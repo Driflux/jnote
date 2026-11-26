@@ -26,6 +26,10 @@ class DatabaseCopierTest {
 
     private fun path(name: String): Path = tmp.root.toPath().resolve(name)
 
+    // 전환 없이 복사만 본다
+    private fun copyOnly(source: Path, target: Path, database: Database?, checkCancelled: () -> Unit) =
+        DatabaseCopier.copy(source, target, database, checkCancelled) { true }
+
     // 커밋된 행이 WAL에만 있고 본 파일에는 아직 없는 DB를 만든다
     private fun walOnlyDatabase(name: String): Database =
         Database(path(name)).also {
@@ -69,7 +73,7 @@ class DatabaseCopierTest {
                 }
             }
             assertThrows(IllegalStateException::class.java) {
-                DatabaseCopier.copy(path("src.db"), path("copy.db"), db) {}
+                copyOnly(path("src.db"), path("copy.db"), db) {}
             }
         }
         assertEquals(setOf("src.db", "src.db-shm", "src.db-wal"), filesIn(tmp.root.toPath()))
@@ -85,7 +89,7 @@ class DatabaseCopierTest {
         Files.copy(path("live.db-wal"), path("crashed.db-wal"))
         holdReadTransaction(path("crashed.db")).use {
             assertThrows(IllegalStateException::class.java) {
-                DatabaseCopier.copy(path("crashed.db"), path("out/copy.db"), null) {}
+                copyOnly(path("crashed.db"), path("out/copy.db"), null) {}
             }
         }
         assertFalse(Files.exists(path("out/copy.db")))
@@ -94,21 +98,21 @@ class DatabaseCopierTest {
     @Test
     fun checkpointBeforeCopyMakesTheCopyComplete() {
         val db = walOnlyDatabase("src.db")
-        DatabaseCopier.copy(path("src.db"), path("out/copy.db"), db) {}
+        copyOnly(path("src.db"), path("out/copy.db"), db) {}
         assertEquals(1, probeCount(path("out/copy.db")))
         assertTrue(Files.exists(path("src.db")))
     }
 
     @Test
     fun neverOpenedAndMissingSourceCreatesNothing() {
-        DatabaseCopier.copy(path("none.db"), path("out/copy.db"), null) {}
+        copyOnly(path("none.db"), path("out/copy.db"), null) {}
         assertFalse(Files.exists(path("out")))
     }
 
     @Test
     fun neverOpenedExistingSourceIsCopied() {
         walOnlyDatabase("src.db").close()
-        DatabaseCopier.copy(path("src.db"), path("copy.db"), null) {}
+        copyOnly(path("src.db"), path("copy.db"), null) {}
         assertEquals(1, probeCount(path("copy.db")))
     }
 
@@ -119,7 +123,7 @@ class DatabaseCopierTest {
         Files.copy(path("live.db"), path("crashed.db"))
         Files.copy(path("live.db-wal"), path("crashed.db-wal"))
         assertEquals(1, db.submitAndWait { 1 })
-        DatabaseCopier.copy(path("crashed.db"), path("copy.db"), null) {}
+        copyOnly(path("crashed.db"), path("copy.db"), null) {}
         assertEquals(1, probeCount(path("copy.db")))
     }
 
@@ -136,7 +140,7 @@ class DatabaseCopierTest {
         val source = bigSource()
         var calls = 0
         assertThrows(CancellationException::class.java) {
-            DatabaseCopier.copy(source, path("out/copy.db"), null) { if (++calls == 3) throw CancellationException() }
+            copyOnly(source, path("out/copy.db"), null) { if (++calls == 3) throw CancellationException() }
         }
         assertNoLeftovers()
         assertEquals(4L shl 20, Files.size(source))
@@ -147,7 +151,7 @@ class DatabaseCopierTest {
         val source = bigSource()
         var calls = 0
         val error = assertThrows(IllegalStateException::class.java) {
-            DatabaseCopier.copy(source, path("out/copy.db"), null) { if (++calls == 2) error("boom") }
+            copyOnly(source, path("out/copy.db"), null) { if (++calls == 2) error("boom") }
         }
         assertEquals("boom", error.message)
         assertNoLeftovers()
@@ -159,7 +163,7 @@ class DatabaseCopierTest {
         for (suffix in listOf("-wal", "-shm")) {
             val stale = path("copy.db$suffix").also { Files.writeString(it, "stale") }
             val error = assertThrows(FileAlreadyExistsException::class.java) {
-                DatabaseCopier.copy(path("src.db"), path("copy.db"), null) {}
+                copyOnly(path("src.db"), path("copy.db"), null) {}
             }
             assertEquals(stale.toString(), error.file)
             assertEquals("stale", Files.readString(stale))
@@ -174,7 +178,7 @@ class DatabaseCopierTest {
         val source = bigSource()
         val target = path("out/copy.db")
         val error = assertThrows(FileAlreadyExistsException::class.java) {
-            DatabaseCopier.copy(source, target, null) {
+            copyOnly(source, target, null) {
                 // 복사하는 사이 다른 프로그램이 같은 경로에 파일을 만든 상황
                 if (!Files.exists(target)) Files.writeString(target, "other")
             }
@@ -188,7 +192,7 @@ class DatabaseCopierTest {
     fun cancelInsideTheDatabaseThreadKeepsTheDatabaseUsable() {
         val db = walOnlyDatabase("src.db")
         assertThrows(CancellationException::class.java) {
-            DatabaseCopier.copy(path("src.db"), path("out/copy.db"), db) { throw CancellationException() }
+            copyOnly(path("src.db"), path("out/copy.db"), db) { throw CancellationException() }
         }
         assertNoLeftovers()
         assertEquals(1, db.submitAndWait { c ->

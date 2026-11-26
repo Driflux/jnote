@@ -7,6 +7,10 @@ import io.github.driflux.jnote.db.DatabaseService
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CancellationException
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
 
 class DbPathSwitcherTest : BasePlatformTestCase() {
     private lateinit var dir: Path
@@ -40,6 +44,9 @@ class DbPathSwitcherTest : BasePlatformTestCase() {
             s.execute("insert into probe values (42)")
         }
     }
+
+    private fun insert(db: Database, value: Int): CompletableFuture<Unit> =
+        db.submit { c -> c.createStatement().use { s -> s.execute("insert into probe values ($value)") } }
 
     private fun probeCount(file: Path): Int {
         val db = Database(file)
@@ -80,6 +87,64 @@ class DbPathSwitcherTest : BasePlatformTestCase() {
         assertEquals(1, service.database.submitAndWait { c ->
             c.createStatement().use { s -> s.executeQuery("select count(*) from probe").use { it.next(); it.getInt(1) } }
         })
+    }
+
+    fun testWriteQueuedBeforeTheCopyIsCopiedAndLaterWritesGoToTheNewFile() {
+        writeProbe()
+        val old = service.database
+        val gate = CountDownLatch(1)
+        old.submit { gate.await() }
+        val queuedBefore = insert(old, 43)
+        val target = dir.resolve("next.db")
+        val switching = CompletableFuture.runAsync { run(DbPathChange.Plan.CopyThenSwitch(target)) }
+        gate.countDown()
+        switching.get(20, TimeUnit.SECONDS)
+        queuedBefore.get()
+        assertEquals(2, probeCount(target))
+
+        insert(service.database, 44).get()
+        assertEquals(3, probeCount(target))
+        assertEquals(2, probeCount(current))
+    }
+
+    fun testWriteQueuedDuringTheCopyFailsInsteadOfLandingOnlyInTheOldFile() {
+        writeProbe()
+        val target = dir.resolve("next.db")
+        var duringCopy: CompletableFuture<Unit>? = null
+        run(DbPathChange.Plan.CopyThenSwitch(target)) {
+            // 복사가 도는 동안 노트를 저장한 상황: 이 쓰기는 복사 작업 뒤에 줄 선다
+            if (duringCopy == null) duringCopy = insert(service.database, 99)
+        }
+        assertEquals(target, service.currentPath())
+        val error = org.junit.Assert.assertThrows(ExecutionException::class.java) { duringCopy!!.get(20, TimeUnit.SECONDS) }
+        assertTrue(error.cause is java.sql.SQLException)
+        assertEquals(1, probeCount(current))
+        assertEquals(1, probeCount(target))
+    }
+
+    fun testDatabaseOpenedDuringACopyOnTheCallingThreadIsCopiedAgain() {
+        Database(current).use { db -> db.submitAndWait { c -> c.createStatement().use { s -> s.execute("create table probe(x integer)") } } }
+        service.switchTo(current)
+        val target = dir.resolve("next.db")
+        var opened = false
+        run(DbPathChange.Plan.CopyThenSwitch(target)) {
+            // 한 번도 열지 않은 DB를 복사하는 사이 처음 쓰인 상황
+            if (!opened) {
+                opened = true
+                insert(service.database, 77).get()
+            }
+        }
+        assertEquals(target, service.currentPath())
+        assertEquals(1, probeCount(target))
+    }
+
+    fun testCancelArrivingAfterTheCopyIsInPlaceStillFinishesTheSwitch() {
+        writeProbe()
+        val target = dir.resolve("next.db")
+        run(DbPathChange.Plan.CopyThenSwitch(target)) { if (Files.exists(target)) throw CancellationException() }
+        assertEquals(target, service.currentPath())
+        assertEquals(target.toString(), settings.state.dbPath)
+        assertEquals(1, probeCount(target))
     }
 
     fun testSwitchToExistingDoesNotCopyOrMerge() {

@@ -25,6 +25,17 @@ class DatabaseService : Disposable {
     /** 만들어졌고 연결까지 열린 DB. 한 번도 쓰지 않았다면 null이라 복사할 때 파일을 만들지 않는다. */
     fun openDatabaseOrNull(): Database? = synchronized(lock) { current?.takeIf { it.isOpen } }
 
+    /**
+     * 상태가 아직 [expected]일 때만 [newPath]로 바꾸고 true를 돌려준다. 옛 DB는 닫지 않으므로 부른 쪽이 닫는다.
+     * 기다리지 않으므로 옛 DB의 스레드 안에서도 부를 수 있다.
+     */
+    fun replace(expected: Current, newPath: Path): Boolean = synchronized(lock) {
+        if (current !== expected.database || pathLocked() != expected.path) return false
+        current = null
+        path = newPath
+        true
+    }
+
     /** 새 경로로 전환한다. 옛 DB는 만들어진 경우에만 닫고, 새 DB는 첫 사용 때 만든다. */
     fun switchTo(newPath: Path) {
         val old = synchronized(lock) {
