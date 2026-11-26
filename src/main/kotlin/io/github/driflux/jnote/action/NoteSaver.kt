@@ -2,16 +2,23 @@ package io.github.driflux.jnote.action
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.service
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.util.concurrency.AppExecutorUtil
+import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
 import io.github.driflux.jnote.anchor.CodeAnchor
+import io.github.driflux.jnote.anchor.CodeAnchors
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.model.Note
+import io.github.driflux.jnote.model.NoteStatus
 import io.github.driflux.jnote.project.ProjectKeyService
+import io.github.driflux.jnote.ui.CodeTargets
 import io.github.driflux.jnote.ui.NoteDraft
+import io.github.driflux.jnote.ui.NoteRows
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 
@@ -43,12 +50,42 @@ class NoteSaver(
 
     /**
      * 편집한 값으로 노트를 갱신한다(앵커와 태그는 그대로). 그 사이 지워졌다면 null로 끝나며,
-     * 목록을 새로 고치도록 이때도 알린다.
+     * 목록을 새로 고치도록 이때도 알린다. APPROX 노트는 편집이 곧 위치 확인이므로 [confirmLocation]처럼
+     * OK와 지금 코드의 스냅샷으로 바꿔 함께 저장한다. 파일을 읽지 못하면 편집만 저장하고 APPROX로 남긴다.
      */
-    fun update(note: Note, draft: NoteDraft): CompletableFuture<Note?> =
+    fun update(project: Project, note: Note, draft: NoteDraft): CompletableFuture<Note?> =
         // 검증이나 저장소 오류가 호출 쪽으로 던져지지 않고 future로 드러나도록 체인 안에서 만든다
         CompletableFuture.completedFuture(draft)
             .thenApply { it.applyTo(note) }
+            .thenApplyAsync({ edited -> if (edited.status == NoteStatus.APPROX) confirmed(project, edited) ?: edited else edited }, background)
             .thenCompose { repository().update(it) }
             .thenApplyAsync({ updated -> publish(); updated }, ui)
+
+    /**
+     * 근사 위치(APPROX) 노트를 사용자가 확인한 위치로 굳힌다. 파일이 없거나 줄 범위가 문서 밖이면
+     * 예외로 끝나고 DB는 그대로다. 그 사이 지워졌다면 null로 끝난다.
+     */
+    fun confirmLocation(project: Project, note: Note): CompletableFuture<Note?> =
+        CompletableFuture.supplyAsync({
+            confirmed(project, note) ?: error(
+                JNoteBundle.message("toolWindow.error.confirm.unreadable", note.relPath.orEmpty(), NoteRows.lineRange(note.startLine, note.endLine)),
+            )
+        }, background)
+            .thenCompose { repository().update(it) }
+            .thenApplyAsync({ updated -> publish(); updated }, ui)
+
+    /**
+     * 지금 코드의 그 줄 범위를 스냅샷으로 삼은 OK 노트. 텍스트는 노트를 만들 때와 같은 규칙(상한 포함)으로 읽는다.
+     * 파일이 없거나 범위가 문서 밖이면 null. 파일을 읽으므로 EDT 밖에서 부른다.
+     */
+    private fun confirmed(project: Project, note: Note): Note? {
+        val relPath = note.relPath ?: return null
+        val start = note.startLine ?: return null
+        val end = note.endLine ?: return null
+        val file = CodeTargets.find(project, relPath) ?: return null
+        val snapshot = ReadAction.compute<String?, Throwable> {
+            FileDocumentManager.getInstance().getDocument(file)?.let { CodeAnchors.fromLines(project, file, it, start, end)?.snapshot }
+        } ?: return null
+        return note.copy(status = NoteStatus.OK, snapshot = snapshot)
+    }
 }

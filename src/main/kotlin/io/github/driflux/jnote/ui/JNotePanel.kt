@@ -167,7 +167,7 @@ class JNotePanel internal constructor(
     internal fun edit(note: Note): CompletableFuture<*> {
         val draft = askEdit(project, note) ?: return CompletableFuture.completedFuture(null)
         // 저장소가 알림을 UI 스레드로 옮겨 보내므로 여기서는 실패만 알린다
-        return saver.update(note, draft).whenComplete { _, error ->
+        return saver.update(project, note, draft).whenComplete { _, error ->
             if (error != null) onEdt { ToolWindowNotifier.editFailed(project, (error as? CompletionException)?.cause ?: error) }
         }
     }

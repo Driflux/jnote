@@ -1,6 +1,7 @@
 package io.github.driflux.jnote.action
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.util.Disposer
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.driflux.jnote.NotesChanged
@@ -11,6 +12,7 @@ import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.NoteKind
+import io.github.driflux.jnote.model.NoteStatus
 import io.github.driflux.jnote.ui.NoteDraft
 import java.nio.file.Files
 import java.nio.file.Path
@@ -104,7 +106,7 @@ class NoteSaverTest : BasePlatformTestCase() {
         tags.attach(created.id, tag.id).get()
         now = 2_000L
 
-        val future = NoteSaver(repository = { repo }, projectKey = { "k" }).update(created, NoteDraft(" New ", "nb", "Gemini"))
+        val future = NoteSaver(repository = { repo }, projectKey = { "k" }).update(project, created, NoteDraft(" New ", "nb", "Gemini"))
         await(future)
 
         val updated = future.get()!!
@@ -122,7 +124,7 @@ class NoteSaverTest : BasePlatformTestCase() {
         val repo = NoteRepository(db)
         val created = repo.create(NewNote.free("q")).get()
         repo.delete(created.id).get()
-        val future = NoteSaver(repository = { repo }, projectKey = { "k" }).update(created, NoteDraft("x"))
+        val future = NoteSaver(repository = { repo }, projectKey = { "k" }).update(project, created, NoteDraft("x"))
         await(future)
         assertNull(future.get())
         assertEquals(1, published.get())
@@ -131,7 +133,7 @@ class NoteSaverTest : BasePlatformTestCase() {
     fun testUpdateFailureDoesNotPublish() {
         val repo = NoteRepository(db)
         val created = repo.create(NewNote.free("q")).get()
-        val future = NoteSaver(repository = { repo }, projectKey = { "k" }).update(created, NoteDraft(" "))
+        val future = NoteSaver(repository = { repo }, projectKey = { "k" }).update(project, created, NoteDraft(" "))
         await(future)
         assertTrue(future.isCompletedExceptionally)
         assertEquals("q", repo.get(created.id).get()!!.title)
@@ -204,5 +206,92 @@ class NoteSaverTest : BasePlatformTestCase() {
         assertTrue(broken.isCompletedExceptionally)
         assertTrue(repo.list(null, true).get().isEmpty())
         assertEquals(0, published.get())
+    }
+
+    // 노트 경로는 basePath 기준이므로 basePath 아래에 실제 파일을 만든다. 테스트마다 이름을 달리해 VFS 캐시가 섞이지 않게 한다
+    private fun sourceFile(name: String, text: String): String {
+        val real = Path.of(project.basePath!!, "src", name)
+        Files.createDirectories(real.parent)
+        Files.writeString(real, text)
+        Disposer.register(testRootDisposable) { real.toFile().delete() }
+        return "src/$name"
+    }
+
+    private fun approx(repo: NoteRepository, relPath: String, start: Int, end: Int) =
+        repo.create(NewNote.code("k", relPath, start, end, "Old", "ob", snapshot = "moved", status = NoteStatus.APPROX)).get()
+
+    fun testConfirmLocationMakesApproxNoteOkWithTheCurrentLinesAndPublishesOnce() {
+        val relPath = sourceFile("Confirm.kt", "one\ntwo\nthree\nfour\n")
+        val repo = NoteRepository(db)
+        val created = approx(repo, relPath, 2, 3)
+
+        val future = NoteSaver(repository = { repo }).confirmLocation(project, created)
+        await(future)
+
+        val stored = repo.get(created.id).get()!!
+        assertEquals(stored, future.get())
+        assertEquals(NoteStatus.OK, stored.status)
+        assertEquals("two\nthree", stored.snapshot)
+        assertEquals(created.copy(status = NoteStatus.OK, snapshot = "two\nthree", updatedAt = stored.updatedAt), stored)
+        assertEquals(1, published.get())
+    }
+
+    fun testEditingAnApproxNoteAlsoConfirmsItsLocation() {
+        val relPath = sourceFile("EditApprox.kt", "a\nb\nc\n")
+        val repo = NoteRepository(db)
+        val created = approx(repo, relPath, 3, 3)
+
+        val future = NoteSaver(repository = { repo }).update(project, created, NoteDraft("New", "nb"))
+        await(future)
+
+        val stored = repo.get(created.id).get()!!
+        assertEquals(created.copy(title = "New", body = "nb", status = NoteStatus.OK, snapshot = "c", updatedAt = stored.updatedAt), stored)
+        assertEquals(1, published.get())
+    }
+
+    fun testEditingAnOkNoteKeepsItsSnapshotEvenWhenTheCodeChanged() {
+        val relPath = sourceFile("EditOk.kt", "changed\n")
+        val repo = NoteRepository(db)
+        val created = repo.create(NewNote.code("k", relPath, 1, 1, "Old", snapshot = "original")).get()
+
+        val future = NoteSaver(repository = { repo }).update(project, created, NoteDraft("New"))
+        await(future)
+
+        val stored = repo.get(created.id).get()!!
+        assertEquals(created.copy(title = "New", updatedAt = stored.updatedAt), stored)
+    }
+
+    fun testConfirmFailsWithoutWritingWhenTheFileOrLinesAreGone() {
+        val short = sourceFile("Short.kt", "only\n")
+        val repo = NoteRepository(db)
+        val missingFile = approx(repo, "src/Gone.kt", 1, 1)
+        val missingLines = approx(repo, short, 2, 4)
+
+        for (note in listOf(missingFile, missingLines)) {
+            val future = NoteSaver(repository = { repo }).confirmLocation(project, note)
+            await(future)
+            assertTrue(future.isCompletedExceptionally)
+            val cause = try {
+                future.join()
+                null
+            } catch (e: CompletionException) {
+                e.cause
+            }
+            assertTrue(cause?.message, cause?.message.orEmpty().contains(note.relPath!!))
+            assertEquals(note, repo.get(note.id).get())
+        }
+        assertEquals(0, published.get())
+    }
+
+    fun testEditingAnApproxNoteWhoseFileIsGoneSavesTheEditAndStaysApprox() {
+        val repo = NoteRepository(db)
+        val created = approx(repo, "src/Gone.kt", 1, 1)
+
+        val future = NoteSaver(repository = { repo }).update(project, created, NoteDraft("New"))
+        await(future)
+
+        val stored = repo.get(created.id).get()!!
+        assertEquals(created.copy(title = "New", body = "", updatedAt = stored.updatedAt), stored)
+        assertEquals(1, published.get())
     }
 }
