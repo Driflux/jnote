@@ -56,20 +56,31 @@ object Migrations {
         connection.createStatement().use { s -> s.executeQuery("PRAGMA user_version").use { it.next(); it.getInt(1) } }
 
     private fun apply(connection: Connection, version: Int, sql: String) {
-        connection.autoCommit = false
+        // 쓰기 잠금을 먼저 잡아야 다른 프로세스와 동시에 시작해도 같은 버전을 두 번 적용하지 않는다
+        execute(connection, "BEGIN IMMEDIATE")
         try {
-            connection.createStatement().use { s ->
-                s.executeUpdate(sql)
-                // user_version은 트랜잭션에 포함되므로 스크립트가 실패하면 함께 되돌아간다
-                s.executeUpdate("PRAGMA user_version = $version")
+            // 잠금을 잡기 전에 다른 프로세스가 먼저 적용했을 수 있으므로 버전을 다시 확인한다
+            if (userVersion(connection) < version) {
+                connection.createStatement().use { s ->
+                    s.executeUpdate(sql)
+                    // user_version은 트랜잭션에 포함되므로 스크립트가 실패하면 함께 되돌아간다
+                    s.executeUpdate("PRAGMA user_version = $version")
+                }
             }
-            connection.commit()
-        } catch (e: Exception) {
-            connection.rollback()
+            execute(connection, "COMMIT")
+        } catch (e: Throwable) {
+            // 롤백 실패가 원래 예외를 가리지 않게 덧붙여 둔다
+            try {
+                execute(connection, "ROLLBACK")
+            } catch (rollbackError: Exception) {
+                e.addSuppressed(rollbackError)
+            }
             throw e
-        } finally {
-            connection.autoCommit = true
         }
+    }
+
+    private fun execute(connection: Connection, sql: String) {
+        connection.createStatement().use { it.execute(sql) }
     }
 
     /** WAL을 본 파일로 비운 뒤 복사해야 .bak 하나만으로 일관된 상태가 된다. */

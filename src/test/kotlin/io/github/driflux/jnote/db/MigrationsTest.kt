@@ -214,6 +214,36 @@ class MigrationsTest {
     }
 
     @Test
+    fun concurrentMigrationsOnTheSameFileBothSucceed() {
+        repeat(20) { round ->
+            val file = tmp.root.toPath().resolve("race$round.db")
+            // WAL 전환 경합은 이 테스트의 관심사가 아니므로 파일을 WAL로 먼저 만들어 둔다
+            checkNotNull(JDBC().connect("jdbc:sqlite:$file", SQLiteConfig().apply { setJournalMode(SQLiteConfig.JournalMode.WAL) }.toProperties())).close()
+            val barrier = java.util.concurrent.CyclicBarrier(2)
+            val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+            try {
+                val results = (1..2).map {
+                    pool.submit<Int> {
+                        val config = SQLiteConfig().apply {
+                            setJournalMode(SQLiteConfig.JournalMode.WAL)
+                            setBusyTimeout(Database.BUSY_TIMEOUT_MS)
+                        }
+                        checkNotNull(JDBC().connect("jdbc:sqlite:$file", config.toProperties())).use { c ->
+                            barrier.await()
+                            Migrations.run(c)
+                            version(c)
+                        }
+                    }
+                }
+                // 한쪽이 먼저 적용했으면 다른 쪽은 건너뛰어야 하므로 둘 다 예외 없이 최신 버전이어야 한다
+                results.forEach { assertEquals(Migrations.ALL.size, it.get(30, java.util.concurrent.TimeUnit.SECONDS)) }
+            } finally {
+                pool.shutdownNow()
+            }
+        }
+    }
+
+    @Test
     fun projectPathIndexExistsAfterMigration() {
         val db = newDatabase()
         val columns = db.submitAndWait { c ->
