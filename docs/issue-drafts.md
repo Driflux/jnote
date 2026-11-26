@@ -423,6 +423,28 @@
 
 **Related**: intent.md section 3, 10
 
+## 23. GitHub-style gutter interaction  `Step 3`
+
+**Goal**: Make adding and previewing notes as direct as GitHub PR review comments.
+
+**Done criteria**
+- [ ] Hovering a line in the gutter shows a "+" button; a click adds a note for that line
+- [ ] Dragging down the gutter selects a line range and opens the add dialog with that range (context menu and shortcut keep working)
+- [ ] A note with a multi-line range draws a thin vertical bar in the gutter over its range (no background highlight in the editor)
+- [ ] Hovering a note icon or its bar shows a preview popup after a short delay (title, tags, AI badge, note text, first lines of the snippet) with Edit, Open in Tool Window, and Delete actions; the popup closes when the mouse leaves
+- [ ] Hover and preview read only from the in-memory per-file cache (no DB or file I/O on the EDT)
+- [ ] The mouse listener is attached per editor lazily, does constant work per event, and is skipped for editors without a project file
+- [ ] The PR records the measured cost of hover handling on a 5,000-line file
+
+**PR split**
+1. Gutter "+" button with line click and drag range
+2. Range bar for multi-line notes
+3. Hover preview popup with actions
+
+**ADR topic**: Gutter interaction model and its per-editor listener cost
+
+**Related**: intent.md section 7. Depends on issues 5, 6, and 8. The per-file cache from issue 8 must keep title, body, tags, and snippet so the preview needs no query.
+
 ## Later (not scheduled)
 
 - Markdown rendering of note text (needs a decision on the Markdown plugin dependency vs. a custom renderer; see the performance principles)

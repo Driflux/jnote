@@ -74,6 +74,7 @@ Stay with Kotlin/JVM. A plugin must run in the IDE's own JVM, and a separate nat
 - Add a note: select code in the editor, then use the context menu or `Ctrl+Option+N` (changeable in Keymap).
 - Tool Window: search box, filter (all / code / free), list, detail area. A "+ New note" button creates free notes. Mockup: `mockup/ui.html`.
 - Gutter icon: shown on the start line; APPROX uses a different icon. ORPHAN and NEEDS_RELOCATE notes draw no icon. Tooltip shows the title, a click selects the note in the Tool Window, and several notes on one line open a chooser popup.
+- GitHub-style gutter interaction (issue 23): hovering a line in the gutter shows a "+" button. A click adds a note for that line, and dragging down the gutter selects a line range and opens the add dialog with it. A note with a multi-line range draws a thin vertical bar in the gutter over its range. Hovering a note icon or its bar shows a preview popup (title, tags, AI badge, note text, first lines of the snippet) with Edit, Open in Tool Window, and Delete actions. Hover and preview read only from the in-memory per-file cache, so they never do DB or file I/O on the EDT. The context menu and the shortcut keep working.
 - Note text is plain text. Free notes use a monospace font. No Markdown rendering.
 - Delete: delete immediately instead of confirming, and show an "Undo" notification for a few seconds.
 - Progress:
@@ -82,7 +83,7 @@ Stay with Kotlin/JVM. A plugin must run in the IDE's own JVM, and a separate nat
   - Empty state and no-result state show guidance text.
   - Errors show a notification with the reason and a fix.
 - 1.0 convenience features: copy snippet, "AI notes only" filter, copy selected notes as Markdown or JSON, keyboard control (focus search, Enter to navigate, Delete to remove), "current file notes only" toggle, snippet syntax highlighting (read-only, created only on selection), SVG icons for light, dark, and New UI.
-- Excluded (later versions): Markdown rendering, Search Everywhere integration, Alt+Enter intention, links between notes, range background highlight, Markdown export to a file (the clipboard copy ships in 1.0). An MCP server is not planned; the skill in section 10 replaces it.
+- Excluded (later versions): Markdown rendering, Search Everywhere integration, Alt+Enter intention, links between notes, range background highlight in the editor (the thin gutter bar in issue 23 is included), Markdown export to a file (the clipboard copy ships in 1.0). An MCP server is not planned; the skill in section 10 replaces it.
 
 ## 8. Implementation order
 1. Skeleton, schema, migrations, CRUD (unit tests)
