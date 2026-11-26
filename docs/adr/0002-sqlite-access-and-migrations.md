@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #2
-- PR: (to be filled)
+- PR: #27, #28, #29
 
 ## Context
 JNote stores notes in one SQLite file (intent.md section 4) and must never slow the IDE down (intent.md section 2): no startup work, no DB access on the EDT, one dependency. AI agents read notes through a view, so its shape is an external contract (intent.md section 10.4). The schema will change in later issues (FTS in #11), so versioned migrations are needed from the start.
