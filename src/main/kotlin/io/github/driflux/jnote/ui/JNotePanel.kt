@@ -10,6 +10,8 @@ import com.intellij.ui.CollectionListModel
 import com.intellij.openapi.ui.JBPopupMenu
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.openapi.ui.ComboBox
+import com.intellij.ui.DocumentAdapter
+import com.intellij.ui.SearchTextField
 import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBList
@@ -29,6 +31,7 @@ import io.github.driflux.jnote.action.NoteSaver
 import io.github.driflux.jnote.action.RelocateNotesTask
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
+import io.github.driflux.jnote.db.SearchRepository
 import io.github.driflux.jnote.db.TagRenameResult
 import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.Note
@@ -44,10 +47,11 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.ListSelectionModel
+import javax.swing.event.DocumentEvent
 
 class JNotePanel internal constructor(
     private val project: Project,
-    scheduler: DelayScheduler,
+    private val scheduler: DelayScheduler,
     private val saver: NoteSaver = NoteSaver(),
     private val askEdit: (Project, Note, List<String>) -> NoteDraft? = AddNoteDialog::edit,
     private val askTagName: (Project, Tag, List<Tag>) -> String? = TagDialogs::askNewName,
@@ -55,7 +59,13 @@ class JNotePanel internal constructor(
 ) : JBPanel<JNotePanel>(BorderLayout()), Disposable {
     constructor(project: Project) : this(project, AppDelayScheduler)
 
-    private class Loaded(val projectKey: String, val notes: List<Note>, val dictionary: List<Tag>, val noteTags: Map<Long, List<Tag>>)
+    private class Loaded(
+        val projectKey: String,
+        val notes: List<Note>,
+        val dictionary: List<Tag>,
+        val noteTags: Map<Long, List<Tag>>,
+        val match: SearchMatch?,
+    )
 
     private val model = CollectionListModel<NoteRow>()
     internal val list = JBList(model).apply {
@@ -95,6 +105,22 @@ class JNotePanel internal constructor(
     }
     // 사전이 다시 읽힐 때마다 칩을 새로 만든다. 켜고 끄는 것은 이 줄이 아니라 state가 기억한다
     internal val tagBar = JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 2)).apply { isVisible = false }
+    // 검색창. 입력이 멈춘 뒤에 한 번만 검색하고, 검색은 EDT 밖에서 한다
+    internal val searchField = SearchTextField(false).apply {
+        textEditor.emptyText.text = JNoteBundle.message("toolWindow.search.placeholder")
+        addDocumentListener(object : DocumentAdapter() {
+            override fun textChanged(e: DocumentEvent) = onQueryTyped()
+        })
+    }
+    private var searchTimer: Cancellable? = null
+
+    // reload()가 어느 스레드에서든 불리므로 state 대신 이 값을 읽는다
+    @Volatile
+    private var query = ""
+
+    // 늦게 끝난 옛 검색이 새 결과를 덮지 않도록 번호를 매긴다
+    private val searchGeneration = AtomicInteger()
+
     internal val spinnerIcon = AsyncProcessIcon("JNote").apply { isVisible = false }
 
     // 닫힌 뒤에 늦게 도착한 타이머가 이미 정리된 아이콘을 다시 돌리지 못하게 한다
@@ -131,8 +157,10 @@ class JNotePanel internal constructor(
             add(spinnerIcon, BorderLayout.EAST)
         }
         add(JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            add(header, BorderLayout.NORTH)
-            add(tagBar, BorderLayout.CENTER)
+            border = JBUI.Borders.empty(4, 8, 0, 8)
+            add(searchField, BorderLayout.NORTH)
+            add(header, BorderLayout.CENTER)
+            add(tagBar, BorderLayout.SOUTH)
         }, BorderLayout.NORTH)
         add(OnePixelSplitter(true, 0.5f).apply {
             firstComponent = JBScrollPane(list)
@@ -150,9 +178,10 @@ class JNotePanel internal constructor(
     fun reload() {
         val ticket = generation.incrementAndGet()
         val allProjects = allProjects
+        val query = query
         pendingLoads.incrementAndGet()
         onEdt { if (!disposed) spinner.start() }
-        load(allProjects).whenComplete { loaded, error ->
+        load(allProjects, query).whenComplete { loaded, error ->
             pendingLoads.decrementAndGet()
             onEdt {
                 if (disposed || ticket != generation.get()) return@onEdt
@@ -228,24 +257,68 @@ class JNotePanel internal constructor(
         ApplicationManager.getApplication().invokeLater({ block() }, project.disposed)
     }
 
-    private fun load(allProjects: Boolean): CompletableFuture<Loaded> =
-        // 프로젝트 키는 git 설정 파일을 읽으므로 DB 스레드가 아니라 풀 스레드에서 구한다
+    // 프로젝트 키는 git 설정 파일을 읽으므로 DB 스레드가 아니라 풀 스레드에서 구한다
+    private fun resolveKey(): CompletableFuture<String> =
         CompletableFuture.supplyAsync({ project.service<ProjectKeyService>().resolve().key }, AppExecutorUtil.getAppExecutorService())
-            .thenCompose { key ->
-                val database = DatabaseService.getInstance().database
-                val tags = TagRepository(database)
-                val notes = NoteRepository(database).list(key, allProjects)
-                val dictionary = tags.list()
-                val assignments = tags.assignments()
-                CompletableFuture.allOf(notes, dictionary, assignments)
-                    .thenApply { Loaded(key, notes.join(), dictionary.join(), assignments.join()) }
+
+    private fun load(allProjects: Boolean, query: String): CompletableFuture<Loaded> =
+        resolveKey().thenCompose { key ->
+            val database = DatabaseService.getInstance().database
+            val tags = TagRepository(database)
+            val notes = NoteRepository(database).list(key, allProjects)
+            val dictionary = tags.list()
+            val assignments = tags.assignments()
+            // 노트가 바뀌어 다시 읽을 때도 일치 여부를 새로 구해야 새로 생긴 노트가 결과에 들어온다
+            val match: CompletableFuture<SearchMatch?> =
+                if (SearchQuery.isSearchable(query)) searchIds(key, query, allProjects).thenApply { it } else CompletableFuture.completedFuture(null)
+            CompletableFuture.allOf(notes, dictionary, assignments, match)
+                .thenApply { Loaded(key, notes.join(), dictionary.join(), assignments.join(), match.join()) }
+        }
+
+    private fun searchIds(key: String, query: String, allProjects: Boolean): CompletableFuture<SearchMatch> =
+        SearchRepository(DatabaseService.getInstance().database).search(query, key, allProjects)
+            .thenApply { SearchMatch(query, it.toSet()) }
+
+    private fun onQueryTyped() {
+        searchTimer?.cancel()
+        searchTimer = scheduler.schedule(SEARCH_DEBOUNCE_MS) { applyQuery(searchField.text) }
+    }
+
+    /** EDT에서만 부른다. 입력이 최소 길이보다 짧으면 검색 없이 목록으로 돌아간다. */
+    internal fun applyQuery(text: String) {
+        searchTimer = null
+        val normalized = SearchQuery.normalize(text)
+        if (disposed || normalized == state.query) return
+        query = normalized
+        state = state.copy(query = normalized)
+        val ticket = searchGeneration.incrementAndGet()
+        if (!state.searching) {
+            render()
+            return
+        }
+        val allProjects = allProjects
+        pendingLoads.incrementAndGet()
+        // 노트 목록은 이미 읽어 두었으므로 일치하는 id만 새로 구한다
+        resolveKey().thenCompose { searchIds(it, normalized, allProjects) }.whenComplete { match, error ->
+            pendingLoads.decrementAndGet()
+            onEdt {
+                if (disposed || ticket != searchGeneration.get()) return@onEdt
+                if (match != null) {
+                    state = state.copy(match = match)
+                    render()
+                } else {
+                    ToolWindowNotifier.loadFailed(project, error.cause ?: error)
+                }
             }
+        }
+    }
 
     private fun show(loaded: Loaded) {
         val free = JNoteBundle.message("toolWindow.subtitle.free")
         val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free, loaded.noteTags[it.id].orEmpty()) }
         shownProjectKey = loaded.projectKey
-        state = state.copy(notes = rows, allProjects = allProjects).withTags(loaded.dictionary)
+        // 검색 없이 읽은 결과가 그 사이 도착한 검색 결과를 지우지 않게 한다
+        state = state.copy(notes = rows, allProjects = allProjects, match = loaded.match ?: state.match).withTags(loaded.dictionary)
         rebuildTagBar()
         render()
     }
@@ -330,9 +403,13 @@ class JNotePanel internal constructor(
 
     private fun showEmptyText() {
         val text = list.emptyText
+        // 태그 칩이 켜져 있으면 검색어보다 칩이 목록을 비운 것일 수 있으므로 칩 안내를 먼저 보인다
         if (state.showEmptyState && state.tagFilterActive) {
             text.text = JNoteBundle.message("toolWindow.empty.tags.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.tags.hint"))
+        } else if (state.noSearchResults) {
+            text.text = JNoteBundle.message("toolWindow.search.empty.title", state.query)
+            text.appendLine(JNoteBundle.message(if (state.allProjects) "toolWindow.search.empty.hint.all" else "toolWindow.search.empty.hint"))
         } else if (state.showEmptyState) {
             text.text = JNoteBundle.message(state.filter.emptyTitleKey)
             text.appendLine(if (state.filter == NoteFilter.FREE) JNoteBundle.message("toolWindow.empty.free.hint") else emptyHint())
@@ -354,11 +431,13 @@ class JNotePanel internal constructor(
 
     override fun dispose() {
         disposed = true
+        searchTimer?.cancel()
         // 대기 중인 타이머를 취소하고 보이는 상태를 끈다. DelayedSpinner는 EDT에서만 쓴다
         UIUtil.invokeLaterIfNeeded { spinner.stop() }
     }
 
     companion object {
         internal const val ADD_NOTE_ACTION_ID = "JNote.AddNote"
+        private const val SEARCH_DEBOUNCE_MS = 250L
     }
 }
