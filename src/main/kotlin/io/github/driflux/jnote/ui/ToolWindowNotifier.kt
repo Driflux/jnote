@@ -17,4 +17,15 @@ internal object ToolWindowNotifier {
             )
             .notify(project)
     }
+
+    /** 재배치는 이후 이슈에서 다루므로 지금은 파일이 없다는 사실만 알린다. */
+    fun fileMissing(project: Project, relPath: String) {
+        NotificationGroupManager.getInstance().getNotificationGroup(DbPathNotifier.GROUP_ID)
+            .createNotification(
+                JNoteBundle.message("toolWindow.error.fileMissing.title"),
+                JNoteBundle.message("toolWindow.error.fileMissing.content", relPath),
+                NotificationType.WARNING,
+            )
+            .notify(project)
+    }
 }

@@ -5,6 +5,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.ui.CollectionListModel
+import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
@@ -30,6 +31,8 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
         selectionMode = ListSelectionModel.SINGLE_SELECTION
     }
 
+    internal val detail = NoteDetailPanel { CodeNavigator.goTo(project, it) }
+
     // 늦게 끝난 옛 읽기가 새 결과를 덮지 않도록 번호를 매긴다
     private val generation = AtomicInteger()
 
@@ -37,7 +40,11 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
     private var disposed = false
 
     init {
-        add(JBScrollPane(list), BorderLayout.CENTER)
+        list.addListSelectionListener { if (!it.valueIsAdjusting) detail.show(list.selectedValue?.note) }
+        add(OnePixelSplitter(true, 0.5f).apply {
+            firstComponent = JBScrollPane(list)
+            secondComponent = detail
+        }, BorderLayout.CENTER)
         // 구독을 먼저 걸어 첫 읽기 사이에 오는 알림을 놓치지 않는다
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(NotesChanged.TOPIC, NotesChangedListener { reload() })
@@ -64,7 +71,11 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
 
     private fun show(loaded: Loaded) {
         val free = JNoteBundle.message("toolWindow.subtitle.free")
+        val selectedId = list.selectedValue?.note?.id
         model.replaceAll(loaded.notes.map { NoteRows.of(it, loaded.projectKey, free) })
+        // 다시 읽어도 보던 노트를 유지하고, 그 사이 지워졌다면 상세를 비운다
+        val index = model.items.indexOfFirst { it.note.id == selectedId }
+        if (index >= 0) list.selectedIndex = index else detail.show(null)
     }
 
     override fun dispose() {
