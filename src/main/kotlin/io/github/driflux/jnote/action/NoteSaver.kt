@@ -30,14 +30,15 @@ class NoteSaver(
 ) {
     fun save(project: Project, anchor: CodeAnchor, draft: NoteDraft): CompletableFuture<Note> =
         CompletableFuture.supplyAsync({ projectKey(project) }, background)
-            .thenCompose { key -> repository().create(draft.toNewNote(key, anchor)) }
+            .thenComposeAsync({ key -> repository().create(draft.toNewNote(key, anchor)) }, background)
             // DB 스레드에서 알리면 구독자가 DB를 기다리다 막힐 수 있어 UI 스레드로 옮긴다
             .thenApplyAsync({ note -> publish(); note }, ui)
 
     fun saveFree(draft: NoteDraft): CompletableFuture<Note> =
-        // 검증 오류도 future로 드러나고, 검증과 repository() 평가가 EDT 밖에서 일어나도록 background에서 시작한다
+        // 검증 오류도 future로 드러나고, 검증과 repository() 평가가 EDT 밖에서 일어나도록 background에서 시작한다.
+        // thenCompose는 앞 단계가 이미 끝났으면 호출 스레드에서 돌 수 있어 thenComposeAsync로 background를 강제한다
         CompletableFuture.supplyAsync({ draft.toFreeNote() }, background)
-            .thenCompose { repository().create(it) }
+            .thenComposeAsync({ repository().create(it) }, background)
             .thenApplyAsync({ note -> publish(); note }, ui)
 
     /**

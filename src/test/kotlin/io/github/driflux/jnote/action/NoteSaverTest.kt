@@ -16,6 +16,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
+import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicInteger
 
 class NoteSaverTest : BasePlatformTestCase() {
@@ -23,6 +24,9 @@ class NoteSaverTest : BasePlatformTestCase() {
     private lateinit var db: Database
     private val anchor = CodeAnchor("src/A.kt", 3, 5, "snap", "A.b")
     private val published = AtomicInteger()
+
+    // 작업이 execute 반환 전에 끝나게 해서, 뒤에 붙인 단계가 호출 스레드에서 도는지 background에서 도는지가 항상 갈리게 한다
+    private val joiningBackground = Executor { r -> Thread(r, "fake-background").also { it.start(); it.join() } }
 
     override fun setUp() {
         super.setUp()
@@ -167,9 +171,24 @@ class NoteSaverTest : BasePlatformTestCase() {
                 repoThread = Thread.currentThread().name
                 repo
             },
-            background = { task -> Thread(task, "fake-background").start() },
+            background = joiningBackground,
         )
         await(saver.saveFree(NoteDraft("q")))
+        assertEquals("fake-background", repoThread)
+    }
+
+    fun testSaveResolvesRepositoryOnBackgroundExecutor() {
+        var repoThread: String? = null
+        val repo = NoteRepository(db)
+        val saver = NoteSaver(
+            repository = {
+                repoThread = Thread.currentThread().name
+                repo
+            },
+            projectKey = { "k" },
+            background = joiningBackground,
+        )
+        await(saver.save(project, anchor, NoteDraft("q")))
         assertEquals("fake-background", repoThread)
     }
 
