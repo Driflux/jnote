@@ -198,4 +198,17 @@ class MigrationsTest {
         assertEquals(Migrations.ALL.size, db.submitAndWait { version(it) })
         assertEquals(setOf("jnote.db", "jnote.db.bak"), tmp.root.list()!!.toSet() - setOf("jnote.db-wal", "jnote.db-shm"))
     }
+
+    @Test
+    fun databaseFromANewerPluginIsRefused() {
+        val db = newDatabase()
+        db.submitAndWait { exec(it, "PRAGMA user_version = ${Migrations.ALL.size + 1}") }
+        db.close()
+        try {
+            newDatabase().submitAndWait { 1 }
+            fail("expected a newer schema to be refused")
+        } catch (e: Exception) {
+            assertTrue(e.toString(), generateSequence<Throwable>(e) { it.cause }.any { it is IllegalStateException })
+        }
+    }
 }

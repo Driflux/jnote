@@ -44,7 +44,10 @@ object Migrations {
 
     fun run(connection: Connection, migrations: List<String> = ALL) {
         val current = userVersion(connection)
-        if (current >= migrations.size) return
+        check(current <= migrations.size) {
+            "Database schema version $current is newer than this JNote version supports (${migrations.size}). Update the plugin."
+        }
+        if (current == migrations.size) return
         if (current > 0) backup(connection)
         for (version in current + 1..migrations.size) apply(connection, version, migrations[version - 1])
     }
