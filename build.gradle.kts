@@ -15,7 +15,6 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        // 빌드 대상을 sinceBuild(242)와 같은 플랫폼으로 맞춰 API 표면을 일치시킨다
         intellijIdeaCommunity(providers.gradleProperty("platformVersion"))
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
     }
@@ -30,7 +29,6 @@ intellijPlatform {
     pluginConfiguration {
         ideaVersion {
             sinceBuild = "242"
-            // untilBuild는 의도적으로 비운다 (docs/adr/0001)
             untilBuild = provider { null }
         }
     }
