@@ -8,6 +8,8 @@ import io.github.driflux.jnote.NotesChangedListener
 import io.github.driflux.jnote.anchor.CodeAnchor
 import io.github.driflux.jnote.db.Database
 import io.github.driflux.jnote.db.NoteRepository
+import io.github.driflux.jnote.db.TagRepository
+import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.ui.NoteDraft
 import java.nio.file.Files
@@ -86,6 +88,49 @@ class NoteSaverTest : BasePlatformTestCase() {
             e.cause
         }
         assertEquals("disk full", cause?.message)
+        assertEquals(0, published.get())
+    }
+
+    fun testUpdateChangesTextBumpsUpdatedAtKeepsAnchorAndTagsAndPublishesOnce() {
+        var now = 1_000L
+        val repo = NoteRepository(db) { now }
+        val tags = TagRepository(db)
+        val created = repo.create(NewNote.code("k", "src/A.kt", 3, 5, "Old", "b", "A.b", "snap")).get()
+        val tag = tags.getOrCreate("x").get()
+        tags.attach(created.id, tag.id).get()
+        now = 2_000L
+
+        val future = NoteSaver(repository = { repo }, projectKey = { "k" }).update(created, NoteDraft(" New ", "nb", "Gemini"))
+        await(future)
+
+        val updated = future.get()!!
+        assertEquals(updated, repo.get(created.id).get())
+        assertEquals("New", updated.title)
+        assertEquals("Gemini", updated.aiSource)
+        assertEquals(2_000L, updated.updatedAt)
+        assertEquals(1_000L, updated.createdAt)
+        assertEquals(created.copy(title = "New", body = "nb", aiSource = "Gemini", updatedAt = 2_000L), updated)
+        assertEquals(listOf(tag.id), tags.tagsOf(created.id).get().map { it.id })
+        assertEquals(1, published.get())
+    }
+
+    fun testUpdateOfDeletedNoteEndsWithNullAndStillPublishes() {
+        val repo = NoteRepository(db)
+        val created = repo.create(NewNote.free("q")).get()
+        repo.delete(created.id).get()
+        val future = NoteSaver(repository = { repo }, projectKey = { "k" }).update(created, NoteDraft("x"))
+        await(future)
+        assertNull(future.get())
+        assertEquals(1, published.get())
+    }
+
+    fun testUpdateFailureDoesNotPublish() {
+        val repo = NoteRepository(db)
+        val created = repo.create(NewNote.free("q")).get()
+        val future = NoteSaver(repository = { repo }, projectKey = { "k" }).update(created, NoteDraft(" "))
+        await(future)
+        assertTrue(future.isCompletedExceptionally)
+        assertEquals("q", repo.get(created.id).get()!!.title)
         assertEquals(0, published.get())
     }
 

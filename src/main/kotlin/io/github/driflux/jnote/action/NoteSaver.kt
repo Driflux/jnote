@@ -33,4 +33,15 @@ class NoteSaver(
             .thenCompose { key -> repository().create(draft.toNewNote(key, anchor)) }
             // DB 스레드에서 알리면 구독자가 DB를 기다리다 막힐 수 있어 UI 스레드로 옮긴다
             .thenApplyAsync({ note -> publish(); note }, ui)
+
+    /**
+     * 편집한 값으로 노트를 갱신한다(앵커와 태그는 그대로). 그 사이 지워졌다면 null로 끝나며,
+     * 목록을 새로 고치도록 이때도 알린다.
+     */
+    fun update(note: Note, draft: NoteDraft): CompletableFuture<Note?> =
+        // 검증이나 저장소 오류가 호출 쪽으로 던져지지 않고 future로 드러나도록 체인 안에서 만든다
+        CompletableFuture.completedFuture(draft)
+            .thenApply { it.applyTo(note) }
+            .thenCompose { repository().update(it) }
+            .thenApplyAsync({ updated -> publish(); updated }, ui)
 }
