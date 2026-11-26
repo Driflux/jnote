@@ -10,7 +10,7 @@ data class RelocationOptions(
     }
 }
 
-/** 스냅샷이 문서에서 어디로 옮겨졌는지 찾는다. 순수 로직이며 스레드와 I/O를 쓰지 않는다. */
+/** 순수 로직이며 스레드와 I/O를 쓰지 않는다. */
 object Relocator {
     /**
      * @param originalStartLine 노트에 저장된 1-based 시작 줄. 후보가 여럿일 때 가까운 쪽을 고른다.

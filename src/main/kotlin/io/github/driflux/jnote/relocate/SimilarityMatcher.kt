@@ -5,7 +5,6 @@ import kotlin.math.floor
 import kotlin.math.max
 
 /**
- * 줄별 Levenshtein 유사도로 스냅샷과 가장 비슷한 같은 크기의 구간을 찾는다.
  * DP 행 버퍼를 인스턴스에 두고 재사용하므로 스레드 간에 공유하면 안 된다.
  */
 internal class SimilarityMatcher(
@@ -52,7 +51,6 @@ internal class SimilarityMatcher(
         )
     }
 
-    /** 검색 한 번 동안 유지하는 상태: 줄별 문자 히스토그램, 반복되는 줄 쌍의 거리 메모, 구간의 줄별 상한 */
     private inner class WindowScorer(
         private val document: NormalizedLines,
         private val snapshot: NormalizedLines,
@@ -188,16 +186,13 @@ internal class SimilarityMatcher(
         const val REJECTED = -1.0
         const val CANCELLED = -2.0
 
-        /** minSimilarity를 지키면서 허용되는 최대 편집 거리 */
         fun allowedDistance(minSimilarity: Double, maxLen: Int): Int = floor((1.0 - minSimilarity) * maxLen + EPS).toInt()
 
-        /** 내용이 같은 줄에 같은 id를 준다 */
         fun contentIds(lines: List<String>): IntArray {
             val ids = HashMap<String, Int>()
             return IntArray(lines.size) { ids.getOrPut(lines[it]) { ids.size } }
         }
 
-        /** 줄마다 같은 내용이 두 번 이상 나오는지 */
         fun repeated(ids: IntArray): BooleanArray {
             val counts = IntArray(ids.size)
             for (id in ids) counts[id]++
