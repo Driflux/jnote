@@ -50,7 +50,6 @@ data class NoteDraft(
     private fun String.trimToNull(): String? = trim().takeIf { it.isNotEmpty() }
 
     companion object {
-        /** 편집 다이얼로그를 채울 값. */
         fun of(note: Note) = NoteDraft(
             title = note.title,
             body = note.body,

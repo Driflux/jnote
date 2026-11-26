@@ -136,7 +136,6 @@ class JNotePanel internal constructor(
             }
         }
 
-    /** 다이얼로그를 띄워 편집하고, 확인하면 EDT 밖에서 저장한다. 취소하면 바로 끝나는 future를 돌려준다. */
     internal fun edit(note: Note): CompletableFuture<*> {
         val draft = askEdit(project, note) ?: return CompletableFuture.completedFuture(null)
         // 저장소가 알림을 UI 스레드로 옮겨 보내므로 여기서는 실패만 알린다

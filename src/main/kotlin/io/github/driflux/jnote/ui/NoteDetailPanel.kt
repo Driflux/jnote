@@ -18,7 +18,6 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
 
-/** 선택한 노트의 상세. 무엇을 보일지는 [NoteDetails]가 정하고 여기서는 값을 부품에 옮기기만 한다. */
 internal class NoteDetailPanel(
     private val onGoToCode: (Note) -> Unit,
     private val onDelete: (Note) -> Unit,
