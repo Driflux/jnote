@@ -38,7 +38,6 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
     private fun projectKey(): String =
         ApplicationManager.getApplication().executeOnPooledThread<String> { project.service<ProjectKeyService>().resolve().key }.get()
 
-    /** EDT 이벤트를 비우며 조건이 참이 될 때까지 기다린다. */
     private fun awaitUntil(message: String, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 10_000
         while (!condition()) {

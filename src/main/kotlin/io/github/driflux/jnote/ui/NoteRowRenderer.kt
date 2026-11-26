@@ -13,7 +13,6 @@ import javax.swing.ListCellRenderer
 import javax.swing.BoxLayout
 import javax.swing.JPanel
 
-/** 제목, 부제목, (다른 프로젝트면) 프로젝트 이름, (AI 출처면) 작은 배지를 그리는 목록 렌더러. */
 internal class NoteRowRenderer : JBPanel<NoteRowRenderer>(BorderLayout()), ListCellRenderer<NoteRow> {
     private val title = JBLabel()
     private val subtitle = JBLabel().apply { font = JBFont.small() }

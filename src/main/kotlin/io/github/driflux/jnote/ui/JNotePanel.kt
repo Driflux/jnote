@@ -21,7 +21,6 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.ListSelectionModel
 
-/** Tool Window 본문. 판단은 [NoteRows]에 맡기고, 읽기와 갱신 연결만 한다. */
 class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayout()), Disposable {
     private class Loaded(val projectKey: String, val notes: List<Note>)
 
