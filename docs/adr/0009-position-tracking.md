@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #9
-- PR: (to be filled)
+- PR: #54
 
 ## Context
 A note stores a line range. When the user edits the file, the code under the note moves, and the gutter icon (ADR 0008) stays on the old line. intent.md section 6 fixes the agreed design. While a file is open, a RangeMarker follows the position, and changed line numbers are written to the DB on close or save. An edit that removes the range makes the note a relocation target (NEEDS_RELOCATE).

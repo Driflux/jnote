@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #11
-- PR: #36
+- PR: #36, #56
 
 ## Context
 Users search note text, code snippets, class names, and tags from one box (intent.md section 5). Notes are short, mixed Korean and English, and Korean is agglutinative (`취소건을` must be found by `취소`), so word tokenizers do not fit. Search must be cheap (intent.md section 2): it runs on the DB thread, never on the EDT, and adds no dependency. The bundled `sqlite-jdbc` 3.54.1.0 ships SQLite with FTS5 and the `trigram` tokenizer; migration v3 and its tests prove it.
@@ -18,6 +18,16 @@ Users search note text, code snippets, class names, and tags from one box (inten
 - **Scope rule.** Same as the note list: project notes plus global notes (`project IS NULL`). `allProjects = true` ignores the filter. A `null` project with `allProjects = false` returns global notes only.
 - **Order and limit.** `updated_at DESC, id DESC`, then `LIMIT` (default 200). Only note ids are returned; loading notes belongs to the note repository (issue #3).
 - **No threading changes.** `search` goes through `Database.submit` and returns a `CompletableFuture`.
+
+## Search box UI (second PR)
+- **Where.** A `SearchTextField` above the existing header row in `JNotePanel`. Typing is debounced by 250 ms through the existing `DelayScheduler`; each change cancels the pending timer, so only the last input searches.
+- **Rules in a pure type.** `SearchQuery` (trim, 2-character minimum counted in code points) and `ToolWindowState` (`query`, `match`, `visibleNotes`, `noSearchResults`) hold the rules, so they are unit tested without Swing. A query shorter than 2 characters does not search and shows the plain list.
+- **Order for free.** `SearchRepository` returns ids in the list's own order (`updated_at DESC, id DESC`). The panel keeps the list it already loaded and keeps the rows whose id is in the result, so no note is loaded twice and most-recent-first is unchanged. The kind filter (All/Code/Free) and the search combine.
+- **Query change reads ids only.** Typing runs `SearchRepository.search` on the DB thread and does not re-read the note list. A reload (note changes, All projects toggle) re-reads the list and recomputes the match for the current query, so a new matching note appears. Both paths tag the result with its query, and a result for an older query is ignored (generation number plus the query tag).
+- **Flicker.** While a new search is running the previous result stays on screen; it is replaced when the answer arrives.
+- **No-result guidance.** Shown only after the answer for the current query arrived, so it does not flash before the result. Title: no notes match the query. Hint: select All projects (omitted when it is already on).
+- **Limit.** The search returns at most 200 ids (`DEFAULT_LIMIT`), so a very broad query shows at most 200 notes.
+- **Not measured here.** The query itself is measured above (1 to 4 ms at 5,000 rows). The UI adds one debounced DB-thread call per pause in typing and no startup or EDT I/O work.
 
 ## Alternatives considered
 - FTS5 `MATCH` with a phrase query: needs query quoting rules, treats 1 to 2 character queries differently, and gives a second path next to LIKE. Rejected for the single-path rule in intent.md section 5.
@@ -40,5 +50,4 @@ Users search note text, code snippets, class names, and tags from one box (inten
   - 2 characters (`x9`, project filter, 111 hits): 4 ms
   - The test only asserts under 2 seconds; the numbers above are informational.
 - Follow-up work
-  - Search box UI and no-result guidance (second PR of issue #11, after the Tool Window).
-  - Load notes by id in the note repository (issue #3).
+    - Load notes by id in the note repository (issue #3).

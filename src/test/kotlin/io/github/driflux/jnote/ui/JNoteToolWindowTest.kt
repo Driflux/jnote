@@ -528,4 +528,121 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         assertEquals(1, asked.size)
         assertEquals(listOf("sql", "todo", "unused"), tagRepo.list().get().map { it.name })
     }
+
+    private fun search(panel: JNotePanel, text: String) {
+        panel.searchField.text = text
+        panel.applyQuery(text)
+    }
+
+    fun testSearchNarrowsTheListAndKeepsMostRecentFirst() {
+        val key = projectKey()
+        repo.create(NewNote.code(key, "src/A.kt", 1, 2, "alpha handler")).get()
+        repo.create(NewNote.code(key, "src/B.kt", 1, 2, "beta")).get()
+        repo.create(NewNote.free("Handler notes")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel).size == 3 }
+
+        search(panel, "handler")
+
+        awaitUntil("narrowed") { titles(panel) == listOf("Handler notes", "alpha handler") }
+    }
+
+    fun testSearchFindsKoreanTextByItsStem() {
+        repo.create(NewNote.free("취소건을 처리한다")).get()
+        repo.create(NewNote.free("무관한 노트")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel).size == 2 }
+
+        search(panel, "취소")
+
+        awaitUntil("narrowed") { titles(panel) == listOf("취소건을 처리한다") }
+    }
+
+    fun testOneCharacterDoesNotSearchAndClearingRestoresTheList() {
+        repo.create(NewNote.free("alpha")).get()
+        repo.create(NewNote.free("beta")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel).size == 2 }
+
+        search(panel, "alp")
+        awaitUntil("narrowed") { titles(panel) == listOf("alpha") }
+
+        search(panel, "a")
+        assertEquals(2, titles(panel).size)
+        assertEquals("", panel.list.emptyText.text)
+
+        search(panel, "alp")
+        awaitUntil("narrowed again") { titles(panel) == listOf("alpha") }
+        search(panel, "")
+        assertEquals(2, titles(panel).size)
+    }
+
+    fun testNoResultGuidanceNamesTheQueryAndSuggestsAllProjects() {
+        repo.create(NewNote.free("alpha")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel).size == 1 }
+
+        search(panel, "zzz")
+
+        awaitUntil("no results") { panel.state.noSearchResults }
+        assertEquals(
+            listOf(JNoteBundle.message("toolWindow.search.empty.title", "zzz"), JNoteBundle.message("toolWindow.search.empty.hint")),
+            emptyTextLines(panel),
+        )
+
+        panel.allProjectsBox.doClick()
+        awaitUntil("all-projects hint") { emptyTextLines(panel).lastOrNull() == JNoteBundle.message("toolWindow.search.empty.hint.all") }
+    }
+
+    fun testSearchFollowsAllProjectsAndNoteChanges() {
+        val key = projectKey()
+        repo.create(NewNote.code(key, "src/A.kt", 1, 2, "needle mine")).get()
+        repo.create(NewNote.code("github.com/org/other", "src/B.kt", 1, 2, "needle theirs")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel) == listOf("needle mine") }
+        search(panel, "needle")
+        awaitUntil("searched") { panel.state.match != null }
+        assertEquals(listOf("needle mine"), titles(panel))
+
+        panel.allProjectsBox.doClick()
+        awaitUntil("all projects searched") { titles(panel).size == 2 }
+
+        repo.create(NewNote.code(key, "src/C.kt", 1, 2, "needle added")).get()
+        panel.reload()
+        awaitUntil("new match listed first") { titles(panel).first() == "needle added" && titles(panel).size == 3 }
+    }
+
+    fun testTypingWaitsForTheDelayAndOnlyTheLastInputSearches() {
+        repo.create(NewNote.free("alpha")).get()
+        repo.create(NewNote.free("beta")).get()
+        val scheduled = mutableListOf<() -> Unit>()
+        val panel = track(JNotePanel(project, recordingScheduler(scheduled)))
+        awaitUntil("listed") { titles(panel).size == 2 }
+
+        panel.searchField.text = "al"
+        panel.searchField.text = "alp"
+        assertEquals(1, scheduled.size)
+        assertEquals(2, titles(panel).size)
+
+        scheduled.single().invoke()
+        awaitUntil("narrowed") { titles(panel) == listOf("alpha") }
+    }
+
+    fun testStaleSearchResultDoesNotOverrideTheNewQuery() {
+        repo.create(NewNote.free("alpha")).get()
+        repo.create(NewNote.free("beta")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel).size == 2 }
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val blocker = dbService.database.submit { gate.await(10, java.util.concurrent.TimeUnit.SECONDS) }
+
+        panel.applyQuery("alp")
+        panel.applyQuery("bet")
+        gate.countDown()
+        blocker.get()
+
+        awaitUntil("latest query wins") { titles(panel) == listOf("beta") }
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+        assertEquals(listOf("beta"), titles(panel))
+    }
 }
