@@ -46,12 +46,48 @@ class DatabaseCopierTest {
             }
         }
 
+    private fun filesIn(dir: Path): Set<String> = Files.list(dir).use { s -> s.map { it.fileName.toString() }.toList().toSet() }
+
+    // 읽기 트랜잭션을 연 채로 두어 체크포인트가 끝나지 못하게 한다
+    private fun holdReadTransaction(file: Path): java.sql.Connection =
+        JDBC().connect("jdbc:sqlite:$file", Properties())!!.also { reader ->
+            reader.autoCommit = false
+            reader.createStatement().use { s -> s.executeQuery("select count(*) from probe").use { it.next() } }
+        }
+
     @Test
-    fun copyingOnlyTheMainFileMissesDataStillInWal() {
+    fun busyCheckpointFailsTheCopyInsteadOfCopyingAnIncompleteFile() {
         val db = walOnlyDatabase("src.db")
-        DatabaseCopier.copyFile(path("src.db"), path("naive.db")) {}
-        assertEquals(null, probeCount(path("naive.db")))
-        assertEquals(1, db.submitAndWait { 1 })
+        holdReadTransaction(path("src.db")).use {
+            // 읽는 쪽 스냅샷 뒤의 커밋은 체크포인트가 본 파일로 옮기지 못한다
+            db.submitAndWait { c ->
+                c.createStatement().use { s ->
+                    s.execute("insert into probe values (43)")
+                    // 시도마다 5초씩 기다리지 않도록 이 연결의 대기 시간만 줄인다
+                    s.execute("PRAGMA busy_timeout = 50")
+                }
+            }
+            assertThrows(IllegalStateException::class.java) {
+                DatabaseCopier.copy(path("src.db"), path("copy.db"), db) {}
+            }
+        }
+        assertEquals(setOf("src.db", "src.db-shm", "src.db-wal"), filesIn(tmp.root.toPath()))
+        assertEquals(2, db.submitAndWait { c ->
+            c.createStatement().use { s -> s.executeQuery("select count(*) from probe").use { it.next(); it.getInt(1) } }
+        })
+    }
+
+    @Test
+    fun busyCheckpointOfALeftoverWalFailsTheCopy() {
+        walOnlyDatabase("live.db")
+        Files.copy(path("live.db"), path("crashed.db"))
+        Files.copy(path("live.db-wal"), path("crashed.db-wal"))
+        holdReadTransaction(path("crashed.db")).use {
+            assertThrows(IllegalStateException::class.java) {
+                DatabaseCopier.copy(path("crashed.db"), path("out/copy.db"), null) {}
+            }
+        }
+        assertFalse(Files.exists(path("out/copy.db")))
     }
 
     @Test

@@ -4,7 +4,6 @@ import org.sqlite.JDBC
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
-import java.sql.Connection
 import java.util.Properties
 import java.util.concurrent.ExecutionException
 
@@ -25,16 +24,12 @@ object DatabaseCopier {
         }
         try {
             openDatabase.submit { connection ->
-                checkpoint(connection)
+                WalCheckpoint.truncateOrFail(connection)
                 copyFile(source, target, checkCancelled)
             }.get()
         } catch (e: ExecutionException) {
             throw e.cause ?: e
         }
-    }
-
-    internal fun checkpoint(connection: Connection) {
-        connection.createStatement().use { it.execute("PRAGMA wal_checkpoint(TRUNCATE)") }
     }
 
     // 이번 세션에서 열지 않은 DB라도 이전 비정상 종료로 -wal에 데이터가 남아 있을 수 있어, 그때만 잠깐 연결해 비운다
@@ -43,10 +38,10 @@ object DatabaseCopier {
         if (!Files.exists(source) || !Files.exists(wal) || Files.size(wal) == 0L) return
         val connection = JDBC().connect("jdbc:sqlite:$source", Properties())
             ?: error("sqlite-jdbc rejected url for $source")
-        connection.use { checkpoint(it) }
+        connection.use { WalCheckpoint.truncateOrFail(it) }
     }
 
-    internal fun copyFile(source: Path, target: Path, checkCancelled: () -> Unit) {
+    private fun copyFile(source: Path, target: Path, checkCancelled: () -> Unit) {
         if (!Files.exists(source)) return
         val parent = target.toAbsolutePath().parent
         Files.createDirectories(parent)
