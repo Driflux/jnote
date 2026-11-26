@@ -11,6 +11,9 @@ object DbPathSwitcher {
     /** 이미 있는 파일을 JNote DB로 열 수 없어 전환하지 않았다. */
     class UnusableTarget(val target: Path, cause: Throwable) : Exception(cause.message, cause)
 
+    /** 전환과 저장은 끝났지만 옛 DB를 닫지 못했다. */
+    class OldDatabaseNotClosed(val target: Path, override val cause: Throwable) : Exception(cause.message, cause)
+
     fun execute(
         plan: DbPathChange.Plan,
         service: DatabaseService,
@@ -33,7 +36,11 @@ object DbPathSwitcher {
         }
         // 경로는 이미 바뀌었으므로, 옛 DB를 닫다 실패해도 재시작 뒤 새 경로를 쓰도록 먼저 저장한다
         settings.store(target)
-        retired?.close()
+        try {
+            retired?.close()
+        } catch (e: Exception) {
+            throw OldDatabaseNotClosed(target, e)
+        }
     }
 
     // 설정에 남긴 뒤에 실패하면 다음 사용과 재시작마다 같은 오류가 나므로, 바꾸기 전에 한 번 열어 마이그레이션까지 해 본다

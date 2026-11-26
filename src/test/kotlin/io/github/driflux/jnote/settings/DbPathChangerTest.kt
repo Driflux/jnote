@@ -111,6 +111,15 @@ class DbPathChangerTest : BasePlatformTestCase() {
         assertEquals("stale", Files.readString(stale))
     }
 
+    fun testCloseFailureAfterTheSwitchSaysTheNewDatabaseIsInUse() {
+        val target = dir.resolve("next.db")
+        DbPathNotifier.failed(DbPathSwitcher.OldDatabaseNotClosed(target, IllegalStateException("stuck")))
+        val n = notifications.single()
+        assertEquals(NotificationType.WARNING, n.type)
+        assertEquals(JNoteBundle.message("notification.dbPath.closeFailed.title"), n.title)
+        assertEquals(JNoteBundle.message("notification.dbPath.closeFailed.content", target, "stuck"), n.content)
+    }
+
     fun testSameFileIsNoChange() {
         DbPathChanger.request(current)
         assertTrue(notifications.isEmpty())
