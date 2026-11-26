@@ -19,7 +19,6 @@
                            bundle="messages.JNoteBundle"
                            key="notification.group.name"/>
 
-        <!-- Tool Window (#6) -->
         <toolWindow id="JNote"
                     anchor="right"
                     icon="AllIcons.Toolwindows.Documentation"

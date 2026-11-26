@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #6
-- PR: (to be filled)
+- PR: #41, #42, #43, #44
 
 ## Context
 Users need to see saved notes, inspect one, jump to its code, and delete it (intent.md sections 5 and 7). The plugin must stay invisible to the IDE until used (intent.md section 2): no startup work, no DB or file I/O on the EDT, no new dependency. Delete is immediate with an Undo notification instead of a confirmation dialog (intent.md section 9). Editing needs the note dialog from issue #5 and lands in a later PR of this issue.
