@@ -15,6 +15,8 @@ import java.util.concurrent.TimeUnit
 internal object ToolWindowNotifier {
     fun loadFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.load", cause)
 
+    fun editFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.edit", cause)
+
     fun deleteFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.delete", cause)
 
     fun restoreFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.restore", cause)

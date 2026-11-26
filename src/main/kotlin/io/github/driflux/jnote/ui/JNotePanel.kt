@@ -19,6 +19,7 @@ import com.intellij.util.ui.UIUtil
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
 import io.github.driflux.jnote.NotesChangedListener
+import io.github.driflux.jnote.action.NoteSaver
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.model.Note
@@ -32,6 +33,8 @@ import javax.swing.ListSelectionModel
 class JNotePanel internal constructor(
     private val project: Project,
     scheduler: DelayScheduler,
+    private val saver: NoteSaver = NoteSaver(),
+    private val askEdit: (Project, Note) -> NoteDraft? = AddNoteDialog::edit,
 ) : JBPanel<JNotePanel>(BorderLayout()), Disposable {
     constructor(project: Project) : this(project, AppDelayScheduler)
 
@@ -43,7 +46,7 @@ class JNotePanel internal constructor(
         selectionMode = ListSelectionModel.SINGLE_SELECTION
     }
 
-    internal val detail = NoteDetailPanel(onGoToCode = { CodeNavigator.goTo(project, it) }, onDelete = { delete(it) })
+    internal val detail = NoteDetailPanel(onGoToCode = { CodeNavigator.goTo(project, it) }, onDelete = { delete(it) }, onEdit = { edit(it) })
 
     // reload()가 어느 스레드에서든 불리므로 Swing 부품 대신 이 값을 읽는다
     @Volatile
@@ -132,6 +135,14 @@ class JNotePanel internal constructor(
                 }
             }
         }
+
+    internal fun edit(note: Note): CompletableFuture<*> {
+        val draft = askEdit(project, note) ?: return CompletableFuture.completedFuture(null)
+        // 저장소가 알림을 UI 스레드로 옮겨 보내므로 여기서는 실패만 알린다
+        return saver.update(note, draft).whenComplete { _, error ->
+            if (error != null) onEdt { ToolWindowNotifier.editFailed(project, (error as? CompletionException)?.cause ?: error) }
+        }
+    }
 
     private fun undo(deletion: NoteDeletion, deleted: DeletedNote) {
         deletion.undo(deleted).whenComplete { _, error ->
