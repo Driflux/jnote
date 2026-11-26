@@ -12,7 +12,7 @@ import org.junit.Test
 
 class GutterLinesTest {
     private fun cached(id: Long, line: Int, status: NoteStatus = NoteStatus.OK) =
-        CachedNote(id, "t$id", "", emptyList(), null, status, line, line + 2, "")
+        CachedNote(id, "u$id", "t$id", "", emptyList(), null, status, line, line + 2, "")
 
     @Test
     fun onlyOkAndApproxNotesDrawAMarker() {

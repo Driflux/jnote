@@ -10,6 +10,7 @@ import io.github.driflux.jnote.model.Tag
  */
 data class CachedNote(
     val id: Long,
+    val uid: String,
     val title: String,
     val body: String,
     val tags: List<String>,
@@ -31,6 +32,7 @@ data class CachedNote(
             val end = note.endLine ?: return null
             return CachedNote(
                 id = note.id,
+                uid = note.uid,
                 title = note.title,
                 body = note.body,
                 tags = tags.map { it.name },

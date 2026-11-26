@@ -21,7 +21,7 @@ internal class NotePositions {
         val lost: Boolean get() = !marker.isValid || (nonEmpty && marker.startOffset == marker.endOffset)
     }
 
-    private class TrackedDocument(val database: Database, val notes: HashMap<Long, Tracked>) {
+    private class TrackedDocument(val database: Database, val relPath: String, val notes: HashMap<String, Tracked>) {
         fun dispose() = notes.values.forEach { it.marker.dispose() }
     }
 
@@ -32,16 +32,16 @@ internal class NotePositions {
      * 캐시의 노트를 마커와 맞춘다. 추적 중인 노트는 마커의 현재 줄로 바꾸고, 범위가 지워진 노트는 뺀다.
      * 추적하지 않는 노트(ORPHAN, NEEDS_RELOCATE, 문서 밖)는 그대로 돌려준다.
      */
-    fun sync(document: Document, database: Database, notes: List<CachedNote>): List<CachedNote> = synchronized(lock) {
-        // 다른 DB의 노트는 id가 같아도 다른 노트다
-        val tracked = documents[document]?.takeIf { it.database === database } ?: run {
+    fun sync(document: Document, relPath: String, database: Database, notes: List<CachedNote>): List<CachedNote> = synchronized(lock) {
+        // 위치는 노트를 읽어 온 DB와 경로로 써야 하므로 둘 중 하나가 바뀌면 새로 시작한다
+        val tracked = documents[document]?.takeIf { it.database === database && it.relPath == relPath } ?: run {
             documents.remove(document)?.dispose()
-            TrackedDocument(database, HashMap())
+            TrackedDocument(database, relPath, HashMap())
         }
-        for (id in tracked.notes.keys - notes.mapTo(HashSet()) { it.id }) tracked.notes.remove(id)!!.marker.dispose()
+        for (uid in tracked.notes.keys - notes.mapTo(HashSet()) { it.uid }) tracked.notes.remove(uid)!!.marker.dispose()
         val result = ArrayList<CachedNote>(notes.size)
         for (note in notes) {
-            val current = tracked.reconcile(document, note.id, Placement(note.startLine, note.endLine, note.status))
+            val current = tracked.reconcile(document, note.uid, Placement(note.startLine, note.endLine, note.status))
             when {
                 current == null -> result += note
                 current.lost -> {}
@@ -69,10 +69,10 @@ internal class NotePositions {
     fun isTracking(document: Document): Boolean = synchronized(lock) { document in documents }
 
     /** 노트 하나를 캐시 값과 맞춘다. 추적하지 않으면 null. */
-    private fun TrackedDocument.reconcile(document: Document, id: Long, cache: Placement): Tracked? {
-        val current = notes[id]
+    private fun TrackedDocument.reconcile(document: Document, uid: String, cache: Placement): Tracked? {
+        val current = notes[uid]
         if (cache.status == NoteStatus.ORPHAN || cache.status == NoteStatus.NEEDS_RELOCATE) {
-            notes.remove(id)?.marker?.dispose()
+            notes.remove(uid)?.marker?.dispose()
             return null
         }
         if (current != null) {
@@ -85,10 +85,10 @@ internal class NotePositions {
                 current.stored = cache
                 return current
             }
-            notes.remove(id)!!.marker.dispose()
+            notes.remove(uid)!!.marker.dispose()
         }
         if (cache.start < 1 || cache.end > document.lineCount) return null
         val marker = document.createRangeMarker(document.getLineStartOffset(cache.start - 1), document.getLineEndOffset(cache.end - 1))
-        return Tracked(marker, marker.startOffset != marker.endOffset, cache, cache).also { notes[id] = it }
+        return Tracked(marker, marker.startOffset != marker.endOffset, cache, cache).also { notes[uid] = it }
     }
 }

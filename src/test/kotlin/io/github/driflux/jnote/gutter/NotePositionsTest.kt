@@ -138,6 +138,10 @@ class NotePositionsTest : BasePlatformTestCase() {
     /** 다른 쓰기가 DB를 바꾸고 알린 것처럼 하고, 캐시가 다시 읽을 때까지 기다린다. */
     private fun writeAndNotify(note: Note) {
         repo.update(note).get()
+        notifyAndSettle()
+    }
+
+    private fun notifyAndSettle() {
         ApplicationManager.getApplication().messageBus.syncPublisher(NotesChanged.TOPIC).notesChanged()
         settle()
     }
@@ -200,6 +204,22 @@ class NotePositionsTest : BasePlatformTestCase() {
         writeAndNotify(saved.copy(startLine = 8, endLine = 8))
 
         assertEquals(listOf(8), drawnLines())
+    }
+
+    fun testANewNoteThatReusesADeletedNotesIdStartsAtItsOwnLines() {
+        openFile("TrackReused.txt", lines(10))
+        val deleted = note("TrackReused.txt", 3, 3, "deleted")
+        loadedMarkers()
+        insertTwoLinesAtTop()
+        assertEquals(listOf(5), drawnLines())
+
+        repo.delete(deleted.id).get()
+        val fresh = note("TrackReused.txt", 3, 3, "fresh")
+        // 가장 큰 id를 지우면 새 노트가 그 id를 받는다. id로 따라갔다면 지운 노트의 마커가 옮겨 둔 5번 줄에 그린다
+        assertEquals(deleted.id, fresh.id)
+        notifyAndSettle()
+
+        assertEquals(listOf(3 to "fresh"), drawn())
     }
 
     fun testAnOrphanedNoteDrawsNothingUntilItIsPlacedAgain() {
