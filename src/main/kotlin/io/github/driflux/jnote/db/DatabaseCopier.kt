@@ -1,6 +1,7 @@
 package io.github.driflux.jnote.db
 
 import org.sqlite.JDBC
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -42,6 +43,7 @@ object DatabaseCopier {
     }
 
     private fun copyFile(source: Path, target: Path, checkCancelled: () -> Unit) {
+        requireNothingAt(target)
         if (!Files.exists(source)) return
         val parent = target.toAbsolutePath().parent
         Files.createDirectories(parent)
@@ -61,10 +63,20 @@ object DatabaseCopier {
                 }
             }
             checkCancelled()
+            // ATOMIC_MOVE는 있는 파일을 덮어쓰므로, 복사하는 사이 누가 만들었는지 옮기기 직전에 다시 본다
+            requireNothingAt(target)
             Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE)
             moved = true
         } finally {
             if (!moved) Files.deleteIfExists(temp)
+        }
+    }
+
+    // 남은 -wal/-shm은 새 파일을 열 때 그 파일의 내용인 것처럼 합쳐질 수 있어, 대상과 함께 셋 다 없어야 한다
+    private fun requireNothingAt(target: Path) {
+        for (suffix in listOf("", "-wal", "-shm")) {
+            val path = target.resolveSibling(target.fileName.toString() + suffix)
+            if (Files.exists(path)) throw FileAlreadyExistsException(path.toString())
         }
     }
 }

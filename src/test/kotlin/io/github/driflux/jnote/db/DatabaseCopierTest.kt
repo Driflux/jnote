@@ -9,6 +9,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.sqlite.JDBC
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Properties
@@ -150,6 +151,37 @@ class DatabaseCopierTest {
         }
         assertEquals("boom", error.message)
         assertNoLeftovers()
+    }
+
+    @Test
+    fun staleWalOrShmNextToTheTargetRefusesTheCopy() {
+        walOnlyDatabase("src.db").close()
+        for (suffix in listOf("-wal", "-shm")) {
+            val stale = path("copy.db$suffix").also { Files.writeString(it, "stale") }
+            val error = assertThrows(FileAlreadyExistsException::class.java) {
+                DatabaseCopier.copy(path("src.db"), path("copy.db"), null) {}
+            }
+            assertEquals(stale.toString(), error.file)
+            assertEquals("stale", Files.readString(stale))
+            assertFalse(Files.exists(path("copy.db")))
+            Files.delete(stale)
+        }
+        assertTrue(filesIn(tmp.root.toPath()).none { it.endsWith(".copying") })
+    }
+
+    @Test
+    fun targetCreatedDuringTheCopyIsNotOverwritten() {
+        val source = bigSource()
+        val target = path("out/copy.db")
+        val error = assertThrows(FileAlreadyExistsException::class.java) {
+            DatabaseCopier.copy(source, target, null) {
+                // 복사하는 사이 다른 프로그램이 같은 경로에 파일을 만든 상황
+                if (!Files.exists(target)) Files.writeString(target, "other")
+            }
+        }
+        assertEquals(target.toString(), error.file)
+        assertEquals("other", Files.readString(target))
+        assertEquals(setOf("copy.db"), filesIn(path("out")))
     }
 
     @Test

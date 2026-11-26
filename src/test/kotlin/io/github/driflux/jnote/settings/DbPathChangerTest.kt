@@ -7,6 +7,7 @@ import com.intellij.notification.Notifications
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
 import java.nio.file.Files
@@ -61,6 +62,17 @@ class DbPathChangerTest : BasePlatformTestCase() {
         val n = notifications.single()
         assertEquals(NotificationType.ERROR, n.type)
         assertTrue(n.content.contains("disk full"))
+    }
+
+    fun testStaleWalAtTheNewLocationIsReportedAndNothingChanges() {
+        val stale = dir.resolve("next.db-wal").also { Files.writeString(it, "stale") }
+        DbPathChanger.request(dir.resolve("next.db"))
+        val n = notifications.single()
+        assertEquals(JNoteBundle.message("notification.dbPath.failed.title"), n.title)
+        assertEquals(JNoteBundle.message("notification.dbPath.targetExists.content", stale), n.content)
+        assertEquals(current, DatabaseService.getInstance().currentPath())
+        assertEquals(current.toString(), DbPathSettings.getInstance().state.dbPath)
+        assertEquals("stale", Files.readString(stale))
     }
 
     fun testSameFileIsNoChange() {
