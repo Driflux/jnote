@@ -77,4 +77,11 @@ class NoteRowsTest {
         assertEquals(note, row.note)
         assertEquals("title", row.title)
     }
+
+    @Test
+    fun rowCarriesItsTags() {
+        val tags = listOf(io.github.driflux.jnote.model.Tag(1, "a"), io.github.driflux.jnote.model.Tag(2, "b"))
+        assertEquals(tags, NoteRows.of(code(), "github.com/org/repo", "free", tags).tags)
+        assertTrue(NoteRows.of(code(), "github.com/org/repo", "free").tags.isEmpty())
+    }
 }

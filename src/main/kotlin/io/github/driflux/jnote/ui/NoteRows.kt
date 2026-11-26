@@ -2,6 +2,7 @@ package io.github.driflux.jnote.ui
 
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
+import io.github.driflux.jnote.model.Tag
 
 /** 목록 한 행에 보여줄 값. Swing과 번들에 기대지 않으므로 단위 테스트로 검증한다. */
 data class NoteRow(
@@ -10,17 +11,20 @@ data class NoteRow(
     /** 다른 프로젝트의 노트일 때만 채운다. */
     val projectName: String?,
     val aiBadge: Boolean,
+    /** 이름순. 태그가 없으면 비어 있다. */
+    val tags: List<Tag> = emptyList(),
 ) {
     val title: String get() = note.title
 }
 
 object NoteRows {
     /** [freeLabel]은 FREE 노트의 부제목으로, 번들 문자열을 호출한 쪽에서 넘긴다. */
-    fun of(note: Note, currentProjectKey: String?, freeLabel: String): NoteRow = NoteRow(
+    fun of(note: Note, currentProjectKey: String?, freeLabel: String, tags: List<Tag> = emptyList()): NoteRow = NoteRow(
         note = note,
         subtitle = subtitle(note, freeLabel),
         projectName = projectName(note, currentProjectKey),
         aiBadge = !note.aiSource.isNullOrBlank(),
+        tags = tags,
     )
 
     /** CODE는 "클래스 · L3-5"(클래스가 없으면 파일 이름), FREE는 [freeLabel]. */

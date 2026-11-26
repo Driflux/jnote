@@ -7,6 +7,7 @@ import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.CollectionListModel
+import com.intellij.openapi.ui.JBPopupMenu
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.SimpleListCellRenderer
@@ -18,6 +19,7 @@ import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.util.ui.AsyncProcessIcon
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import com.intellij.util.ui.WrapLayout
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
 import io.github.driflux.jnote.NoteSelectRequested
@@ -27,10 +29,17 @@ import io.github.driflux.jnote.action.NoteSaver
 import io.github.driflux.jnote.action.RelocateNotesTask
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
+import io.github.driflux.jnote.db.TagRenameResult
+import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.Note
+import io.github.driflux.jnote.model.Tag
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.awt.BorderLayout
 import java.awt.FlowLayout
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import javax.swing.JMenuItem
+import javax.swing.JPopupMenu
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 import java.util.concurrent.atomic.AtomicInteger
@@ -40,11 +49,13 @@ class JNotePanel internal constructor(
     private val project: Project,
     scheduler: DelayScheduler,
     private val saver: NoteSaver = NoteSaver(),
-    private val askEdit: (Project, Note) -> NoteDraft? = AddNoteDialog::edit,
+    private val askEdit: (Project, Note, List<String>) -> NoteDraft? = AddNoteDialog::edit,
+    private val askTagName: (Project, Tag, List<Tag>) -> String? = TagDialogs::askNewName,
+    private val confirmTagDelete: (Project, Tag) -> Boolean = TagDialogs::confirmDelete,
 ) : JBPanel<JNotePanel>(BorderLayout()), Disposable {
     constructor(project: Project) : this(project, AppDelayScheduler)
 
-    private class Loaded(val projectKey: String, val notes: List<Note>)
+    private class Loaded(val projectKey: String, val notes: List<Note>, val dictionary: List<Tag>, val noteTags: Map<Long, List<Tag>>)
 
     private val model = CollectionListModel<NoteRow>()
     internal val list = JBList(model).apply {
@@ -82,6 +93,8 @@ class JNotePanel internal constructor(
             render()
         }
     }
+    // 사전이 다시 읽힐 때마다 칩을 새로 만든다. 켜고 끄는 것은 이 줄이 아니라 state가 기억한다
+    internal val tagBar = JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 2)).apply { isVisible = false }
     internal val spinnerIcon = AsyncProcessIcon("JNote").apply { isVisible = false }
 
     // 닫힌 뒤에 늦게 도착한 타이머가 이미 정리된 아이콘을 다시 돌리지 못하게 한다
@@ -117,7 +130,10 @@ class JNotePanel internal constructor(
             }, BorderLayout.WEST)
             add(spinnerIcon, BorderLayout.EAST)
         }
-        add(header, BorderLayout.NORTH)
+        add(JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            add(header, BorderLayout.NORTH)
+            add(tagBar, BorderLayout.CENTER)
+        }, BorderLayout.NORTH)
         add(OnePixelSplitter(true, 0.5f).apply {
             firstComponent = JBScrollPane(list)
             secondComponent = detail
@@ -165,12 +181,32 @@ class JNotePanel internal constructor(
             }
         }
 
+    /**
+     * 붙은 태그를 EDT 밖에서 읽은 뒤 다이얼로그를 띄워 편집하고, 확인하면 EDT 밖에서 저장한다.
+     * 취소하면 아무것도 저장하지 않는다. 모두 끝나면 완료되는 future를 돌려준다.
+     */
     internal fun edit(note: Note): CompletableFuture<*> {
-        val draft = askEdit(project, note) ?: return CompletableFuture.completedFuture(null)
-        // 저장소가 알림을 UI 스레드로 옮겨 보내므로 여기서는 실패만 알린다
-        return saver.update(project, note, draft).whenComplete { _, error ->
-            if (error != null) onEdt { ToolWindowNotifier.editFailed(project, (error as? CompletionException)?.cause ?: error) }
+        val done = CompletableFuture<Unit>()
+        TagRepository(DatabaseService.getInstance().database).tagsOf(note.id).whenComplete { tags, readError ->
+            onEdt {
+                if (readError != null) {
+                    ToolWindowNotifier.editFailed(project, (readError as? CompletionException)?.cause ?: readError)
+                    done.complete(Unit)
+                    return@onEdt
+                }
+                val draft = askEdit(project, note, tags.map { it.name })
+                if (draft == null) {
+                    done.complete(Unit)
+                    return@onEdt
+                }
+                // 저장소가 알림을 UI 스레드로 옮겨 보내므로 여기서는 실패만 알린다
+                saver.update(project, note, draft).whenComplete { _, error ->
+                    if (error != null) onEdt { ToolWindowNotifier.editFailed(project, (error as? CompletionException)?.cause ?: error) }
+                    done.complete(Unit)
+                }
+            }
         }
+        return done
     }
 
     /** 근사 위치를 지금 줄 범위로 확인한다. 성공하면 저장소의 알림으로 목록과 거터가 다시 읽힌다. */
@@ -196,15 +232,73 @@ class JNotePanel internal constructor(
         // 프로젝트 키는 git 설정 파일을 읽으므로 DB 스레드가 아니라 풀 스레드에서 구한다
         CompletableFuture.supplyAsync({ project.service<ProjectKeyService>().resolve().key }, AppExecutorUtil.getAppExecutorService())
             .thenCompose { key ->
-                NoteRepository(DatabaseService.getInstance().database).list(key, allProjects).thenApply { Loaded(key, it) }
+                val database = DatabaseService.getInstance().database
+                val tags = TagRepository(database)
+                val notes = NoteRepository(database).list(key, allProjects)
+                val dictionary = tags.list()
+                val assignments = tags.assignments()
+                CompletableFuture.allOf(notes, dictionary, assignments)
+                    .thenApply { Loaded(key, notes.join(), dictionary.join(), assignments.join()) }
             }
 
     private fun show(loaded: Loaded) {
         val free = JNoteBundle.message("toolWindow.subtitle.free")
-        val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free) }
+        val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free, loaded.noteTags[it.id].orEmpty()) }
         shownProjectKey = loaded.projectKey
-        state = state.copy(notes = rows, allProjects = allProjects)
+        state = state.copy(notes = rows, allProjects = allProjects).withTags(loaded.dictionary)
+        rebuildTagBar()
         render()
+    }
+
+    internal fun tagMenu(tag: Tag): JPopupMenu = JBPopupMenu().apply {
+        add(JMenuItem(JNoteBundle.message("toolWindow.tag.rename")).apply { addActionListener { renameTag(tag) } })
+        add(JMenuItem(JNoteBundle.message("toolWindow.tag.delete")).apply { addActionListener { deleteTag(tag) } })
+    }
+
+    /** 새 이름을 물어 모든 노트에 적용한다. 취소하면 바로 끝나는 future를 돌려준다. */
+    internal fun renameTag(tag: Tag): CompletableFuture<*> {
+        val name = askTagName(project, tag, state.tags) ?: return CompletableFuture.completedFuture(null)
+        return TagRepository(DatabaseService.getInstance().database).rename(tag.id, name).whenComplete { result, error ->
+            onEdt {
+                when {
+                    error != null -> ToolWindowNotifier.renameTagFailed(project, error.cause ?: error)
+                    result is TagRenameResult.Conflict -> ToolWindowNotifier.tagExists(project, name.trim())
+                    // 입력 검사를 지났다면 일어나지 않지만, 다른 프로세스가 사이에 바꿨을 수 있다. 어느 쪽이든 목록은 새로 읽는다
+                    else -> publishChanged()
+                }
+            }
+        }
+    }
+
+    /** 확인을 받으면 태그와 노트 연결만 지운다(노트는 그대로). 취소하면 바로 끝나는 future를 돌려준다. */
+    internal fun deleteTag(tag: Tag): CompletableFuture<*> {
+        if (!confirmTagDelete(project, tag)) return CompletableFuture.completedFuture(null)
+        return TagRepository(DatabaseService.getInstance().database).delete(tag.id).whenComplete { _, error ->
+            onEdt { if (error == null) publishChanged() else ToolWindowNotifier.deleteTagFailed(project, error.cause ?: error) }
+        }
+    }
+
+    private fun rebuildTagBar() {
+        tagBar.removeAll()
+        state.tags.forEach { tag ->
+            val chip = tagChip(tag.name, tag.id in state.selectedTagIds) {
+                state = state.toggleTag(tag.id)
+                render()
+            }
+            // 오른쪽 클릭은 켜고 끄는 동작이 아니라 이름 바꾸기와 삭제 메뉴를 연다
+            chip.addMouseListener(object : MouseAdapter() {
+                override fun mousePressed(e: MouseEvent) = showMenu(e)
+                override fun mouseReleased(e: MouseEvent) = showMenu(e)
+
+                private fun showMenu(e: MouseEvent) {
+                    if (e.isPopupTrigger) tagMenu(tag).show(e.component, e.x, e.y)
+                }
+            })
+            tagBar.add(chip)
+        }
+        tagBar.isVisible = state.tags.isNotEmpty()
+        tagBar.revalidate()
+        tagBar.repaint()
     }
 
     private fun render() {
@@ -236,7 +330,10 @@ class JNotePanel internal constructor(
 
     private fun showEmptyText() {
         val text = list.emptyText
-        if (state.showEmptyState) {
+        if (state.showEmptyState && state.tagFilterActive) {
+            text.text = JNoteBundle.message("toolWindow.empty.tags.title")
+            text.appendLine(JNoteBundle.message("toolWindow.empty.tags.hint"))
+        } else if (state.showEmptyState) {
             text.text = JNoteBundle.message(state.filter.emptyTitleKey)
             text.appendLine(if (state.filter == NoteFilter.FREE) JNoteBundle.message("toolWindow.empty.free.hint") else emptyHint())
         } else {

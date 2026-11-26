@@ -16,6 +16,7 @@ import javax.swing.JPanel
 internal class NoteRowRenderer : JBPanel<NoteRowRenderer>(BorderLayout()), ListCellRenderer<NoteRow> {
     private val title = JBLabel()
     private val subtitle = JBLabel().apply { font = JBFont.small() }
+    private val tags = JBLabel().apply { font = JBFont.small() }
     private val project = JBLabel().apply { font = JBFont.small() }
     private val badge = JBLabel(JNoteBundle.message("toolWindow.badge.ai")).apply {
         font = JBFont.small()
@@ -29,6 +30,7 @@ internal class NoteRowRenderer : JBPanel<NoteRowRenderer>(BorderLayout()), ListC
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             add(title)
             add(subtitle)
+            add(tags)
         }
         val tail = JPanel().apply {
             isOpaque = false
@@ -54,6 +56,9 @@ internal class NoteRowRenderer : JBPanel<NoteRowRenderer>(BorderLayout()), ListC
         title.foreground = main
         subtitle.text = value.subtitle
         subtitle.foreground = muted
+        tags.text = value.tags.joinToString(" ") { "#" + it.name }
+        tags.foreground = muted
+        tags.isVisible = value.tags.isNotEmpty()
         project.text = value.projectName.orEmpty()
         project.foreground = muted
         project.isVisible = value.projectName != null

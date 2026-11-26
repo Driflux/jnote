@@ -395,14 +395,14 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         awaitUntil("list emptied") { panel.list.model.size == 0 }
     }
 
-    private fun panelWith(saver: NoteSaver, askEdit: (Project, Note) -> NoteDraft?): JNotePanel =
+    private fun panelWith(saver: NoteSaver, askEdit: (Project, Note, List<String>) -> NoteDraft?): JNotePanel =
         JNotePanel(project, AppDelayScheduler, saver, askEdit).also {
             panels += it
             Disposer.register(testRootDisposable, it)
         }
 
     // 람다는 JUnit3 러너가 테스트로 오인하지 않도록 도우미 함수에서 만든다
-    private fun answering(draft: NoteDraft?, seen: MutableList<Note>): (Project, Note) -> NoteDraft? = { _, note ->
+    private fun answering(draft: NoteDraft?, seen: MutableList<Note>): (Project, Note, List<String>) -> NoteDraft? = { _, note, _ ->
         seen += note
         draft
     }
@@ -425,14 +425,14 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         }
     }
 
-    fun testEditSavesTheDialogValuesKeepsAnchorAndTagsAndPublishesOnce() {
+    fun testEditSavesTheDialogValuesKeepsAnchorAndPublishesOnce() {
         val key = projectKey()
         val tags = TagRepository(dbService.database)
         val tag = tags.getOrCreate("keep").get()
         val note = repo.create(NewNote.code(key, "src/Foo.kt", 2, 3, "Old", body = "old", className = "Foo", snapshot = "snap")).get()
         tags.attach(note.id, tag.id).get()
         val seen = mutableListOf<Note>()
-        val panel = panelWith(NoteSaver(), answering(NoteDraft("New title", "new body", "Claude", "http://x", "why"), seen))
+        val panel = panelWith(NoteSaver(), answering(NoteDraft("New title", "new body", "Claude", "http://x", "why", tags = listOf("keep")), seen))
         awaitUntil("list loaded") { panel.list.model.size == 1 }
         panel.list.selectedIndex = 0
         val events = countNotifications()

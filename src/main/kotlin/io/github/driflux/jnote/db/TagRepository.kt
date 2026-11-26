@@ -65,6 +65,44 @@ class TagRepository(private val database: Database) {
         }
     }
 
+    /**
+     * 노트에 붙은 태그를 [names]와 정확히 같게 맞춘다. 사전에 없는 이름은 만들고, 빠진 연결은 끊는다.
+     * 한 트랜잭션이라 중간에 실패하면 사전도 연결도 그대로다. 이름은 다듬고 중복은 하나로 본다.
+     * 쉼표가 든 이름이나 없는 노트면 future가 예외로 끝난다. 돌려주는 태그는 이름순이다.
+     */
+    fun replaceTags(noteId: Long, names: List<String>): CompletableFuture<List<Tag>> = database.submit { c ->
+        val cleaned = names.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        require(cleaned.none { ',' in it }) { "tag name must not contain a comma" }
+        c.autoCommit = false
+        try {
+            val tags = cleaned.map { name ->
+                c.prepareStatement("INSERT OR IGNORE INTO tag (name) VALUES (?)").use { s ->
+                    s.setString(1, name)
+                    s.executeUpdate()
+                }
+                checkNotNull(findByName(c, name))
+            }
+            c.prepareStatement("DELETE FROM note_tag WHERE note_id = ?").use { s ->
+                s.setLong(1, noteId)
+                s.executeUpdate()
+            }
+            c.prepareStatement("INSERT INTO note_tag (note_id, tag_id) VALUES (?, ?)").use { s ->
+                for (tag in tags) {
+                    s.setLong(1, noteId)
+                    s.setLong(2, tag.id)
+                    s.executeUpdate()
+                }
+            }
+            c.commit()
+            tags.sortedBy { it.name }
+        } catch (e: Throwable) {
+            c.rollback()
+            throw e
+        } finally {
+            c.autoCommit = true
+        }
+    }
+
     /** 이미 붙어 있어도 성공한다. 없는 노트나 태그면 SQLException(외래 키)으로 끝난다. */
     fun attach(noteId: Long, tagId: Long): CompletableFuture<Unit> = database.submit { c ->
         c.prepareStatement("INSERT OR IGNORE INTO note_tag (note_id, tag_id) VALUES (?, ?)").use { s ->
@@ -101,6 +139,19 @@ class TagRepository(private val database: Database) {
         ).use { s ->
             s.setString(1, project)
             s.setString(2, relPath)
+            s.executeQuery().use { rs ->
+                val result = LinkedHashMap<Long, MutableList<Tag>>()
+                while (rs.next()) result.getOrPut(rs.getLong(1)) { mutableListOf() } += Tag(rs.getLong(2), rs.getString(3))
+                result
+            }
+        }
+    }
+
+    /** 모든 노트의 태그를 노트 id별로 묶어 돌려준다. 태그가 없는 노트는 키가 없다. 목록 화면이 한 번에 읽는다. */
+    fun assignments(): CompletableFuture<Map<Long, List<Tag>>> = database.submit { c ->
+        c.prepareStatement(
+            "SELECT nt.note_id, t.id, t.name FROM note_tag nt JOIN tag t ON t.id = nt.tag_id ORDER BY nt.note_id, t.name",
+        ).use { s ->
             s.executeQuery().use { rs ->
                 val result = LinkedHashMap<Long, MutableList<Tag>>()
                 while (rs.next()) result.getOrPut(rs.getLong(1)) { mutableListOf() } += Tag(rs.getLong(2), rs.getString(3))

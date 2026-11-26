@@ -64,4 +64,49 @@ class ToolWindowStateTest {
     fun beforeTheFirstLoadAFilterShowsNoEmptyState() {
         assertFalse(ToolWindowState(filter = NoteFilter.FREE).showEmptyState)
     }
+
+    private val sql = io.github.driflux.jnote.model.Tag(10, "sql")
+    private val todo = io.github.driflux.jnote.model.Tag(11, "todo")
+    private val tagged = row.copy(tags = listOf(sql, todo))
+    private val sqlOnly = codeRow.copy(tags = listOf(sql))
+
+    @Test
+    fun noChipOnMeansNoTagFiltering() {
+        val state = ToolWindowState(notes = listOf(tagged, sqlOnly, row.copy(note = row.note.copy(id = 3))))
+        assertEquals(3, state.visibleNotes.size)
+        assertFalse(state.tagFilterActive)
+    }
+
+    @Test
+    fun severalChipsNarrowDownAndRequireEveryTag() {
+        val state = ToolWindowState(notes = listOf(tagged, sqlOnly), selectedTagIds = setOf(10))
+        assertEquals(listOf(tagged, sqlOnly), state.visibleNotes)
+        assertEquals(listOf(tagged), state.toggleTag(11).visibleNotes)
+    }
+
+    @Test
+    fun tagFilterCombinesWithTheKindFilter() {
+        val state = ToolWindowState(notes = listOf(tagged, sqlOnly), filter = NoteFilter.CODE, selectedTagIds = setOf(10))
+        assertEquals(listOf(sqlOnly), state.visibleNotes)
+    }
+
+    @Test
+    fun toggleTagTurnsItOnThenOff() {
+        val on = ToolWindowState().toggleTag(10)
+        assertEquals(setOf(10L), on.selectedTagIds)
+        assertTrue(on.tagFilterActive)
+        assertEquals(emptySet<Long>(), on.toggleTag(10).selectedTagIds)
+    }
+
+    @Test
+    fun withTagsDropsChipsOfTagsThatNoLongerExist() {
+        val state = ToolWindowState(selectedTagIds = setOf(10, 11)).withTags(listOf(sql))
+        assertEquals(listOf(sql), state.tags)
+        assertEquals(setOf(10L), state.selectedTagIds)
+    }
+
+    @Test
+    fun aTagFilterThatMatchesNothingShowsTheEmptyState() {
+        assertTrue(ToolWindowState(notes = listOf(row), selectedTagIds = setOf(10)).showEmptyState)
+    }
 }
