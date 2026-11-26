@@ -37,7 +37,6 @@ internal class NotePositions {
     /** 쓰는 노트 하나. [marker]는 그 노트를 아직 같은 마커가 따라가는지 [confirm]이 알아보는 데 쓴다. */
     internal class Pending(val uid: String, val marker: RangeMarker, val target: Placement)
 
-    /** 저장이나 닫기 한 번에 [database]에 쓸 위치. */
     class WriteBack internal constructor(val database: Database, val relPath: String, internal val pending: List<Pending>) {
         val updates: List<AnchorUpdate> = pending.map { AnchorUpdate(it.uid, relPath, it.target.start, it.target.end, it.target.status) }
     }
@@ -110,7 +109,6 @@ internal class NotePositions {
 
     fun isTracking(document: Document): Boolean = synchronized(lock) { document in documents }
 
-    /** 노트 하나를 캐시 값과 맞춘다. 추적하지 않으면 null. */
     private fun TrackedDocument.reconcile(document: Document, uid: String, cache: Placement): Tracked? {
         val current = notes[uid]
         if (cache.status == NoteStatus.ORPHAN || cache.status == NoteStatus.NEEDS_RELOCATE) {

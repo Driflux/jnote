@@ -82,7 +82,6 @@ internal class GutterNoteService(private val project: Project) : Disposable {
         return cache.lookup(relPath, onChanged = { restart(file) }, onFailed = { failed(file, relPath, it) })
     }
 
-    /** [notes]를 열린 문서의 마커가 가리키는 현재 줄로 바꿔 돌려준다. 범위가 지워진 노트는 빠진다. */
     fun track(document: Document, relPath: String, notes: List<CachedNote>): List<CachedNote> {
         val database = synchronized(this) { seenDatabase?.database } ?: return notes
         return positions.sync(document, relPath, database, notes)

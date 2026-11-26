@@ -142,7 +142,6 @@ class NotePositionsTest : BasePlatformTestCase() {
         PsiDocumentManager.getInstance(project).commitDocument(document)
     }
 
-    /** 다른 쓰기가 DB를 바꾸고 알린 것처럼 하고, 캐시가 다시 읽을 때까지 기다린다. */
     private fun writeAndNotify(note: Note) {
         repo.update(note).get()
         notifyAndSettle()
