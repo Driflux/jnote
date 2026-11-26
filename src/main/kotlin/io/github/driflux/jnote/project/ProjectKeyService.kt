@@ -3,6 +3,7 @@ package io.github.driflux.jnote.project
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 
 /**
@@ -34,7 +35,14 @@ internal class CachedProjectKey(
 ) {
     private val value: ProjectKey by lazy {
         // 기본 프로젝트처럼 경로가 없으면 읽을 곳이 없으므로 이름으로 대체한다
-        if (basePath == null) ProjectKey(fallbackName, fallbackName) else resolver(Path.of(basePath))
+        val path = basePath?.let {
+            try {
+                Path.of(it)
+            } catch (e: InvalidPathException) {
+                null
+            }
+        }
+        if (path == null) ProjectKey(fallbackName, fallbackName) else resolver(path)
     }
 
     fun get(): ProjectKey = value

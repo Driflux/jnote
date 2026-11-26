@@ -41,6 +41,11 @@ class ProjectKeyServiceTest : BasePlatformTestCase() {
         assertEquals(ProjectKey("default", "default"), cache.get())
     }
 
+    fun testInvalidBasePathFallsBackToName() {
+        val cache = CachedProjectKey("/bad" + 0.toChar() + "path", "default") { error("must not resolve") }
+        assertEquals(ProjectKey("default", "default"), cache.get())
+    }
+
     fun testServiceFallsBackForTestProject() {
         val key = offEdt { project.service<ProjectKeyService>().resolve() }
         assertEquals(project.basePath, key.key)
