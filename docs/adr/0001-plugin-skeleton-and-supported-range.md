@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #1
-- PR: (to be filled)
+- PR: #24, #25
 
 ## Context
 JNote must never slow the IDE down (intent.md section 2) and supports IntelliJ IDEA 2024.2 (build 242) and later (intent.md section 3). Step 1 needs an empty plugin that builds, tests, and loads, so later issues add features on a settled base.
