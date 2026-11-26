@@ -124,14 +124,44 @@ class RelocatorTest {
         assertEquals(1, r.startLine)
     }
 
+    /** isCancelled를 몇 번 확인하는지 센다. 취소는 하지 않는다 */
+    private fun pollCount(run: (() -> Boolean) -> Unit): Int {
+        var polls = 0
+        run { polls++; false }
+        return polls
+    }
+
     @Test
     fun cancellationReturnsNonePromptly() {
         val doc = (0 until 5000).map { "val v$it = compute($it, ${it * 7}) // note" }
-        val snap = listOf("completely different snapshot line", "second different line")
-        var checks = 0
-        val result = locate(doc, snap, 1, RelocationOptions(isCancelled = { ++checks > 10 }))
+        val snap = doc.subList(4990, 4995).map { "$it;" }
+        assertTrue(locate(doc, snap, 1) is RelocationResult.Approx)
+        val exactPolls = pollCount { ExactMatcher.find(Normalizer.normalize(doc), Normalizer.normalize(snap), 1, it) }
+        val fullPolls = pollCount { locate(doc, snap, 1, RelocationOptions(isCancelled = it)) }
+        // 정확 일치 검색이 끝난 뒤, 유사도 검색이 아직 많이 남았을 때 취소한다
+        val cancelAt = exactPolls + 5
+        assertTrue("fullPolls=$fullPolls", fullPolls > cancelAt + 1000)
+        var polls = 0
+        val result = locate(doc, snap, 1, RelocationOptions(isCancelled = { ++polls >= cancelAt }))
         assertEquals(RelocationResult.None, result)
-        assertTrue("checks=$checks", checks < 100)
+        assertEquals(cancelAt, polls)
+    }
+
+    @Test
+    fun cancelledRunReturnsNoneEvenAfterFindingApproxCandidate() {
+        val edited = listOf(
+            "fun compute(total: Int): Int {",
+            "    val tripled = total * 3",
+            "    return tripled + 1",
+            "}",
+        )
+        val doc = edited + filler(3000)
+        assertTrue(locate(doc, snippet, 1) is RelocationResult.Approx)
+        // 마지막 확인에서야 취소한다. 맨 앞의 근사 후보는 그 전에 이미 찾았다
+        val lastPoll = pollCount { locate(doc, snippet, 1, RelocationOptions(isCancelled = it)) }
+        var polls = 0
+        val result = locate(doc, snippet, 1, RelocationOptions(isCancelled = { ++polls >= lastPoll }))
+        assertEquals(RelocationResult.None, result)
     }
 
     @Test
