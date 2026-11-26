@@ -3,10 +3,8 @@ package io.github.driflux.jnote.ui
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 
-/** AI 출처 구역에 보여줄 값. */
 data class AiSourceDetail(val source: String, val sourceUrl: String?, val prompt: String?)
 
-/** 상세 영역이 보여줄 값과 버튼 유무. 화면 부품에 기대지 않으므로 단위 테스트로 검증한다. */
 data class NoteDetail(
     val title: String,
     val className: String?,

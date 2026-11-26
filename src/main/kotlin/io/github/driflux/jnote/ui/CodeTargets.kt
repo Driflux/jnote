@@ -6,7 +6,6 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import java.nio.file.Path
 
-/** 노트의 상대 경로를 프로젝트 안의 실제 파일로 풀어 준다. */
 internal object CodeTargets {
     private val driveLetter = Regex("^[A-Za-z]:")
 
