@@ -21,7 +21,9 @@ This ADR covers both PRs of issue 7.
 - **Visibility.** The list query already returns FREE notes for any project key, so the note appears in every project.
 
 ### Filter (second PR)
-Described in the second PR once it lands.
+- **Pure model.** `NoteFilter` (ALL, CODE, FREE) decides which notes it accepts and carries the bundle keys for its label and empty-state title. `ToolWindowState` keeps all loaded rows plus the filter and derives `visibleNotes` and `showEmptyState`, so the rules are tested without Swing.
+- **Panel.** A combo box next to the "All projects" box. Changing it re-renders from the rows already loaded; it does not read the database again. The filter survives reloads and project toggles, defaults to All, and is not persisted across IDE restarts.
+- **Empty state.** When the filter hides everything, the list shows "No code notes" or "No free notes". The Free hint points to the New Note button; the others keep the add-note hint with the real shortcut. A filtered-out selected note clears the detail area.
 
 ## Alternatives considered
 - A button inside the panel header: puts more code in `JNotePanel`, which several issues touch. A title action needs no panel change. Rejected.
@@ -36,4 +38,4 @@ Described in the second PR once it lands.
   - The toolbar button is icon only, with the text as tooltip, because title actions render as icons.
   - The dialog and the notification are not verified in a running IDE.
 - Follow-up work
-  - Filter combo (second PR of this issue). The gutter and tag filter issues reuse the same panel.
+  - The tag filter (#10) and search (#11) can extend `ToolWindowState` the same way.

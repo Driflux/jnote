@@ -254,4 +254,75 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         awaitUntil("load finished") { panel.state.notes != null }
         assertFalse(panel.spinner.visible)
     }
+
+    private fun select(panel: JNotePanel, filter: NoteFilter) {
+        panel.filterCombo.selectedItem = filter
+    }
+
+    fun testFilterComboOffersAllCodeFreeAndDefaultsToAll() {
+        val panel = newPanel()
+        assertEquals(listOf(NoteFilter.ALL, NoteFilter.CODE, NoteFilter.FREE), (0 until panel.filterCombo.itemCount).map { panel.filterCombo.getItemAt(it) })
+        assertEquals(NoteFilter.ALL, panel.filterCombo.selectedItem)
+    }
+
+    fun testFilterShowsOnlyThatKindAndSwitchingBackRestoresAll() {
+        val key = projectKey()
+        repo.create(NewNote.code(key, "src/A.kt", 1, 2, "code")).get()
+        repo.create(NewNote.free("free")).get()
+        val panel = newPanel()
+        awaitUntil("both listed") { titles(panel).size == 2 }
+
+        select(panel, NoteFilter.CODE)
+        assertEquals(listOf("code"), titles(panel))
+        select(panel, NoteFilter.FREE)
+        assertEquals(listOf("free"), titles(panel))
+        select(panel, NoteFilter.ALL)
+        assertEquals(2, titles(panel).size)
+    }
+
+    fun testFilterSurvivesAReload() {
+        val key = projectKey()
+        repo.create(NewNote.code(key, "src/A.kt", 1, 2, "code")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel) == listOf("code") }
+        select(panel, NoteFilter.FREE)
+        repo.create(NewNote.free("free")).get()
+
+        panel.reload()
+
+        awaitUntil("reloaded with filter") { titles(panel) == listOf("free") }
+    }
+
+    fun testFilteringOutTheSelectedNoteClearsTheDetail() {
+        repo.create(NewNote.free("free")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel) == listOf("free") }
+        panel.list.selectedIndex = 0
+        assertTrue(panel.detail.isVisible)
+
+        select(panel, NoteFilter.CODE)
+
+        assertFalse(panel.detail.isVisible)
+    }
+
+    fun testEmptyTextNamesTheFilteredKind() {
+        repo.create(NewNote.free("free")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel) == listOf("free") }
+        assertEquals("", panel.list.emptyText.text)
+
+        select(panel, NoteFilter.CODE)
+        assertEquals(JNoteBundle.message("toolWindow.empty.code.title"), emptyTextLines(panel).first())
+
+        repo.delete(repo.list(null, true).get().single().id).get()
+        panel.reload()
+        awaitUntil("emptied") { panel.state.notes?.isEmpty() == true }
+        select(panel, NoteFilter.FREE)
+        assertEquals(
+            listOf(JNoteBundle.message("toolWindow.empty.free.title"), JNoteBundle.message("toolWindow.empty.free.hint")),
+            emptyTextLines(panel),
+        )
+        select(panel, NoteFilter.ALL)
+        assertEquals(JNoteBundle.message("toolWindow.empty.title"), emptyTextLines(panel).first())
+    }
 }
