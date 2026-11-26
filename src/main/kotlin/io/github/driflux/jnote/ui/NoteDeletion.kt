@@ -2,10 +2,12 @@ package io.github.driflux.jnote.ui
 
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.db.Database
+import io.github.driflux.jnote.db.DatabaseClosedException
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.model.Note
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
 import java.util.concurrent.RejectedExecutionException
 
 /** 지운 노트와 그때 붙어 있던 태그 id. 되돌리기에 필요한 전부다. */
@@ -25,10 +27,20 @@ class NoteDeletion(private val database: Database) {
     /**
      * 지운 DB에 되살린다. 그 사이 DB 경로가 바뀌어 그 DB가 닫혔다면 다른 DB에 되살리지 않고 오류로 끝낸다.
      */
-    fun undo(deleted: DeletedNote): CompletableFuture<Note> = try {
-        notes.restore(deleted.note, deleted.tagIds)
-    } catch (e: RejectedExecutionException) {
-        CompletableFuture.failedFuture(IllegalStateException(JNoteBundle.message("toolWindow.error.restore.databaseSwitched"), e))
+    fun undo(deleted: DeletedNote): CompletableFuture<Note> {
+        val restored = try {
+            notes.restore(deleted.note, deleted.tagIds)
+        } catch (e: RejectedExecutionException) {
+            CompletableFuture.failedFuture(e)
+        }
+        return restored.exceptionallyCompose { error ->
+            val cause = if (error is CompletionException) error.cause ?: error else error
+            if (cause is DatabaseClosedException || cause is RejectedExecutionException) {
+                CompletableFuture.failedFuture(IllegalStateException(JNoteBundle.message("toolWindow.error.restore.databaseSwitched"), cause))
+            } else {
+                CompletableFuture.failedFuture(cause)
+            }
+        }
     }
 
     companion object {
