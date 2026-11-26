@@ -1,0 +1,10 @@
+<idea-plugin>
+    <id>io.github.driflux.jnote</id>
+    <name>JNote</name>
+    <vendor>Driflux</vendor>
+    <description><![CDATA[
+        A lightweight personal code-note plugin. Attach notes to code, search them, and keep them local.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+</idea-plugin>

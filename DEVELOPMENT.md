@@ -1,9 +1,8 @@
 # DEVELOPMENT.md
 
-> Once the project skeleton (step 1) exists, verify the commands below against the real state and update this file.
-
 ## Tech stack
-- Kotlin, Gradle (IntelliJ Platform Gradle Plugin 2.x)
+- Kotlin, Gradle (IntelliJ Platform Gradle Plugin 2.x), JDK 21 for Gradle and the toolchain
+- Builds against `intellijIdeaCommunity("2024.2")`; the first build downloads that IDE
 - Target: IntelliJ IDEA 2024.2 (`sinceBuild = 242`) and later, `untilBuild` unset
 - DB: SQLite (depends only on `sqlite-jdbc`)
 - Uses only common platform APIs (no Java plugin dependency).
@@ -12,13 +11,14 @@
 ```bash
 ./gradlew runIde          # run the plugin in a sandbox IDE
 ./gradlew test            # unit / integration tests
-./gradlew verifyPlugin    # compatibility check with Plugin Verifier
+./gradlew verifyPluginProjectConfiguration  # validate the plugin project configuration
+./gradlew verifyPlugin    # compatibility check with Plugin Verifier (needs pluginVerification IDEs, not configured yet)
 ./gradlew buildPlugin     # build the distribution zip (build/distributions)
 ```
 
 ## Package layout (planned)
 ```
-src/main/kotlin/.../jnote
+src/main/kotlin/io/github/driflux/jnote
   db/          SQLite access, schema, migrations (single-thread executor)
   model/       Note, Tag, NoteStatus
   relocate/    relocation (exact match, similarity, file path recovery)
