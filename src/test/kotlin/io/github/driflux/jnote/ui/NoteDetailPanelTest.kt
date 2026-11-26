@@ -16,6 +16,8 @@ import com.intellij.testFramework.TestActionEvent
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
 import io.github.driflux.jnote.NotesChangedListener
+import io.github.driflux.jnote.action.NoteSaver
+import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
@@ -390,5 +392,101 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         panel.delete(note).get()
 
         awaitUntil("list emptied") { panel.list.model.size == 0 }
+    }
+
+    private fun panelWith(saver: NoteSaver, askEdit: (Project, Note) -> NoteDraft?): JNotePanel =
+        JNotePanel(project, AppDelayScheduler, saver, askEdit).also {
+            panels += it
+            Disposer.register(testRootDisposable, it)
+        }
+
+    // 람다는 JUnit3 러너가 테스트로 오인하지 않도록 도우미 함수에서 만든다
+    private fun answering(draft: NoteDraft?, seen: MutableList<Note>): (Project, Note) -> NoteDraft? = { _, note ->
+        seen += note
+        draft
+    }
+
+    private fun countNotifications(): java.util.concurrent.atomic.AtomicInteger {
+        val events = java.util.concurrent.atomic.AtomicInteger()
+        ApplicationManager.getApplication().messageBus.connect(testRootDisposable)
+            .subscribe(NotesChanged.TOPIC, NotesChangedListener { events.incrementAndGet() })
+        return events
+    }
+
+    fun testEditButtonIsShownForCodeAndFreeNotes() {
+        val key = projectKey()
+        repo.create(NewNote.code(key, "src/A.kt", 1, 1, "code")).get()
+        repo.create(NewNote.free("free")).get()
+        val panel = newPanel(2)
+        (0 until 2).forEach {
+            panel.list.selectedIndex = it
+            assertTrue(panel.detail.editButton.isVisible)
+        }
+    }
+
+    fun testEditSavesTheDialogValuesKeepsAnchorAndTagsAndPublishesOnce() {
+        val key = projectKey()
+        val tags = TagRepository(dbService.database)
+        val tag = tags.getOrCreate("keep").get()
+        val note = repo.create(NewNote.code(key, "src/Foo.kt", 2, 3, "Old", body = "old", className = "Foo", snapshot = "snap")).get()
+        tags.attach(note.id, tag.id).get()
+        val seen = mutableListOf<Note>()
+        val panel = panelWith(NoteSaver(), answering(NoteDraft("New title", "new body", "Claude", "http://x", "why"), seen))
+        awaitUntil("list loaded") { panel.list.model.size == 1 }
+        panel.list.selectedIndex = 0
+        val events = countNotifications()
+
+        panel.detail.editButton.doClick()
+
+        awaitUntil("list shows the edit") { panel.list.model.size == 1 && panel.list.model.getElementAt(0).title == "New title" }
+        assertEquals(listOf(note), seen)
+        val updated = repo.get(note.id).get()!!
+        assertEquals(note.copy(title = "New title", body = "new body", aiSource = "Claude", sourceUrl = "http://x", prompt = "why", updatedAt = updated.updatedAt), updated)
+        assertTrue(updated.updatedAt >= note.updatedAt)
+        assertEquals(listOf(tag), tags.tagsOf(note.id).get())
+        assertEquals(1, events.get())
+        assertEquals("new body", panel.detail.bodyArea.text)
+    }
+
+    fun testEditOfAFreeNoteKeepsItGlobal() {
+        val note = repo.create(NewNote.free("q", "select 1")).get()
+        val panel = panelWith(NoteSaver(), answering(NoteDraft("q2", "select 2"), mutableListOf()))
+        awaitUntil("list loaded") { panel.list.model.size == 1 }
+
+        val saved = panel.edit(note)
+        awaitUntil("edit saved") { saved.isDone }
+
+        val updated = repo.get(note.id).get()!!
+        assertEquals(note.copy(title = "q2", body = "select 2", updatedAt = updated.updatedAt), updated)
+        assertNull(updated.project)
+    }
+
+    fun testCancelledEditChangesNothingAndPublishesNothing() {
+        val note = repo.create(NewNote.free("q")).get()
+        val seen = mutableListOf<Note>()
+        val panel = panelWith(NoteSaver(), answering(null, seen))
+        awaitUntil("list loaded") { panel.list.model.size == 1 }
+        val events = countNotifications()
+
+        val cancelled = panel.edit(note)
+        awaitUntil("cancelled edit finished") { cancelled.isDone }
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertEquals(1, seen.size)
+        assertEquals(note, repo.get(note.id).get())
+        assertEquals(0, events.get())
+    }
+
+    fun testEditFailureShowsAnErrorNotificationWithTheReason() {
+        captureNotifications()
+        val note = repo.create(NewNote.free("q")).get()
+        val failing = NoteSaver(repository = { error("disk full") })
+        val panel = panelWith(failing, answering(NoteDraft("x"), mutableListOf()))
+        awaitUntil("list loaded") { panel.list.model.size == 1 }
+
+        panel.edit(note)
+
+        awaitUntil("error notification") { shownNotifications().any { it.content.contains("disk full") } }
+        assertEquals(note, repo.get(note.id).get())
     }
 }

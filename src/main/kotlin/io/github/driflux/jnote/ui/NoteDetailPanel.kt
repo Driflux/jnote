@@ -19,7 +19,11 @@ import javax.swing.JComponent
 import javax.swing.JPanel
 
 /** 선택한 노트의 상세. 무엇을 보일지는 [NoteDetails]가 정하고 여기서는 값을 부품에 옮기기만 한다. */
-internal class NoteDetailPanel(private val onGoToCode: (Note) -> Unit, private val onDelete: (Note) -> Unit) : JBPanel<NoteDetailPanel>(BorderLayout()) {
+internal class NoteDetailPanel(
+    private val onGoToCode: (Note) -> Unit,
+    private val onDelete: (Note) -> Unit,
+    private val onEdit: (Note) -> Unit,
+) : JBPanel<NoteDetailPanel>(BorderLayout()) {
     private var note: Note? = null
 
     internal val titleLabel = JBLabel().apply { font = JBFont.label().asBold() }
@@ -33,11 +37,15 @@ internal class NoteDetailPanel(private val onGoToCode: (Note) -> Unit, private v
     internal val goToCodeButton = JButton(JNoteBundle.message("toolWindow.detail.goToCode")).apply {
         addActionListener { note?.let(onGoToCode) }
     }
+    internal val editButton = JButton(JNoteBundle.message("toolWindow.detail.edit")).apply {
+        addActionListener { note?.let(onEdit) }
+    }
     internal val deleteButton = JButton(JNoteBundle.message("toolWindow.detail.delete")).apply {
         addActionListener { note?.let(onDelete) }
     }
     internal val buttons = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
         add(goToCodeButton)
+        add(editButton)
         add(deleteButton)
     }
 

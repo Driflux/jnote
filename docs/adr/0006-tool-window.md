@@ -36,5 +36,11 @@ Users need to see saved notes, inspect one, jump to its code, and delete it (int
   - Undo re-attaches only tags that still exist.
   - Each open panel reloads the whole list on every `NotesChanged` event; fine for a personal note count.
 - Follow-up work
-  - Edit (needs the dialog from #5), as a later PR of this issue.
+  - Edit: see the Edit section below.
   - SVG icons (#8), tag filter and chips (#10), search (#11), relocation for missing files (#13, #14).
+
+## Edit (additive)
+- **Button and dialog.** The detail area has an Edit button for every note. It opens the add-note dialog from #5 in edit mode, prefilled with the title, note text, and the three AI source fields (the AI source group is expanded when any of them has a value). The anchor is shown read-only and never changes; a FREE note shows no anchor. There is no second dialog.
+- **Save.** `NoteDraft.applyTo(note)` overwrites only title, note text, and the AI source fields, and `NoteSaver.update` calls `NoteRepository.update` off the EDT, then publishes `NotesChanged` once on the UI thread. Tags are not touched, and `updatedAt` is set by the repository. A note deleted in the meantime ends the update with null; the list is still refreshed.
+- **Failure.** A failed save (including a closed database after a path switch) is reported through the notifier with the escaped reason; the note stays as it was. Cancelling the dialog does nothing and publishes nothing.
+- **Known limit.** The update writes the whole row from the note the list last loaded, so a change made to the anchor or status after that load (for example by relocation, a later issue) would be overwritten by an edit made from a stale selection. Relocation issues should switch to a text-only repository method if this matters.
