@@ -85,7 +85,7 @@ internal class OpenValidationService(private val project: Project) : Disposable 
         return FileRelocation.relocate(
             notes,
             lines,
-            similarity = lines.size <= SIMILARITY_MAX_LINES,
+            similarity = similarityAllowed(lines),
             isCancelled = { disposed || project.isDisposed || document.modificationStamp != stamp },
         )
     }
@@ -110,8 +110,17 @@ internal class OpenValidationService(private val project: Project) : Disposable 
     }
 
     internal companion object {
-        /** 이 줄 수 이하의 파일만 유사도까지 찾는다. 넘으면 정확 일치만 찾고 못 찾으면 NEEDS_RELOCATE다(intent.md 6절). */
+        /** 이 줄 수 이하의 파일만 유사도까지 찾는다. 넘으면 정확 일치만 찾는다(intent.md 6절). 못 찾은 노트의 상태는 FileRelocation이 정한다. */
         private const val SIMILARITY_MAX_LINES = 5_000
+
+        /**
+         * 유사도까지 찾을 크기인지. 마지막 줄바꿈 뒤의 빈 조각은 줄로 세지 않으므로,
+         * 줄바꿈으로 끝나는 5,000줄 파일도 5,000줄이다.
+         */
+        internal fun similarityAllowed(lines: List<String>): Boolean {
+            val count = if (lines.lastOrNull()?.isEmpty() == true) lines.size - 1 else lines.size
+            return count <= SIMILARITY_MAX_LINES
+        }
 
         /** 이 문서가 이번에 열린 동안 이미 검증했다는 에디터 표시. */
         internal val VALIDATED = Key.create<Boolean>("jnote.openValidated")

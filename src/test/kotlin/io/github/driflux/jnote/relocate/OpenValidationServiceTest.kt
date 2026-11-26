@@ -42,6 +42,7 @@ class OpenValidationServiceTest : BasePlatformTestCase() {
 
     private val alpha = listOf("fun alpha() {", "    return total + 1", "}")
     private val beta = listOf("fun beta() {", "    return count * 3", "}")
+    private val changedAlpha = listOf("fun alpha() {", "    return total + 2", "}")
 
     override fun setUp() {
         super.setUp()
@@ -194,6 +195,25 @@ class OpenValidationServiceTest : BasePlatformTestCase() {
 
         assertAnchor(moved, NoteStatus.OK, 103, 105)
         assertAnchor(changed, NoteStatus.NEEDS_RELOCATE, 3000, 3002)
+    }
+
+    fun testAFiveThousandLineFileEndingWithALineBreakStillUsesSimilarity() {
+        val saved = note("ValidateBoundary.txt", 3, 5, alpha)
+        openFile("ValidateBoundary.txt", fillers(1, 4) + changedAlpha + fillers(5, 4_993) + "")
+        assertEquals(5_001, myFixture.editor.document.lineCount)
+
+        highlightAfterOpening()
+
+        assertAnchor(saved, NoteStatus.APPROX, 5, 7)
+    }
+
+    fun testAFileOfFiveThousandAndOneLinesSkipsSimilarity() {
+        val saved = note("ValidateOverBoundary.txt", 3, 5, alpha)
+        openFile("ValidateOverBoundary.txt", fillers(1, 4) + changedAlpha + fillers(5, 4_994) + "")
+
+        highlightAfterOpening()
+
+        assertAnchor(saved, NoteStatus.NEEDS_RELOCATE, 3, 5)
     }
 
     fun testANoteIsValidatedOncePerOpenAndAgainAfterAllItsEditorsCloseAndReopen() {
