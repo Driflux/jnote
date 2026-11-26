@@ -19,4 +19,12 @@
                            bundle="messages.JNoteBundle"
                            key="notification.group.name"/>
     </extensions>
+
+    <actions>
+        <action id="JNote.AddNote" class="io.github.driflux.jnote.action.AddNoteAction">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt N"/>
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="ctrl alt N"/>
+        </action>
+    </actions>
 </idea-plugin>

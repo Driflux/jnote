@@ -24,9 +24,24 @@ This ADR covers both PRs of issue 5. The first PR adds anchor collection. The se
 - **Dumb mode.** The walk only reads the syntax tree and `getName()`; it needs no index, so it works while the IDE is indexing. If a language's name lookup does need an index and throws `IndexNotReadyException`, the resolver returns null and the note is saved without a class name instead of blocking or failing. The action does not wait for smart mode.
 
 ### Action, dialog, save (second PR)
-To be added with that PR.
+- **Action `JNote.AddNote`.** Registered in `plugin.xml` (dynamic, no startup work) and added to `EditorPopupMenu`. The default shortcut is `ctrl alt N` in the default keymap and in the macOS keymap (Ctrl+Option+N); both stay editable in Keymap. Its text comes from the bundle. `update` runs on the background thread (`ActionUpdateThread.BGT`) and only compares the file path with the project base path, so the action is hidden unless the editor's file is inside the project. The action is `DumbAware`.
+- **Flow.**
+  1. EDT: `CodeAnchors.fromEditor` reads the document into an `AnchorDraft`.
+  2. `ReadAction.nonBlocking` resolves the class name (cancelled and restarted if a write happens, and dropped when the project closes).
+  3. UI thread: the dialog opens. Cancel ends the flow.
+  4. Background: `NoteSaver` resolves the project key (`ProjectKeyService.resolve()`, file reads) and calls `NoteRepository.create(NewNote.code(...))`, which runs through `Database.submit`.
+  5. UI thread: `NotesChanged` is published once, then an information notification from the existing `JNote` group is shown.
+  A failure at any step shows an error notification with the reason and a next step. Nothing is swallowed. Cancellation (project closing) is the only silent end.
+- **Dialog.** A `DialogWrapper` built with the Kotlin UI DSL: a read-only summary of the anchor (file, class, lines), a required title (validated when OK is pressed), a multi-line plain-text note, and an "AI source" collapsible group, collapsed by default, with an editable combo (presets Claude, ChatGPT, Gemini; any text is accepted), a link, and a prompt. There are no tags (issue 10).
+- **`NoteDraft`.** The dialog result is a plain `NoteDraft`. `toNewNote` trims text, turns blank AI fields into null, and rejects a blank title. This keeps the mapping testable without a UI.
+- **Publishing on the UI thread.** The save finishes on the DB thread. A subscriber that waits for the DB from that thread would deadlock, so the topic is published after hopping to the UI thread.
+- **Shared topic.** `NotesChanged.TOPIC` is an application-level topic. The Tool Window (issue 6) subscribes and re-reads its list.
+
+### Testing note
+The dialog layout cannot be fully unit tested. Tests cover `NoteDraft`, the dialog's collapsed default, preset list, and value reading, and the whole action flow with the dialog replaced by a stub. The real dialog was not opened in a running IDE as part of this change.
 
 ## Alternatives considered
+- Publish `NotesChanged` from the DB thread: simpler, but risks a deadlock with subscribers that wait for the DB. Rejected.
 - Use `PsiClass` from the Java plugin: gives exact class names for Java and Kotlin, but needs a plugin dependency and does not exist in other IDEs. Rejected (ADR 0001, platform-only).
 - Run name resolution on the EDT: PSI can be slow on a file that is not parsed yet. Rejected; only the document is read on the EDT.
 - Wait for smart mode before saving: would block the action during indexing for a value that is optional. Rejected.
@@ -42,5 +57,6 @@ To be added with that PR.
   - A language whose PSI has no `PsiNameIdentifierOwner` (plain text, for example) always gets no class name.
   - A selection over the snapshot cap loses the end of the snapshot; the line range is still exact.
   - A project opened on a folder different from where its files live (files outside `basePath`) cannot get notes.
+  - `ctrl alt N` is also bound to Inline in the default keymap of IDEs with the Java plugin. The conflict is visible and resolvable in Keymap; the shortcut is the one fixed in intent.md section 7.
 - Follow-up work
   - A language-specific resolver that skips variables, if the common result proves too noisy.
