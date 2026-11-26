@@ -18,6 +18,7 @@ dependencies {
         intellijIdeaCommunity(providers.gradleProperty("platformVersion"))
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
     }
+    implementation("org.xerial:sqlite-jdbc:3.54.1.0")
     testImplementation("junit:junit:4.13.2")
 }
 
