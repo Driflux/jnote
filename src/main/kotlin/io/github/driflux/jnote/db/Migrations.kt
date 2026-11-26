@@ -46,9 +46,9 @@ object Migrations {
         SELECT n.uid, n.kind, n.project, n.rel_path, n.class_name, n.start_line, n.end_line,
                n.snapshot, n.status, n.title, n.body, n.ai_source, n.source_url, n.prompt,
                n.created_at, n.updated_at,
-               (SELECT group_concat(name, ',')
-                  FROM (SELECT t.name AS name FROM note_tag nt JOIN tag t ON t.id = nt.tag_id
-                         WHERE nt.note_id = n.id ORDER BY t.name)) AS tags
+               (SELECT group_concat(t.name, ',' ORDER BY t.name)
+                  FROM note_tag nt JOIN tag t ON t.id = nt.tag_id
+                 WHERE nt.note_id = n.id) AS tags
           FROM note n
         """.trimIndent(),
     )
