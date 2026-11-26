@@ -79,7 +79,12 @@ class NoteDetailsTest {
         assertFalse(CodeTargets.isSafeRelPath("../x.kt"))
         assertFalse(CodeTargets.isSafeRelPath("src/../../x.kt"))
         assertFalse(CodeTargets.isSafeRelPath("src\\..\\x.kt"))
-        assertFalse(CodeTargets.isSafeRelPath("C:/x.kt"))
+        assertFalse(CodeTargets.isSafeRelPath("C:/x.kt", windows = true))
+        assertFalse(CodeTargets.isSafeRelPath("c:\\x.kt", windows = true))
+        assertFalse(CodeTargets.isSafeRelPath("a:b/x.kt", windows = true))
+        // POSIX에서는 콜론이 든 평범한 파일 이름이다
+        assertTrue(CodeTargets.isSafeRelPath("a:b/x.kt", windows = false))
+        assertTrue(CodeTargets.isSafeRelPath("1:b/x.kt", windows = true))
         assertFalse(CodeTargets.isSafeRelPath("\\\\host\\share"))
     }
 }

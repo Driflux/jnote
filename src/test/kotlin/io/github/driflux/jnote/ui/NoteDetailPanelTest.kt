@@ -1,17 +1,21 @@
 package io.github.driflux.jnote.ui
 
 import com.intellij.notification.Notification
+import com.intellij.notification.NotificationType
 import com.intellij.notification.Notifications
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.vfs.newvfs.impl.VfsRootAccess
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.model.NewNote
+import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.nio.file.Files
 import java.nio.file.Path
@@ -90,7 +94,11 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
 
     fun testGoToCodeOpensTheFileAtTheStartLine() {
         val key = projectKey()
-        myFixture.addFileToProject("src/Foo.kt", "line1\nline2\nline3\nline4\n")
+        // 노트 경로는 basePath 기준이므로 라이트 픽스처의 temp:// 파일이 아니라 basePath 아래 실제 파일을 쓴다
+        val real = Path.of(project.basePath!!, "src", "Foo.kt")
+        Files.createDirectories(real.parent)
+        Files.writeString(real, "line1\nline2\nline3\nline4\n")
+        Disposer.register(testRootDisposable) { real.toFile().delete() }
         val note = repo.create(NewNote.code(key, "src/Foo.kt", 3, 4, "n")).get()
 
         val opened = PlatformTestUtil.waitForFuture(CodeNavigator.goTo(project, note), 10_000)
@@ -123,8 +131,121 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
 
     fun testGoToCodeRejectsPathsOutsideTheProject() {
         val key = projectKey()
-        val note = repo.create(NewNote.code(key, "../outside.kt", 1, 1, "n")).get()
-        assertFalse(PlatformTestUtil.waitForFuture(CodeNavigator.goTo(project, note), 10_000))
+        val outside = Path.of(project.basePath!!).resolve("../jnote-outside-test.kt").normalize()
+        Files.writeString(outside, "class Outside")
+        try {
+            val note = repo.create(NewNote.code(key, "../jnote-outside-test.kt", 1, 1, "n")).get()
+            assertTrue("the file must really exist", Files.exists(outside))
+
+            val opened = PlatformTestUtil.waitForFuture(CodeNavigator.goTo(project, note), 10_000)
+
+            assertFalse(opened)
+            assertNull(FileEditorManager.getInstance(project).selectedTextEditor)
+        } finally {
+            Files.deleteIfExists(outside)
+        }
+    }
+
+    fun testFindResolvesAgainstTheGivenBaseNotTheGuessedProjectDir() {
+        val otherBase = Files.createTempDirectory("jnote-base").toRealPath()
+        VfsRootAccess.allowRootAccess(testRootDisposable, otherBase.toString())
+        try {
+            Files.createDirectories(otherBase.resolve("src"))
+            Files.writeString(otherBase.resolve("src/X.kt"), "class X")
+            val found = CodeTargets.findUnder(otherBase.toString(), "src/X.kt")!!
+            assertEquals(otherBase.resolve("src/X.kt").toString(), found.path)
+            assertNull(CodeTargets.findUnder(project.basePath!!, "src/X.kt"))
+            // VFS가 아직 모르는 파일도 같은 기준으로 새로 확인한다
+            Files.writeString(otherBase.resolve("src/Late.kt"), "class Late")
+            assertNotNull(CodeTargets.findUnder(otherBase.toString(), "src/Late.kt"))
+        } finally {
+            otherBase.toFile().deleteRecursively()
+        }
+    }
+
+    fun testFindIgnoresDirectoriesAndUnsafePaths() {
+        val base = Files.createTempDirectory("jnote-base").toRealPath()
+        VfsRootAccess.allowRootAccess(testRootDisposable, base.toString())
+        try {
+            Files.createDirectories(base.resolve("src"))
+            assertNull(CodeTargets.findUnder(base.toString(), "src"))
+            assertNull(CodeTargets.findUnder(base.toString(), "../x.kt"))
+        } finally {
+            base.toFile().deleteRecursively()
+        }
+    }
+
+    private fun collectNotifications(): MutableList<Notification> {
+        val shown = mutableListOf<Notification>()
+        project.messageBus.connect(testRootDisposable).subscribe(
+            Notifications.TOPIC,
+            object : Notifications {
+                override fun notify(notification: Notification) {
+                    shown += notification
+                }
+            },
+        )
+        return shown
+    }
+
+    fun testLookupFailureIsReportedNotSwallowed() {
+        val shown = collectNotifications()
+        val note = repo.create(NewNote.code(projectKey(), "src/Foo.kt", 1, 1, "n")).get()
+
+        val done = CodeNavigator.goTo(project, note) { _, _ -> error("vfs <broke>") }
+        PlatformTestUtil.waitWithEventsDispatching("future did not complete", { done.isDone }, 10)
+
+        assertTrue(done.isCompletedExceptionally)
+        val notification = shown.single()
+        assertEquals(NotificationType.ERROR, notification.type)
+        assertTrue(notification.content, notification.content.contains("vfs &lt;broke&gt;"))
+    }
+
+    fun testCodeNoteWithoutPathNotifiesAndFreeNoteDoesNot() {
+        val shown = collectNotifications()
+        assertFalse(CodeNavigator.open(project, NoteKind.FREE, null, null).get())
+        assertTrue(shown.isEmpty())
+
+        assertFalse(CodeNavigator.open(project, NoteKind.CODE, null, 1).get())
+        assertEquals(NotificationType.WARNING, shown.single().type)
+    }
+
+    // 닫힌 프로젝트는 건드리면 안 되므로 호출된 메서드를 기록하는 프록시를 쓴다
+    private fun closedProject(touched: MutableList<String>, flag: java.util.concurrent.atomic.AtomicBoolean) =
+        java.lang.reflect.Proxy.newProxyInstance(Project::class.java.classLoader, arrayOf(Project::class.java)) { _, method, _ ->
+            when (method.name) {
+                "isDisposed" -> flag.get()
+                "toString" -> "ClosedProject"
+                "hashCode" -> 1
+                "equals" -> false
+                else -> {
+                    touched += method.name
+                    null
+                }
+            }
+        } as Project
+
+    fun testGoToOnClosedProjectCompletesInsteadOfStayingPending() {
+        val touched = mutableListOf<String>()
+        val flag = java.util.concurrent.atomic.AtomicBoolean(true)
+        val done = CodeNavigator.open(closedProject(touched, flag = flag), NoteKind.CODE, "src/A.kt", 1)
+        assertTrue(done.isDone)
+        assertFalse(done.get())
+        assertTrue(touched.toString(), touched.isEmpty())
+    }
+
+    fun testProjectClosingDuringLookupStillCompletesTheFuture() {
+        val touched = mutableListOf<String>()
+        val flag = java.util.concurrent.atomic.AtomicBoolean(false)
+        val closing = closedProject(touched, flag = flag)
+
+        val done = CodeNavigator.open(closing, NoteKind.CODE, "src/A.kt", 1) { _, _ ->
+            flag.set(true)
+            null
+        }
+
+        assertFalse(PlatformTestUtil.waitForFuture(done, 10_000))
+        assertTrue(touched.toString(), touched.isEmpty())
     }
 
     fun testFreeNoteHasNoTarget() {
