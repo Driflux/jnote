@@ -2,6 +2,7 @@ package io.github.driflux.jnote.settings
 
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.diagnostic.thisLogger
 import io.github.driflux.jnote.JNoteBundle
 import java.nio.file.FileAlreadyExistsException
 
@@ -23,6 +24,11 @@ object DbPathNotifier {
         when (cause) {
             // 새 위치의 파일은 덮어쓰지 않으므로, 쓰기 권한이 아니라 그 파일이 원인이라고 알려 준다
             is FileAlreadyExistsException -> JNoteBundle.message("notification.dbPath.targetExists.content", cause.file)
+            is DbPathSwitcher.UnusableTarget -> {
+                // SQLite가 준 자세한 이유는 사용자가 고칠 수 있는 정보가 아니라 로그에만 남긴다
+                thisLogger().warn("Cannot open ${cause.target} as a JNote database", cause.cause)
+                JNoteBundle.message("notification.dbPath.unusableTarget.content", cause.target)
+            }
             else -> JNoteBundle.message("notification.dbPath.failed.content", cause.message ?: cause.javaClass.simpleName)
         },
     )

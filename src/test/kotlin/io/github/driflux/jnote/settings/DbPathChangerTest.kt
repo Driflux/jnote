@@ -8,6 +8,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.driflux.jnote.JNoteBundle
+import io.github.driflux.jnote.db.Database
 import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
 import java.nio.file.Files
@@ -129,8 +130,9 @@ class DbPathChangerTest : BasePlatformTestCase() {
         assertEquals(current.toString(), DbPathSettings.getInstance().state.dbPath)
     }
 
-    fun testApprovingConfirmationSwitchesToExistingFile() {
-        val other = dir.resolve("other.db").also { Files.writeString(it, "x") }
+    fun testApprovingConfirmationSwitchesToExistingDatabase() {
+        val other = dir.resolve("other.db")
+        Database(other).use { db -> db.submitAndWait { c -> c.createStatement().use { s -> s.execute("create table other(x)") } } }
         DbPathChanger.request(other) { true }
         PlatformTestUtil.waitWithEventsDispatching(
             "DB path was not switched",
@@ -138,6 +140,18 @@ class DbPathChangerTest : BasePlatformTestCase() {
             20,
         )
         assertEquals(other, DatabaseService.getInstance().currentPath())
-        assertEquals("x", Files.readString(other))
+        assertTrue(notifications.isEmpty())
+    }
+
+    fun testExistingFileThatIsNotADatabaseIsRefusedAndNothingChanges() {
+        val other = dir.resolve("other.db").also { Files.writeString(it, "not a database") }
+        DbPathChanger.request(other) { true }
+        val n = notifications.single()
+        assertEquals(NotificationType.ERROR, n.type)
+        assertEquals(JNoteBundle.message("notification.dbPath.failed.title"), n.title)
+        assertEquals(JNoteBundle.message("notification.dbPath.unusableTarget.content", other), n.content)
+        assertEquals(current, DatabaseService.getInstance().currentPath())
+        assertEquals(current.toString(), DbPathSettings.getInstance().state.dbPath)
+        assertEquals("not a database", Files.readString(other))
     }
 }
