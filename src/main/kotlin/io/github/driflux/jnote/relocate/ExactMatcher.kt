@@ -2,12 +2,8 @@ package io.github.driflux.jnote.relocate
 
 import kotlin.math.abs
 
-/** 정규화된 스냅샷과 완전히 같은 연속 구간을 찾는다. */
 internal object ExactMatcher {
-    /**
-     * 일치가 여럿이면 원래 시작 줄에 가장 가까운 것, 거리가 같으면 앞쪽 줄을 고른다.
-     * 취소되면 null을 돌려준다.
-     */
+    /** 취소되면 null을 돌려준다. */
     fun find(
         document: NormalizedLines,
         snapshot: NormalizedLines,
