@@ -1,0 +1,140 @@
+package io.github.driflux.jnote.db
+
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.nio.file.Files
+import java.sql.Connection
+import java.sql.SQLException
+
+class MigrationsTest {
+    @get:Rule
+    val tmp = TemporaryFolder()
+
+    private val opened = mutableListOf<Database>()
+    private val dbPath get() = tmp.root.toPath().resolve("jnote.db")
+    private val bakPath get() = tmp.root.toPath().resolve("jnote.db.bak")
+
+    private fun newDatabase(): Database = Database(dbPath).also { opened += it }
+
+    @After
+    fun closeAll() = opened.forEach { it.close() }
+
+    private fun version(c: Connection): Int =
+        c.createStatement().use { s -> s.executeQuery("PRAGMA user_version").use { it.next(); it.getInt(1) } }
+
+    private fun exec(c: Connection, sql: String) = c.createStatement().use { it.executeUpdate(sql) }
+
+    private fun count(c: Connection, sql: String): Int =
+        c.createStatement().use { s -> s.executeQuery(sql).use { it.next(); it.getInt(1) } }
+
+    private val insertNote = "INSERT INTO note(uid, kind, title, created_at, updated_at) VALUES ('%s', '%s', 't', 1, 1)"
+
+    @Test
+    fun freshDatabaseReachesLatestVersionWithoutBackup() {
+        val db = newDatabase()
+        assertEquals(Migrations.ALL.size, db.submitAndWait { version(it) })
+        assertFalse(Files.exists(bakPath))
+    }
+
+    @Test
+    fun rerunningIsIdempotent() {
+        val db = newDatabase()
+        db.submitAndWait { exec(it, insertNote.format("a", "FREE")) }
+        db.submitAndWait { Migrations.run(it) }
+        assertEquals(1, db.submitAndWait { count(it, "SELECT count(*) FROM note") })
+        assertFalse(Files.exists(bakPath))
+    }
+
+    @Test
+    fun backupIsCreatedOnlyWhenUpgradingExistingDatabaseAndOverwritten() {
+        val db = newDatabase()
+        db.submitAndWait { exec(it, insertNote.format("a", "FREE")) }
+        val v1 = Migrations.ALL
+        val v2 = v1 + "CREATE TABLE extra2(x)"
+        val v3 = v2 + "CREATE TABLE extra3(x)"
+
+        db.submitAndWait { Migrations.run(it, v2) }
+        assertTrue(Files.exists(bakPath))
+        assertEquals(0, backupValue("extra2"))
+
+        // 두 번째 업그레이드 시점의 백업에는 extra2가 들어 있어야 한다
+        db.submitAndWait { Migrations.run(it, v3) }
+        assertEquals(1, backupValue("extra2"))
+        assertEquals(0, backupValue("extra3"))
+    }
+
+    /** 백업 파일을 열어 해당 테이블이 있으면 1, 없으면 0 */
+    private fun backupValue(table: String): Int {
+        val copy = tmp.newFile().toPath()
+        Files.copy(bakPath, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        val backup = Database(copy).also { opened += it }
+        return backup.submitAndWait { count(it, "SELECT count(*) FROM sqlite_master WHERE name = '$table'") }
+    }
+
+    @Test
+    fun backupContainsCommittedWalData() {
+        val db = newDatabase()
+        db.submitAndWait { exec(it, insertNote.format("a", "FREE")) }
+        db.submitAndWait { Migrations.run(it, Migrations.ALL + "CREATE TABLE extra(x)") }
+        val copy = tmp.newFile().toPath()
+        Files.copy(bakPath, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        val backup = Database(copy).also { opened += it }
+        assertEquals(1, backup.submitAndWait { count(it, "SELECT count(*) FROM note") })
+    }
+
+    @Test
+    fun failedMigrationRollsBackAndKeepsVersion() {
+        val db = newDatabase()
+        val broken = Migrations.ALL + "CREATE TABLE half(x); INSERT INTO missing_table VALUES (1);"
+        try {
+            db.submitAndWait { Migrations.run(it, broken) }
+            fail("expected failure")
+        } catch (e: Exception) {
+            assertTrue(generateSequence<Throwable>(e) { it.cause }.any { it is SQLException })
+        }
+        assertEquals(Migrations.ALL.size, db.submitAndWait { version(it) })
+        assertEquals(0, db.submitAndWait { count(it, "SELECT count(*) FROM sqlite_master WHERE name = 'half'") })
+    }
+
+    @Test
+    fun badKindIsRejected() {
+        val db = newDatabase()
+        try {
+            db.submitAndWait { exec(it, insertNote.format("a", "BAD")) }
+            fail("expected constraint failure")
+        } catch (e: Exception) {
+            assertTrue(generateSequence<Throwable>(e) { it.cause }.any { it is SQLException })
+        }
+    }
+
+    @Test
+    fun duplicateUidIsRejected() {
+        val db = newDatabase()
+        db.submitAndWait { exec(it, insertNote.format("a", "FREE")) }
+        try {
+            db.submitAndWait { exec(it, insertNote.format("a", "CODE")) }
+            fail("expected unique failure")
+        } catch (e: Exception) {
+            assertTrue(generateSequence<Throwable>(e) { it.cause }.any { it is SQLException })
+        }
+    }
+
+    @Test
+    fun deletingNoteCascadesToNoteTag() {
+        val db = newDatabase()
+        val remaining = db.submitAndWait { c ->
+            exec(c, insertNote.format("a", "FREE"))
+            exec(c, "INSERT INTO tag(name) VALUES ('x')")
+            exec(c, "INSERT INTO note_tag(note_id, tag_id) SELECT note.id, tag.id FROM note, tag")
+            exec(c, "DELETE FROM note")
+            count(c, "SELECT count(*) FROM note_tag")
+        }
+        assertEquals(0, remaining)
+    }
+}
