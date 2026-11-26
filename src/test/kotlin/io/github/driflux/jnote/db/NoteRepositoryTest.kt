@@ -1,5 +1,6 @@
 package io.github.driflux.jnote.db
 
+import io.github.driflux.jnote.model.AnchorUpdate
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
@@ -293,5 +294,50 @@ class NoteRepositoryTest {
             }
         }
         assertTrue(plan.toString(), plan.any { it.contains("idx_note_project_path") })
+    }
+
+    @Test
+    fun updateAnchorsChangesOnlyPathLinesAndStatus() {
+        val created = repo.create(code()).get()
+        now = 2_000L
+        val changed = repo.updateAnchors(listOf(AnchorUpdate(created.uid, "src/B.kt", 10, 12, NoteStatus.APPROX))).get()
+        assertEquals(1, changed)
+        val expected = created.copy(relPath = "src/B.kt", startLine = 10, endLine = 12, status = NoteStatus.APPROX)
+        // 사용자가 고친 것이 아니므로 updated_at도 그대로다
+        assertEquals(expected, repo.get(created.id).get())
+    }
+
+    @Test
+    fun updateAnchorsCountsOnlyNotesThatChange() {
+        val same = repo.create(code("same")).get()
+        val moved = repo.create(code("moved")).get()
+        val changed = repo.updateAnchors(
+            listOf(
+                AnchorUpdate(same.uid, "src/A.kt", 3, 5, NoteStatus.OK),
+                AnchorUpdate(moved.uid, "src/A.kt", 4, 6, NoteStatus.OK),
+            ),
+        ).get()
+        assertEquals(1, changed)
+        assertEquals(3, repo.get(same.id).get()?.startLine)
+        assertEquals(4, repo.get(moved.id).get()?.startLine)
+    }
+
+    @Test
+    fun updateAnchorsIgnoresNotesDeletedMeanwhile() {
+        val kept = repo.create(code("kept")).get()
+        val gone = repo.create(code("gone")).get()
+        repo.delete(gone.id).get()
+        // 지운 id가 새 노트에 다시 쓰여도 uid가 다르므로 새 노트는 바뀌지 않는다
+        val reused = repo.create(code("new")).get()
+        assertEquals(gone.id, reused.id)
+        val changed = repo.updateAnchors(
+            listOf(
+                AnchorUpdate(gone.uid, "src/A.kt", 9, 9, NoteStatus.ORPHAN),
+                AnchorUpdate(kept.uid, "src/A.kt", 7, 9, NoteStatus.OK),
+            ),
+        ).get()
+        assertEquals(1, changed)
+        assertEquals(3, repo.get(reused.id).get()?.startLine)
+        assertEquals(7, repo.get(kept.id).get()?.startLine)
     }
 }

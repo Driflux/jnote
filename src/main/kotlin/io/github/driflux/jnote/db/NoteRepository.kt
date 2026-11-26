@@ -1,5 +1,6 @@
 package io.github.driflux.jnote.db
 
+import io.github.driflux.jnote.model.AnchorUpdate
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
@@ -80,6 +81,34 @@ class NoteRepository(
             s.executeUpdate()
         }
         if (changed == 0) null else findById(c, note.id)
+    }
+
+    /**
+     * 경로, 줄 범위, 상태만 한 트랜잭션으로 바꾼다. 제목, 본문, 태그, updated_at은 그대로 둔다.
+     * 사용자가 고친 것이 아니므로 "최근 수정 순" 목록의 순서를 바꾸지 않는다.
+     * 값이 이미 같은 노트와 그 사이 지워진 노트는 건너뛰고, 실제로 바뀐 노트 수를 돌려준다.
+     */
+    fun updateAnchors(updates: List<AnchorUpdate>): CompletableFuture<Int> = database.submit { c ->
+        c.autoCommit = false
+        try {
+            val changed = c.prepareStatement(UPDATE_ANCHOR).use { s ->
+                updates.sumOf { update ->
+                    s.setString(1, update.relPath)
+                    s.setInt(2, update.startLine)
+                    s.setInt(3, update.endLine)
+                    s.setString(4, update.status.name)
+                    s.setString(5, update.uid)
+                    s.executeUpdate()
+                }
+            }
+            c.commit()
+            changed
+        } catch (e: Throwable) {
+            c.rollback()
+            throw e
+        } finally {
+            c.autoCommit = true
+        }
     }
 
     /**
@@ -198,6 +227,10 @@ class NoteRepository(
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         const val UPDATE = "UPDATE note SET kind=?, project=?, rel_path=?, class_name=?, start_line=?, end_line=?, " +
             "snapshot=?, status=?, title=?, body=?, ai_source=?, source_url=?, prompt=?, updated_at=? WHERE id=?"
+
+        // 값이 같은 행은 건드리지 않아 바뀐 수를 정확히 세고 FTS 트리거도 돌지 않게 한다
+        const val UPDATE_ANCHOR = "UPDATE note SET rel_path=?1, start_line=?2, end_line=?3, status=?4 " +
+            "WHERE uid=?5 AND (rel_path, start_line, end_line, status) IS NOT (?1, ?2, ?3, ?4)"
     }
 }
 

@@ -29,6 +29,19 @@ class RelocatorTest {
     }
 
     @Test
+    fun similarityOffFindsOnlyExactMatches() {
+        val edited = listOf(
+            "fun compute(total: Int): Int {",
+            "    val tripled = total * 3",
+            "    return tripled + 1",
+            "}",
+        )
+        val off = RelocationOptions(similarity = false)
+        assertEquals(RelocationResult.None, locate(filler(10) + edited, snippet, 11, off))
+        assertEquals(RelocationResult.Match(11, 14), locate(filler(10) + snippet, snippet, 1, off))
+    }
+
+    @Test
     fun emptyAndOversizeSnapshotReturnNone() {
         assertEquals(RelocationResult.None, locate(snippet, emptyList(), 1))
         assertEquals(RelocationResult.None, locate(snippet, snippet + "extra", 1))
