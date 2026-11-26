@@ -63,7 +63,6 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
         }
     }
 
-    /** 확인 없이 바로 지우고, 되돌리기 알림을 띄운다. 끝나면 완료되는 future를 돌려준다. */
     internal fun delete(note: Note): CompletableFuture<*> =
         deleteOn(NoteDeletion.onCurrentDatabase(), note)
 

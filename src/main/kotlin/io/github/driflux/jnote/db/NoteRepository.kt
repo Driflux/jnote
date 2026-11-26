@@ -128,7 +128,6 @@ class NoteRepository(
         requireNotNull(findById(c, note.id))
     }
 
-    /** 노트와 (cascade로) 태그 연결을 지운다. 지운 행이 있으면 true. */
     fun delete(id: Long): CompletableFuture<Boolean> = database.submit { c ->
         c.prepareStatement("DELETE FROM note WHERE id = ?").use { s ->
             s.setLong(1, id)

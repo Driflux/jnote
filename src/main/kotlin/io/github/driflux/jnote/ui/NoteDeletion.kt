@@ -10,7 +10,6 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 import java.util.concurrent.RejectedExecutionException
 
-/** 지운 노트와 그때 붙어 있던 태그 id. 되돌리기에 필요한 전부다. */
 class DeletedNote(val note: Note, val tagIds: List<Long>)
 
 /**
@@ -44,7 +43,6 @@ class NoteDeletion(private val database: Database) {
     }
 
     companion object {
-        /** 되돌리기 알림이 살아 있는 시간 */
         const val UNDO_TIMEOUT_MS = 8_000L
 
         /** 지금 쓰는 DB 기준. DB 경로가 바뀔 수 있어 지울 때마다 만들고, 그 인스턴스로 되돌린다. */
