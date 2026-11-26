@@ -1,6 +1,5 @@
 package io.github.driflux.jnote.ui
 
-/** 예약한 작업을 취소하는 손잡이. */
 fun interface Cancellable {
     fun cancel()
 }

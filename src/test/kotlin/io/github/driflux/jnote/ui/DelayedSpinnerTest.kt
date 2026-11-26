@@ -6,7 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DelayedSpinnerTest {
-    /** 시간을 손으로 흘려보내는 스케줄러 */
     private class FakeScheduler : DelayScheduler {
         class Job(val dueAt: Long, val task: () -> Unit) {
             var cancelled = false
