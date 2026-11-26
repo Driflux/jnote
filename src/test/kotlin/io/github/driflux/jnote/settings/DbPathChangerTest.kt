@@ -75,7 +75,6 @@ class DbPathChangerTest : BasePlatformTestCase() {
         assertEquals(current, DatabaseService.getInstance().currentPath())
         assertFalse(Files.exists(another))
 
-        // 첫 요청이 끝나면 다음 요청을 받는다
         DbPathChanger.request(another)
         assertEquals(another, DatabaseService.getInstance().currentPath())
     }
@@ -85,7 +84,7 @@ class DbPathChangerTest : BasePlatformTestCase() {
     }
 
     fun testInvalidPathShowsErrorNotificationAndChangesNothing() {
-        DbPathChanger.request(dir) // 폴더
+        DbPathChanger.request(dir)
         val n = notifications.single()
         assertEquals(NotificationType.ERROR, n.type)
         assertEquals(JNoteBundle.message("notification.dbPath.invalid.title"), n.title)

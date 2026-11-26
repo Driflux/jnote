@@ -30,7 +30,6 @@ class DatabaseService : Disposable {
         Current(pathLocked(), current)
     }
 
-    /** 만들어졌고 연결까지 열린 DB. 한 번도 쓰지 않았다면 null이다. */
     fun openDatabaseOrNull(): Database? = synchronized(lock) { current?.takeIf { it.isOpen } }
 
     /**

@@ -8,7 +8,6 @@ import java.util.concurrent.ExecutionException
 
 /** 계획대로 복사와 전환을 수행한다. 블로킹이므로 백그라운드 스레드에서만 부른다. */
 object DbPathSwitcher {
-    /** 이미 있는 파일을 JNote DB로 열 수 없어 전환하지 않았다. */
     class UnusableTarget(val target: Path, cause: Throwable) : Exception(cause.message, cause)
 
     /** 전환과 저장은 끝났지만 옛 DB를 닫지 못했다. */

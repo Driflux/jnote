@@ -6,7 +6,6 @@ import com.intellij.openapi.diagnostic.thisLogger
 import io.github.driflux.jnote.JNoteBundle
 import java.nio.file.FileAlreadyExistsException
 
-/** 오류는 삼키지 않고 이유와 해결 방법을 알림으로 보여 준다. */
 object DbPathNotifier {
     const val GROUP_ID = "JNote"
 

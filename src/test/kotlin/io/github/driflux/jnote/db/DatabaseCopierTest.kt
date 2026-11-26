@@ -26,7 +26,6 @@ class DatabaseCopierTest {
 
     private fun path(name: String): Path = tmp.root.toPath().resolve(name)
 
-    // 전환 없이 복사만 본다
     private fun copyOnly(source: Path, target: Path, database: Database?, checkCancelled: () -> Unit) =
         DatabaseCopier.copy(source, target, database, checkCancelled) { true }
 
