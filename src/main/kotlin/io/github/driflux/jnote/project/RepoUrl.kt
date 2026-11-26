@@ -12,7 +12,10 @@ object RepoUrl {
     fun normalize(raw: String): String? {
         val input = raw.trim()
         val (authority, path) = split(input) ?: return null
-        val host = authority.substringAfterLast('@').substringBefore(':').lowercase()
+        // 사용자 정보는 authority 안의 마지막 @까지만 떼고, 남은 포트가 숫자가 아니면 경로의 @ 때문에 잘못 나뉜 것이다
+        val hostPort = authority.substringAfterLast('@')
+        if (':' in hostPort && !hostPort.substringAfter(':').all { it.isDigit() }) return null
+        val host = hostPort.substringBefore(':').lowercase()
         val repoPath = path.trim('/').removeSuffix(".git").trimEnd('/')
         if (host.isEmpty() || repoPath.isEmpty()) return null
         return "$host/$repoPath"

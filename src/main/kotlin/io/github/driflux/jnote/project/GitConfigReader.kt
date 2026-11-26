@@ -1,7 +1,10 @@
 package io.github.driflux.jnote.project
 
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.nio.file.Files
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 
 /** git 설정 파일만 읽는다. 프로세스를 띄우지 않으며 모든 읽기 실패는 null로 돌려준다. */
@@ -9,10 +12,24 @@ object GitConfigReader {
     private val sectionHeader = Regex("^\\[\\s*([^\\s\\]\"]+)(?:\\s+\"((?:[^\"\\\\]|\\\\.)*)\")?\\s*](.*)$")
     private val keyValue = Regex("^([A-Za-z][A-Za-z0-9-]*)\\s*=(.*)$")
 
-    /** start부터 위로 올라가며 첫 `.git`을 찾아 git 디렉터리를 돌려준다. 워크트리의 `.git` 파일이면 gitdir 대상이다. */
-    fun findGitDir(start: Path): Path? {
+    // 설정 파일은 신뢰할 수 없는 프로젝트에서 오므로 크기를 제한한다. 넘으면 값이 없는 것으로 본다
+    private const val MAX_FILE_BYTES = 64 * 1024
+
+    private val userHome: Path? = try {
+        System.getProperty("user.home")?.let { Path.of(it).toAbsolutePath().normalize() }
+    } catch (e: InvalidPathException) {
+        null
+    }
+
+    /**
+     * start부터 위로 올라가며 첫 `.git`을 찾아 git 디렉터리를 돌려준다. 워크트리의 `.git` 파일이면 gitdir 대상이다.
+     * home에 닿으면 멈추고 home의 `.git`은 받지 않는다. 홈 전체를 dotfiles 저장소로 쓰는 경우
+     * 그 아래 비git 프로젝트가 저장소의 origin을 가져가기 때문이다.
+     */
+    fun findGitDir(start: Path, home: Path? = userHome): Path? {
+        val stop = home?.toAbsolutePath()?.normalize()
         var dir: Path? = start.toAbsolutePath().normalize()
-        while (dir != null) {
+        while (dir != null && dir != stop) {
             val dotGit = dir.resolve(".git")
             if (Files.isDirectory(dotGit)) return dotGit
             if (Files.isRegularFile(dotGit)) return readGitDirFile(dotGit)
@@ -27,7 +44,11 @@ object GitConfigReader {
         val raw = readText(commonDirFile)?.trim()
         if (raw.isNullOrEmpty()) return gitDir
         // 상대 경로는 gitDir 기준이고, 절대 경로는 resolve가 그대로 돌려준다
-        return gitDir.resolve(raw).normalize()
+        return try {
+            gitDir.resolve(raw).normalize()
+        } catch (e: InvalidPathException) {
+            gitDir
+        }
     }
 
     /** commonDir/config의 `[remote "origin"]` 첫 url. 없거나 읽을 수 없으면 null. */
@@ -58,11 +79,29 @@ object GitConfigReader {
         val line = readText(file)?.lineSequence()?.firstOrNull { it.startsWith("gitdir:") } ?: return null
         val target = line.removePrefix("gitdir:").trim()
         if (target.isEmpty()) return null
-        return file.toAbsolutePath().parent.resolve(target).normalize()
+        return try {
+            file.toAbsolutePath().parent.resolve(target).normalize()
+        } catch (e: InvalidPathException) {
+            null
+        }
     }
 
     private fun readText(file: Path): String? = try {
-        Files.readString(file)
+        if (!Files.isRegularFile(file)) {
+            null
+        } else {
+            Files.newInputStream(file).use { input ->
+                val bytes = input.readNBytes(MAX_FILE_BYTES + 1)
+                if (bytes.size > MAX_FILE_BYTES) {
+                    null
+                } else {
+                    Charsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT)
+                        .decode(ByteBuffer.wrap(bytes)).toString()
+                }
+            }
+        }
     } catch (e: IOException) {
         null
     }

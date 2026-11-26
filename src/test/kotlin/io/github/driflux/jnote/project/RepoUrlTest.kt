@@ -25,6 +25,15 @@ class RepoUrlTest {
 
     @Test fun scpWithoutUser() = assertNormalized("github.com:org/repo.git")
 
+    @Test fun passwordWithSlashDoesNotLeakIntoKey() {
+        assertNull(RepoUrl.normalize("https://u:p/ss@h/o/r"))
+        assertNull(RepoUrl.normalize("https://user:pa/ss@github.com/org/repo.git"))
+    }
+
+    @Test fun atSignInPathIsKept() = assertNormalized("https://github.com/org/re@po", "github.com/org/re@po")
+
+    @Test fun lastAtOfAuthorityStripsUserInfo() = assertNormalized("https://a@b:pw@github.com/org/repo")
+
     @Test fun invalidInputReturnsNull() {
         listOf(
             "", "   ", "not a url", "/local/path/repo", "../repo", "C:\\work\\repo",

@@ -130,6 +130,54 @@ class GitConfigReaderTest {
         assertEquals(git, GitConfigReader.resolveCommonDir(git))
     }
 
+    @Test fun commondirWithNulFallsBackToGitDir() {
+        val gitDir = dir("nul-common", ".git")
+        Files.writeString(gitDir.resolve("commondir"), "a" + 0.toChar() + "b\n")
+        assertEquals(gitDir, GitConfigReader.resolveCommonDir(gitDir))
+    }
+
+    @Test fun gitFileWithNulReturnsNull() {
+        val d = dir("nul-gitfile")
+        Files.writeString(d.resolve(".git"), "gitdir: a" + 0.toChar() + "b\n")
+        assertNull(GitConfigReader.findGitDir(d, null))
+    }
+
+    @Test fun oversizedConfigCountsAsNoValue() {
+        val d = dir("big-config")
+        val head = "[remote \"origin\"]\n url = https://h/o/r\n"
+        Files.writeString(d.resolve("config"), head + "#".repeat(64 * 1024))
+        assertNull(GitConfigReader.readOriginUrl(d))
+        Files.writeString(d.resolve("config"), head + "#".repeat(64 * 1024 - head.length))
+        assertEquals("https://h/o/r", GitConfigReader.readOriginUrl(d))
+    }
+
+    @Test fun oversizedCommondirCountsAsNoValue() {
+        val gitDir = dir("big-common", ".git")
+        Files.writeString(gitDir.resolve("commondir"), "x".repeat(64 * 1024 + 1))
+        assertEquals(gitDir, GitConfigReader.resolveCommonDir(gitDir))
+    }
+
+    @Test fun oversizedGitFileReturnsNull() {
+        val d = dir("big-gitfile")
+        Files.writeString(d.resolve(".git"), "gitdir: ../x" + " ".repeat(64 * 1024))
+        assertNull(GitConfigReader.findGitDir(d, null))
+    }
+
+    @Test fun findGitDirStopsAtHome() {
+        val home = dir("home")
+        dir("home", ".git")
+        val project = dir("home", "plain-project", "sub")
+        assertNull(GitConfigReader.findGitDir(project, home))
+        assertNull(GitConfigReader.findGitDir(home, home))
+    }
+
+    @Test fun findGitDirStillFindsRepoInsideHome() {
+        val home = dir("home2")
+        dir("home2", ".git")
+        val git = dir("home2", "repo", ".git")
+        assertEquals(git, GitConfigReader.findGitDir(dir("home2", "repo", "src"), home))
+    }
+
     @Test fun resolveCommonDirRelativeAndAbsolute() {
         val mainGit = dir("main", ".git")
         val wtGitDir = dir("main", ".git", "worktrees", "wt")
