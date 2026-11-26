@@ -42,6 +42,24 @@ class NoteDraftTest {
     @Test fun missingClassNameStaysNull() =
         assertNull(NoteDraft("T").toNewNote("p", anchor.copy(className = null)).className)
 
+    @Test fun freeNoteHasNoProjectNorAnchorAndKeepsTrimmedText() {
+        val note = NoteDraft(" select 1 ", " from t\n", "Claude", " ", "why").toFreeNote()
+        assertEquals(NoteKind.FREE, note.kind)
+        assertNull(note.project)
+        assertNull(note.relPath)
+        assertNull(note.startLine)
+        assertNull(note.snapshot)
+        assertEquals("select 1", note.title)
+        assertEquals("from t", note.body)
+        assertEquals("Claude", note.aiSource)
+        assertNull(note.sourceUrl)
+        assertEquals("why", note.prompt)
+    }
+
+    @Test fun blankTitleIsRejectedForFreeNotes() {
+        assertThrows(IllegalArgumentException::class.java) { NoteDraft(" ").toFreeNote() }
+    }
+
     @Test fun blankTitleIsRejected() {
         assertThrows(IllegalArgumentException::class.java) { NoteDraft("   ").toNewNote("p", anchor) }
     }

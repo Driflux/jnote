@@ -93,6 +93,10 @@ class AddNoteDialog(
         /** 확인으로 닫으면 입력값, 취소하면 null. UI 스레드에서 호출한다. */
         fun ask(project: Project, anchor: CodeAnchor): NoteDraft? = show(AddNoteDialog(project, anchor))
 
+        /** 앵커 없이 자유 노트를 쓴다. UI 스레드에서 호출한다. */
+        fun askFree(project: Project): NoteDraft? =
+            show(AddNoteDialog(project, null, dialogTitle = JNoteBundle.message("dialog.newNote.title")))
+
         /** 저장된 [note]의 값을 채워 편집한다. 앵커는 보여 주기만 하고 바꾸지 않는다. UI 스레드에서 호출한다. */
         fun edit(project: Project, note: Note): NoteDraft? = show(
             AddNoteDialog(project, note.anchorOrNull(), NoteDraft.of(note), JNoteBundle.message("dialog.editNote.title")),

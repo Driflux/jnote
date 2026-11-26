@@ -143,4 +143,33 @@ class NoteSaverTest : BasePlatformTestCase() {
         assertTrue(repo.list("k", false).get().isEmpty())
         assertEquals(0, published.get())
     }
+
+    fun testSaveFreeStoresGlobalNoteWithoutResolvingProjectAndPublishesOnce() {
+        val repo = NoteRepository(db)
+        val saver = NoteSaver(repository = { repo }, projectKey = { error("free notes need no project key") })
+        val future = saver.saveFree(NoteDraft("q", "select 1", "Claude"))
+        await(future)
+
+        val note = future.get()
+        assertEquals(NoteKind.FREE, note.kind)
+        assertNull(note.project)
+        assertNull(note.relPath)
+        assertEquals("select 1", note.body)
+        assertEquals(note, repo.get(note.id).get())
+        assertEquals(1, published.get())
+    }
+
+    fun testSaveFreeFailureSurfacesAndDoesNotPublish() {
+        val repo = NoteRepository(db)
+        val saver = NoteSaver(repository = { repo })
+        val blank = saver.saveFree(NoteDraft(" "))
+        val broken = NoteSaver(repository = { error("disk full") }).saveFree(NoteDraft("q"))
+        await(blank)
+        await(broken)
+
+        assertTrue(blank.isCompletedExceptionally)
+        assertTrue(broken.isCompletedExceptionally)
+        assertTrue(repo.list(null, true).get().isEmpty())
+        assertEquals(0, published.get())
+    }
 }

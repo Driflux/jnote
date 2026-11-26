@@ -29,6 +29,18 @@ data class NoteDraft(
         )
     }
 
+    /** 앵커와 프로젝트가 없는 자유 노트. 다듬는 규칙은 [toNewNote]와 같다. */
+    fun toFreeNote(): NewNote {
+        require(title.isNotBlank()) { "title is blank" }
+        return NewNote.free(
+            title = title.trim(),
+            body = body.trim(),
+            aiSource = aiSource.trimToNull(),
+            sourceUrl = sourceUrl.trimToNull(),
+            prompt = prompt.trimToNull(),
+        )
+    }
+
     /**
      * 편집 결과를 [note]에 덮어쓴 노트. 앵커, 종류, 프로젝트, 상태는 그대로 두고 제목, 본문, AI 출처만 바꾼다.
      * 태그는 노트 행에 없으므로 건드리지 않고, updatedAt은 저장소가 갱신한다.
