@@ -37,6 +37,23 @@ class JNoteConfigurableTest : BasePlatformTestCase() {
         assertEquals(JNoteConfigurable::class.java.name, ep.instanceClass)
     }
 
+    fun testFieldChecksOnlyTheFormOfThePathWhileTyping() {
+        val configurable = JNoteConfigurable()
+        val panel = configurable.createComponent() as com.intellij.openapi.ui.DialogPanel
+        val field = fieldOf(configurable)
+        fun errors(text: String): List<String> {
+            field.text = text
+            return (panel.validationsOnInput.values.flatten() + panel.validationsOnApply.values.flatten())
+                .mapNotNull { it.validate()?.message }
+        }
+        val notAbsolute = io.github.driflux.jnote.JNoteBundle.message("settings.dbPath.invalid.notAbsolute")
+        // 폴더인지는 파일 시스템을 봐야 알 수 있어 입력 중에는 가리지 않는다
+        assertEquals(emptyList<String>(), errors(dir.toString()))
+        assertEquals(listOf(notAbsolute, notAbsolute), errors("relative/jnote.db"))
+        assertEquals(listOf(notAbsolute, notAbsolute), errors("/tmp/a\u0000b.db"))
+        configurable.disposeUIResources()
+    }
+
     fun testShowsDefaultPathWhenNothingIsStored() {
         DbPathSettings.getInstance().state.dbPath = ""
         val configurable = JNoteConfigurable()
