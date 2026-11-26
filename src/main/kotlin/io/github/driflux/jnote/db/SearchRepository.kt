@@ -4,7 +4,7 @@ import java.sql.Connection
 import java.util.concurrent.CompletableFuture
 
 /**
- * 노트 검색. 경로는 하나뿐이다: note_fts(trigram)에 대한 LIKE '%q%'.
+ * 경로는 하나뿐이다: note_fts(trigram)에 대한 LIKE '%q%'.
  * 3자 이상은 trigram 인덱스를 쓰고, 2자는 SQLite가 자동으로 전체 스캔으로 처리한다.
  * ESCAPE 절을 붙이면 FTS5가 LIKE 가속을 포기하고 전체 스캔을 하므로, % _ \ 가 없는 질의에는 ESCAPE를 붙이지 않는다.
  * 태그 이름은 FTS 대상이 아니므로 note_tag/tag에 대한 LIKE를 합집합으로 붙인다.
@@ -58,8 +58,6 @@ class SearchRepository(private val database: Database) {
                  LIMIT ?4
             """.trimIndent()
         }
-
-        /** 사용자 입력의 % _ 와 이스케이프 문자 자체를 문자 그대로 매칭하도록 한다. */
         internal fun escapeLike(query: String): String =
             query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     }

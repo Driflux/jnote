@@ -65,7 +65,7 @@ object Migrations {
             INSERT INTO note_fts(note_fts, rowid, title, body, snapshot, class_name, prompt)
             VALUES ('delete', old.id, old.title, old.body, old.snapshot, old.class_name, old.prompt);
         END;
-        CREATE TRIGGER note_fts_au AFTER UPDATE ON note BEGIN
+        CREATE TRIGGER note_fts_au AFTER UPDATE OF title, body, snapshot, class_name, prompt ON note BEGIN
             INSERT INTO note_fts(note_fts, rowid, title, body, snapshot, class_name, prompt)
             VALUES ('delete', old.id, old.title, old.body, old.snapshot, old.class_name, old.prompt);
             INSERT INTO note_fts(rowid, title, body, snapshot, class_name, prompt)

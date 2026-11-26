@@ -26,7 +26,6 @@ class SearchRepositoryTest {
 
     private var seq = 0
 
-    /** 노트를 일반 SQL로 넣고 id를 돌려준다. */
     private fun note(
         title: String = "t",
         body: String = "",
@@ -113,7 +112,6 @@ class SearchRepositoryTest {
                 )
             }
         }
-        // 같은 파일을 다시 열면 v3가 적용되고 기존 행이 백필된다
         val reopened = newDatabase("old.db")
         assertEquals(1, SearchRepository(reopened).search("취소", null, true).get().size)
         val exported = reopened.submitAndWait { c ->
@@ -133,6 +131,28 @@ class SearchRepositoryTest {
         assertEquals(emptyList<Long>(), ftsIds("gamma"))
         // 삭제 뒤에도 인덱스가 손상되지 않아야 한다
         db.submitAndWait { c -> c.createStatement().use { it.execute("INSERT INTO note_fts(note_fts) VALUES ('integrity-check')") } }
+    }
+
+    @Test
+    fun updatingNonIndexedColumnsDoesNotRewriteFtsIndex() {
+        val id = note(body = "alpha beta", snapshot = "fun handler()")
+        val before = ftsDataHash()
+        exec("UPDATE note SET start_line = 5, end_line = 9, status = 'APPROX', updated_at = 99 WHERE id = $id")
+        assertEquals(before, ftsDataHash())
+        assertEquals(listOf(id), ftsIds("alpha"))
+    }
+
+    private fun ftsDataHash(): String = db.submitAndWait { c ->
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        c.createStatement().use { s ->
+            s.executeQuery("SELECT id, block FROM note_fts_data ORDER BY id").use { rs ->
+                while (rs.next()) {
+                    digest.update(rs.getLong(1).toString().toByteArray())
+                    digest.update(rs.getBytes(2))
+                }
+            }
+        }
+        digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     @Test
