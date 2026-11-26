@@ -10,12 +10,18 @@ import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import org.sqlite.BusyHandler
+import org.sqlite.Function
 import org.sqlite.JDBC
 import org.sqlite.SQLiteConfig
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
 import java.sql.Connection
 import java.sql.SQLException
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
 
 class MigrationsTest {
     @get:Rule
@@ -45,6 +51,42 @@ class MigrationsTest {
         val db = newDatabase()
         assertEquals(Migrations.ALL.size, db.submitAndWait { version(it) })
         assertFalse(Files.exists(bakPath))
+    }
+
+    @Test
+    fun twoDatabasesOpeningOneNewFileAtOnceBothSucceed() {
+        repeat(20) {
+            val path = tmp.newFolder().toPath().resolve("jnote.db")
+            val a = Database(path).also { opened += it }
+            val b = Database(path).also { opened += it }
+            val versions = listOf(a.submit { version(it) }, b.submit { version(it) }).map { it.get(30, TimeUnit.SECONDS) }
+            assertEquals(listOf(Migrations.ALL.size, Migrations.ALL.size), versions)
+            assertFalse(Files.exists(path.resolveSibling("jnote.db.bak")))
+        }
+    }
+
+    @Test
+    fun twoDatabasesUpgradingOneFileAtOnceBothSucceedAndKeepThePreUpgradeBackup() {
+        repeat(20) {
+            val dir = tmp.newFolder().toPath()
+            val path = dir.resolve("jnote.db")
+            val walConfig = SQLiteConfig().apply { setJournalMode(SQLiteConfig.JournalMode.WAL) }
+            checkNotNull(JDBC().connect("jdbc:sqlite:$path", walConfig.toProperties())).use { c ->
+                Migrations.run(c, Migrations.ALL.take(1))
+                exec(c, insertNote.format("a", "FREE"))
+            }
+            val a = Database(path).also { opened += it }
+            val b = Database(path).also { opened += it }
+            val versions = listOf(a.submit { version(it) }, b.submit { version(it) }).map { it.get(30, TimeUnit.SECONDS) }
+            assertEquals(listOf(Migrations.ALL.size, Migrations.ALL.size), versions)
+            assertEquals(setOf("jnote.db", "jnote.db.bak"), dir.toFile().list()!!.toSet() - setOf("jnote.db-wal", "jnote.db-shm"))
+            val copy = tmp.newFile().toPath()
+            Files.copy(dir.resolve("jnote.db.bak"), copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            checkNotNull(JDBC().connect("jdbc:sqlite:$copy", java.util.Properties())).use {
+                assertEquals(1, version(it))
+                assertEquals(1, count(it, "SELECT count(*) FROM note"))
+            }
+        }
     }
 
     @Test
@@ -106,6 +148,117 @@ class MigrationsTest {
         }
         assertEquals(Migrations.ALL.size, db.submitAndWait { version(it) })
         assertEquals(0, db.submitAndWait { count(it, "SELECT count(*) FROM sqlite_master WHERE name = 'half'") })
+    }
+
+    @Test
+    fun failedMigrationRollsBackEveryMigrationOfTheRun() {
+        val db = newDatabase()
+        val broken = Migrations.ALL + "CREATE TABLE extra(x)" + "INSERT INTO missing_table VALUES (1)"
+        try {
+            db.submitAndWait { Migrations.run(it, broken) }
+            fail("expected failure")
+        } catch (e: Exception) {
+            assertTrue(generateSequence<Throwable>(e) { it.cause }.any { it is SQLException })
+        }
+        assertEquals(Migrations.ALL.size, db.submitAndWait { version(it) })
+        assertEquals(0, db.submitAndWait { count(it, "SELECT count(*) FROM sqlite_master WHERE name = 'extra'") })
+    }
+
+    /**
+     * [parkedRun]의 마지막 스크립트가 park()에서 멈춘 동안 [waitingRun]을 시작한다. waitingRun은 버전을 읽은 뒤에야
+     * 체크포인트에서 쓰기 잠금을 기다리므로, 그 대기가 시작된 뒤에 parkedRun을 커밋시킨다.
+     * waitingRun은 parkedRun이 커밋하고 [afterParkedCommit]이 끝날 때까지 기다리고, 잠금 하나에 [waitingGivesUpAfter]번까지 기다린다.
+     */
+    private fun runWhileAnotherUpgradeIsParked(
+        parkedRun: List<String>,
+        waitingRun: List<String>,
+        afterParkedCommit: () -> Unit = {},
+        waitingGivesUpAfter: Int = 1000,
+    ): Result<Unit> {
+        val config = SQLiteConfig().apply {
+            setJournalMode(SQLiteConfig.JournalMode.WAL)
+            setBusyTimeout(Database.BUSY_TIMEOUT_MS)
+        }
+        val parked = CountDownLatch(1)
+        val waiting = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val committed = CountDownLatch(1)
+        checkNotNull(JDBC().connect("jdbc:sqlite:$dbPath", config.toProperties())).use { first ->
+            checkNotNull(JDBC().connect("jdbc:sqlite:$dbPath", config.toProperties())).use { second ->
+                Function.create(first, "park", object : Function() {
+                    override fun xFunc() {
+                        parked.countDown()
+                        release.await()
+                        result(0)
+                    }
+                })
+                BusyHandler.setHandler(second, object : BusyHandler() {
+                    override fun callback(nbPrevInvok: Int): Int {
+                        waiting.countDown()
+                        committed.await(10, TimeUnit.SECONDS)
+                        Thread.sleep(10)
+                        return if (nbPrevInvok < waitingGivesUpAfter) 1 else 0
+                    }
+                })
+                try {
+                    val upgrade = CompletableFuture.runAsync { Migrations.run(first, parkedRun) }
+                    assertTrue(parked.await(10, TimeUnit.SECONDS))
+                    val open = CompletableFuture.runAsync { Migrations.run(second, waitingRun) }
+                    assertTrue(waiting.await(10, TimeUnit.SECONDS))
+                    release.countDown()
+                    upgrade.get(30, TimeUnit.SECONDS)
+                    afterParkedCommit()
+                    committed.countDown()
+                    return runCatching { open.get(30, TimeUnit.SECONDS) }.map { }
+                } finally {
+                    release.countDown()
+                    committed.countDown()
+                }
+            }
+        }
+    }
+
+    private fun seedV1() = checkNotNull(JDBC().connect("jdbc:sqlite:$dbPath", java.util.Properties())).use {
+        Migrations.run(it, Migrations.ALL.take(1))
+        exec(it, insertNote.format("a", "FREE"))
+    }
+
+    @Test
+    fun olderPluginOpeningWhileANewerOneUpgradesIsRefused() {
+        seedV1()
+        val result = runWhileAnotherUpgradeIsParked(Migrations.ALL + "SELECT park()", Migrations.ALL)
+        val cause = (result.exceptionOrNull() as? ExecutionException)?.cause
+        assertTrue(result.toString(), cause is IllegalStateException && "newer than this JNote version supports" in cause.message.orEmpty())
+    }
+
+    @Test
+    fun newerPluginOpeningWhileAnOlderOneUpgradesBacksUpWhatTheOlderOneLeft() {
+        seedV1()
+        // 이전 플러그인은 v2까지 올리고 같은 트랜잭션에서 노트 하나를 더 남긴다
+        val olderRun = Migrations.ALL.take(1) + (Migrations.ALL[1] + ";\n" + insertNote.format("later", "FREE") + ";\nSELECT park()")
+        runWhileAnotherUpgradeIsParked(olderRun, Migrations.ALL).getOrThrow()
+        val copy = tmp.newFile().toPath()
+        Files.copy(bakPath, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        checkNotNull(JDBC().connect("jdbc:sqlite:$copy", java.util.Properties())).use {
+            assertEquals(2, version(it))
+            assertEquals(2, count(it, "SELECT count(*) FROM note"))
+        }
+    }
+
+    @Test
+    fun openingSucceedsWhenTheCheckpointFailsAfterAnotherConnectionFinishedTheUpgrade() {
+        seedV1()
+        val parkedRun = Migrations.ALL.dropLast(1) + (Migrations.ALL.last() + ";\nSELECT park()")
+        val walConfig = SQLiteConfig().apply { setJournalMode(SQLiteConfig.JournalMode.WAL) }
+        checkNotNull(JDBC().connect("jdbc:sqlite:$dbPath", walConfig.toProperties())).use { reader ->
+            // 업그레이드가 커밋된 뒤 읽기 트랜잭션이 WAL을 붙잡아 기다리던 연결의 TRUNCATE 체크포인트가 끝나지 못하게 한다
+            val result = runWhileAnotherUpgradeIsParked(parkedRun, Migrations.ALL, afterParkedCommit = {
+                reader.autoCommit = false
+                reader.createStatement().use { s -> s.executeQuery("SELECT count(*) FROM note").use { it.next() } }
+            }, waitingGivesUpAfter = 5)
+            reader.rollback()
+            result.getOrThrow()
+        }
     }
 
     @Test
