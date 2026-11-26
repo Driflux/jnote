@@ -6,7 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import org.sqlite.JDBC
 import java.sql.Connection
+import java.util.Properties
 
 class SearchRepositoryTest {
     @get:Rule
@@ -100,16 +102,17 @@ class SearchRepositoryTest {
 
     @Test
     fun migrationV3BackfillsRowsFromPopulatedV2Database() {
-        val old = newDatabase("old.db")
-        old.submitAndWait { c ->
+        // Database는 열 때 마지막 버전까지 올리므로, v2 파일은 연결을 직접 열어 만든다
+        val file = tmp.root.toPath().resolve("old.db")
+        JDBC().connect("jdbc:sqlite:$file", Properties())!!.use { c ->
             Migrations.run(c, Migrations.ALL.take(2))
+            assertEquals(2, c.createStatement().use { s -> s.executeQuery("PRAGMA user_version").use { it.next(); it.getInt(1) } })
             c.createStatement().use {
                 it.executeUpdate(
                     "INSERT INTO note(uid, kind, title, body, created_at, updated_at) VALUES ('a', 'FREE', 'old', '결제 취소건을 확인', 1, 1)",
                 )
             }
         }
-        old.close()
         // 같은 파일을 다시 열면 v3가 적용되고 기존 행이 백필된다
         val reopened = newDatabase("old.db")
         assertEquals(1, SearchRepository(reopened).search("취소", null, true).get().size)
