@@ -2,12 +2,15 @@ package io.github.driflux.jnote.gutter
 
 import com.intellij.codeInsight.daemon.LineMarkerInfo
 import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerImpl
+import com.intellij.notification.Notification
+import com.intellij.notification.Notifications
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Document
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -16,7 +19,9 @@ import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.SyntaxTraverser
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
+import io.github.driflux.jnote.NotesChangedListener
 import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
@@ -26,6 +31,8 @@ import io.github.driflux.jnote.model.NoteStatus
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class NotePositionsTest : BasePlatformTestCase() {
     private lateinit var dir: Path
@@ -144,6 +151,65 @@ class NotePositionsTest : BasePlatformTestCase() {
     private fun notifyAndSettle() {
         ApplicationManager.getApplication().messageBus.syncPublisher(NotesChanged.TOPIC).notesChanged()
         settle()
+    }
+
+    private fun insertLineAt(line: Int) = edit { it.insertString(lineStart(line), "new\n") }
+
+    // 노트 줄 안에 글자를 더하는 편집은 어떤 노트의 줄도 옮기지 않는다
+    private fun appendToLine(line: Int) = edit { it.insertString(lineEnd(line), " more") }
+
+    private fun save() = runWriteAction { FileDocumentManager.getInstance().saveDocument(document) }
+
+    private fun stored(note: Note): Note = repo.getByUid(note.uid).get()!!
+
+    /** 쓰기는 DB 스레드에서 끝나므로 DB 값이 그 위치가 될 때까지 기다린다. */
+    private fun awaitStored(note: Note, start: Int, end: Int, status: NoteStatus = note.status): Note {
+        awaitUntil("${note.title} stored at $start..$end $status") {
+            stored(note).let { it.startLine == start && it.endLine == end && it.status == status }
+        }
+        return stored(note)
+    }
+
+    /**
+     * DB 스레드는 하나라 지금 맡긴 일이 끝나면 앞서 맡긴 쓰기도 끝났다. 그 뒤 EDT로 넘긴 알림까지 처리한다.
+     * 아직 아무도 DB를 찾지 않았다면 기다릴 쓰기도 없으므로 DB를 만들지 않는다.
+     */
+    private fun drainWrites() {
+        dbService.current().database?.submitAndWait { }
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+    }
+
+    /** 풀 때까지 DB 스레드를 막는다. 테스트가 중간에 실패해도 스레드가 영영 막히지 않도록 시간 제한을 둔다. */
+    private fun blockDatabase(): CountDownLatch {
+        val gate = CountDownLatch(1)
+        dbService.database.submit { gate.await(10, TimeUnit.SECONDS) }
+        return gate
+    }
+
+    private fun failUpdates() = dbService.database.submitAndWait { c ->
+        c.createStatement().use { it.execute("CREATE TRIGGER fail_update BEFORE UPDATE ON note BEGIN SELECT RAISE(ABORT, 'boom'); END") }
+    }
+
+    private fun allowUpdates() = dbService.database.submitAndWait { c -> c.createStatement().use { it.execute("DROP TRIGGER fail_update") } }
+
+    private fun countNotesChanged(): () -> Int {
+        var count = 0
+        ApplicationManager.getApplication().messageBus.connect(testRootDisposable)
+            .subscribe(NotesChanged.TOPIC, NotesChangedListener { count++ })
+        return { count }
+    }
+
+    private fun saveFailures(): () -> List<Notification> {
+        val shown = mutableListOf<Notification>()
+        project.messageBus.connect(testRootDisposable).subscribe(
+            Notifications.TOPIC,
+            object : Notifications {
+                override fun notify(notification: Notification) {
+                    shown += notification
+                }
+            },
+        )
+        return { shown.filter { it.title == JNoteBundle.message("gutter.error.save.title") } }
     }
 
     private fun closedElsewhere(file: VirtualFile) {
@@ -287,5 +353,230 @@ class NotePositionsTest : BasePlatformTestCase() {
         settle()
 
         assertEquals(listOf(3 to "new database"), drawn())
+    }
+
+    fun testSavingWritesOnlyTheLinesTheEditMovedTheNoteTo() {
+        openFile("TrackSave.txt", lines(10))
+        val saved = repo.create(
+            NewNote.code(projectKey(), "src/TrackSave.txt", 3, 4, "moved", body = "why", status = NoteStatus.APPROX),
+        ).get()
+        loadedMarkers()
+        insertTwoLinesAtTop()
+
+        save()
+
+        // 제목, 본문, 상태, 수정 시각은 그대로다
+        assertEquals(saved.copy(startLine = 5, endLine = 6), awaitStored(saved, 5, 6))
+    }
+
+    fun testSavingAfterTheNoteLinesWereDeletedMarksItForRelocationOnce() {
+        openFile("TrackSaveLost.txt", lines(10))
+        val saved = note("TrackSaveLost.txt", 3, 4, "lost")
+        loadedMarkers()
+        val changes = countNotesChanged()
+        delete(lineStart(3), lineStart(5))
+
+        save()
+
+        // 지워지기 전 줄은 재배치 힌트로 남는다
+        assertEquals(saved.copy(status = NoteStatus.NEEDS_RELOCATE), awaitStored(saved, 3, 4, NoteStatus.NEEDS_RELOCATE))
+        drainWrites()
+        assertEquals(1, changes())
+
+        appendToLine(5)
+        save()
+        drainWrites()
+        assertEquals(1, changes())
+    }
+
+    fun testClosingAnEditedFileWithoutSavingWritesTheMovedLines() {
+        val file = openFile("TrackCloseWrite.txt", lines(10))
+        val saved = note("TrackCloseWrite.txt", 3, 3, "closed")
+        loadedMarkers()
+        insertTwoLinesAtTop()
+
+        FileEditorManager.getInstance(project).closeFile(file)
+
+        awaitStored(saved, 5, 5)
+        myFixture.openFileInEditor(file)
+        // 닫혀 있던 파일의 캐시는 다시 열고 처음 그릴 때 다시 읽는다
+        directPass()
+        settle()
+        assertEquals(listOf(5), drawnLines())
+    }
+
+    fun testReopeningBeforeTheCloseWriteFinishesEndsAtTheWrittenLines() {
+        val file = openFile("TrackCloseRace.txt", lines(10))
+        val saved = note("TrackCloseRace.txt", 3, 3, "race")
+        loadedMarkers()
+        insertTwoLinesAtTop()
+        val gate = blockDatabase()
+        FileEditorManager.getInstance(project).closeFile(file)
+        myFixture.openFileInEditor(file)
+        // 쓰기가 아직 끝나지 않아 캐시가 옛 줄이므로 새 마커는 옛 줄에서 시작한다
+        assertEquals(listOf(3), drawnLines())
+
+        gate.countDown()
+        awaitStored(saved, 5, 5)
+        settle()
+
+        assertEquals(listOf(5), drawnLines())
+    }
+
+    fun testASaveThatMovesNoNoteWritesAndAnnouncesNothing() {
+        openFile("TrackSaveStill.txt", lines(10))
+        val saved = note("TrackSaveStill.txt", 3, 4, "still")
+        loadedMarkers()
+        val changes = countNotesChanged()
+        appendToLine(3)
+
+        save()
+
+        drainWrites()
+        assertEquals(saved, stored(saved))
+        assertEquals(0, changes())
+    }
+
+    fun testAWriteThatChangesNoRowAnnouncesNothing() {
+        openFile("TrackSaveGone.txt", lines(10))
+        val saved = note("TrackSaveGone.txt", 3, 3, "gone")
+        loadedMarkers()
+        val changes = countNotesChanged()
+        insertTwoLinesAtTop()
+        // 다른 곳에서 노트를 지웠고 캐시는 아직 모른다. 쓰기는 고친 행이 없다
+        repo.delete(saved.id).get()
+
+        save()
+
+        drainWrites()
+        assertNull(repo.getByUid(saved.uid).get())
+        assertEquals(0, changes())
+    }
+
+    fun testOnlyTheNoteBelowTheEditIsWritten() {
+        openFile("TrackSaveBelow.txt", lines(10))
+        val above = note("TrackSaveBelow.txt", 2, 2, "above")
+        val below = note("TrackSaveBelow.txt", 6, 7, "below")
+        loadedMarkers()
+        // 다른 쓰기가 위쪽 노트를 옮겼고 캐시는 아직 모른다. 편집이 옮기지 않은 노트는 쓰지 않으므로 이 값이 남는다
+        val relocated = repo.update(above.copy(startLine = 9, endLine = 9)).get()!!
+        insertLineAt(4)
+
+        save()
+
+        assertEquals(below.copy(startLine = 7, endLine = 8), awaitStored(below, 7, 8))
+        assertEquals(relocated, stored(above))
+    }
+
+    fun testAnEditAfterTheReloadIsWrittenOnTopOfTheLastSave() {
+        openFile("TrackSaveTwice.txt", lines(10))
+        val saved = note("TrackSaveTwice.txt", 3, 3, "twice")
+        loadedMarkers()
+        insertTwoLinesAtTop()
+        save()
+        awaitStored(saved, 5, 5)
+        settle()
+
+        insertTwoLinesAtTop()
+        // 다시 읽힌 5번 줄은 이 추적기가 쓴 값이므로 마커를 그 줄로 되돌리지 않는다
+        assertEquals(listOf(7), drawnLines())
+        save()
+
+        awaitStored(saved, 7, 7)
+    }
+
+    fun testTwoSavesBeforeTheFirstWriteFinishesKeepTheLaterEdits() {
+        openFile("TrackSaveQuick.txt", lines(10))
+        val saved = note("TrackSaveQuick.txt", 3, 3, "quick")
+        loadedMarkers()
+        val gate = blockDatabase()
+        insertTwoLinesAtTop()
+        save()
+        insertTwoLinesAtTop()
+        save()
+        insertTwoLinesAtTop()
+
+        gate.countDown()
+        awaitStored(saved, 7, 7)
+        settle()
+
+        // 다시 읽힌 7번 줄은 두 번째 저장이 쓴 값이므로 그 뒤 편집이 옮긴 마커를 되돌리지 않는다
+        assertEquals(listOf(9), drawnLines())
+        save()
+        awaitStored(saved, 9, 9)
+    }
+
+    fun testLinesAnotherWriterSetSurviveTheNextSave() {
+        openFile("TrackSaveOther.txt", lines(10))
+        val saved = note("TrackSaveOther.txt", 3, 3, "other")
+        loadedMarkers()
+        insertTwoLinesAtTop()
+        writeAndNotify(saved.copy(startLine = 9, endLine = 9))
+        assertEquals(listOf(9), drawnLines())
+
+        save()
+
+        drainWrites()
+        assertEquals(9 to 9, stored(saved).let { it.startLine to it.endLine })
+    }
+
+    fun testAFailedWriteIsReportedOnceAndTheNextSaveWritesTheMovedLines() {
+        val failures = saveFailures()
+        openFile("Track<Fail>.txt", lines(10))
+        val saved = note("Track<Fail>.txt", 3, 3, "fail")
+        loadedMarkers()
+        failUpdates()
+        insertTwoLinesAtTop()
+
+        save()
+
+        drainWrites()
+        assertEquals(saved, stored(saved))
+        val content = failures().single().content
+        assertTrue(content, content.contains("Track&lt;Fail&gt;.txt") && content.contains("boom"))
+
+        allowUpdates()
+        // 바뀐 것이 없는 문서를 저장하면 저장 이벤트가 오지 않으므로, 노트를 옮기지 않는 편집을 하고 저장한다.
+        // 실패한 쓰기는 stored를 바꾸지 않았으므로 이 저장이 옮긴 줄을 쓴다
+        appendToLine(5)
+        save()
+        awaitStored(saved, 5, 5)
+        drainWrites()
+        assertEquals(1, failures().size)
+    }
+
+    fun testASaveAfterADatabaseSwitchWritesNothingAndReportsNothing() {
+        val failures = saveFailures()
+        openFile("TrackSaveSwitch.txt", lines(10))
+        val saved = note("TrackSaveSwitch.txt", 3, 3, "switch")
+        loadedMarkers()
+        insertTwoLinesAtTop()
+        val changes = countNotesChanged()
+        dbService.switchTo(Files.createTempDirectory(dir, "other").resolve("jnote.db"))
+        // 경로를 바꿀 때 DB를 복사하므로 새 DB에도 uid가 같은 노트가 있다
+        repo.restore(saved, emptyList()).get()
+
+        save()
+
+        drainWrites()
+        assertEquals(saved, stored(saved))
+        assertEquals(0, failures().size)
+        assertEquals(0, changes())
+    }
+
+    fun testSavingAFileWithoutNotesTouchesNoDatabase() {
+        dbService.switchTo(dir.resolve("never-created.db"))
+        openFile("TrackSaveNone.txt", lines(10))
+        loadedMarkers()
+        val changes = countNotesChanged()
+        insertTwoLinesAtTop()
+
+        save()
+
+        drainWrites()
+        assertFalse(gutter.isTracking(document))
+        assertEquals(0, changes())
+        assertFalse(Files.exists(dir.resolve("never-created.db")))
+        assertNull(dbService.openDatabaseOrNull())
     }
 }

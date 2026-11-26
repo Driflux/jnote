@@ -22,4 +22,18 @@ internal object GutterNotifier {
             )
             .notify(project)
     }
+
+    fun saveFailed(project: Project, relPath: String, cause: Throwable) {
+        NotificationGroupManager.getInstance().getNotificationGroup(DbPathNotifier.GROUP_ID)
+            .createNotification(
+                JNoteBundle.message("gutter.error.save.title"),
+                JNoteBundle.message(
+                    "gutter.error.save.content",
+                    StringUtil.escapeXmlEntities(relPath),
+                    StringUtil.escapeXmlEntities(cause.message ?: cause.javaClass.simpleName),
+                ),
+                NotificationType.ERROR,
+            )
+            .notify(project)
+    }
 }
