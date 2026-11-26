@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #3
-- PR: (to be filled)
+- PR: #34, #35
 
 ## Context
 Every later feature (Tool Window, gutter, search, AI import) reads and writes notes and tags. They need one repository layer on top of the schema from ADR 0002. It must keep the performance rules of intent.md section 2: all DB access through `Database.submit`, nothing on the EDT. Schema v1 already allows rows that make no sense (for example a CODE note without a path), so the layer must keep illegal states out.
