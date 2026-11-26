@@ -58,6 +58,7 @@ class JNotePanel internal constructor(
         onEdit = { edit(it) },
         onRelocate = { note -> note.relPath?.let { RelocateNotesTask(project, it).queue() } },
         canRelocate = { note -> note.project != null && note.project == shownProjectKey },
+        onConfirm = { confirmLocation(it) },
     )
 
     // 다시 찾기는 지금 프로젝트의 파일과 노트로만 하므로, "모든 프로젝트" 보기의 다른 프로젝트 노트에는 버튼을 숨긴다. EDT에서만 쓴다
@@ -171,6 +172,12 @@ class JNotePanel internal constructor(
             if (error != null) onEdt { ToolWindowNotifier.editFailed(project, (error as? CompletionException)?.cause ?: error) }
         }
     }
+
+    /** 근사 위치를 지금 줄 범위로 확인한다. 성공하면 저장소의 알림으로 목록과 거터가 다시 읽힌다. */
+    internal fun confirmLocation(note: Note): CompletableFuture<*> =
+        saver.confirmLocation(project, note).whenComplete { _, error ->
+            if (error != null) onEdt { ToolWindowNotifier.confirmFailed(project, (error as? CompletionException)?.cause ?: error) }
+        }
 
     private fun undo(deletion: NoteDeletion, deleted: DeletedNote) {
         deletion.undo(deleted).whenComplete { _, error ->

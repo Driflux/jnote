@@ -19,8 +19,9 @@ class NoteDetailsTest {
         prompt: String? = null,
         start: Int = 3,
         end: Int = 5,
+        status: NoteStatus = NoteStatus.OK,
     ) = Note(
-        1, "u", NoteKind.CODE, "p", "src/Foo.kt", className, start, end, snapshot, NoteStatus.OK,
+        1, "u", NoteKind.CODE, "p", "src/Foo.kt", className, start, end, snapshot, status,
         "title", body, aiSource, sourceUrl, prompt, 1, 1,
     )
 
@@ -68,6 +69,15 @@ class NoteDetailsTest {
         assertNull(NoteDetails.of(code(aiSource = " ", prompt = "p")).ai)
         val d = NoteDetails.of(code(aiSource = "Claude", sourceUrl = "https://x.test", prompt = ""))
         assertEquals(AiSourceDetail("Claude", "https://x.test", null), d.ai)
+    }
+
+    @Test
+    fun onlyApproxNotesAreApproximate() {
+        assertTrue(NoteDetails.of(code(status = NoteStatus.APPROX)).approximate)
+        listOf(NoteStatus.OK, NoteStatus.ORPHAN, NoteStatus.NEEDS_RELOCATE).forEach {
+            assertFalse(it.name, NoteDetails.of(code(status = it)).approximate)
+        }
+        assertFalse(NoteDetails.of(free()).approximate)
     }
 
     @Test

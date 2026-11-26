@@ -2,6 +2,7 @@ package io.github.driflux.jnote.ui
 
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
+import io.github.driflux.jnote.model.NoteStatus
 
 data class AiSourceDetail(val source: String, val sourceUrl: String?, val prompt: String?)
 
@@ -17,6 +18,8 @@ data class NoteDetail(
     val ai: AiSourceDetail?,
     /** FREE 노트는 이동할 곳이 없으므로 버튼을 숨긴다. */
     val canGoToCode: Boolean,
+    /** 재배치가 유사도로 찾은 근사 위치(APPROX)면 안내와 위치 확인 버튼을 보인다. */
+    val approximate: Boolean,
 )
 
 object NoteDetails {
@@ -33,6 +36,7 @@ object NoteDetails {
                 AiSourceDetail(it, note.sourceUrl?.takeIf(String::isNotBlank), note.prompt?.takeIf(String::isNotBlank))
             },
             canGoToCode = isCode,
+            approximate = note.status == NoteStatus.APPROX,
         )
     }
 
