@@ -26,10 +26,14 @@ src/main/kotlin/.../jnote
   ui/          Tool Window, dialogs, gutter icon
   action/      actions such as "add note"
   settings/    DB path setting
+  ai/          JSON format v1, import (upsert, preview), inbox check, copy for AI
   JNoteBundle.kt
 src/main/resources/messages/JNoteBundle.properties, JNoteBundle_ko.properties
 src/test/kotlin/...
 docs/adr/      design decision records
+docs/ai-format.md      JSON format spec (single source for AI integration)
+claude-plugin/         Claude Code plugin (skills/jnote/SKILL.md)
+.claude-plugin/marketplace.json   Claude Code marketplace manifest for this repo
 mockup/ui.html UI mockup
 ```
 

@@ -2,7 +2,7 @@
 
 > Drafts not yet registered on GitHub. Numbers are provisional; replace them with the real issue numbers once registered.
 > Each issue is split into one or more PRs, and the first PR includes the ADR (`docs/adr`). Every feature PR includes tests (CONTRIBUTE.md).
-> Steps follow the implementation order in intent.md section 8. Dependencies mostly follow the numbering.
+> Steps follow the implementation order in intent.md section 8. The "AI" group follows intent.md section 10 and depends on issues 2, 3, and 6. Otherwise dependencies mostly follow the numbering.
 
 ## 1. Project skeleton and CI  `Step 1`
 
@@ -30,16 +30,18 @@
 - [ ] The DB opens only on first use (no startup work)
 - [ ] WAL, `busy_timeout` 5 s, single-thread executor
 - [ ] Sequential `user_version` migrations; create `jnote.db.bak` right before a version bump
-- [ ] Apply schema v1 (`note`, `tag`, `note_tag`, indexes); FTS is added as v2 in the search issue
+- [ ] Apply schema v1 (`note`, `tag`, `note_tag`, indexes) including `uid` (unique), `ai_source`, `source_url`, `prompt`; FTS is added as v2 in the search issue
 - [ ] Migration tests using a SQLite file in a temp directory
+- [ ] Read-only SQL view `v_notes_export` (notes with tags flattened, fixed column names) that every later migration keeps working, with a contract test
 
 **PR split**
 1. DB connection, executor, lazy loading
-2. Migration runner + schema v1 + backup
+2. Migration runner + schema v1 (uid and AI fields) + backup
+3. `v_notes_export` view + contract test
 
-**ADR topic**: DB access model and migration approach
+**ADR topic**: DB access model, migration approach, and the view as an external contract
 
-**Related**: intent.md section 4
+**Related**: intent.md section 4, 10
 
 ## 3. Note and tag repository (CRUD)  `Step 1`
 
@@ -50,6 +52,7 @@
 - [ ] Create tags, link/unlink them to notes, and test the policy for unused tags
 - [ ] List by project, most recently modified first
 - [ ] Pure unit tests (no IDE)
+- [ ] New notes get a generated `uid`; AI fields round-trip through the repository
 
 **PR split**
 1. `Note` model + note CRUD
@@ -84,7 +87,7 @@
 **Done criteria**
 - [ ] Context menu and `Ctrl+Option+N` (changeable in Keymap)
 - [ ] Collect selection range, relative path, snapshot, and class name (class-name extraction behind an interface, common PSI implementation)
-- [ ] Dialog for title and note text (tags are added in the tags issue)
+- [ ] Dialog for title and note text, plus a collapsible "AI source" section (default collapsed): AI name (free text with presets), link, prompt (tags are added in the tags issue)
 - [ ] Save in the background; UI strings go through the bundle
 
 **PR split**
@@ -105,6 +108,7 @@
 - [ ] Edit and delete (delete without confirmation + undo notification)
 - [ ] Empty-state guidance; spinner only after 300 ms
 - [ ] Create the Tool Window lazily
+- [ ] Small badge on AI-sourced notes in the list
 
 **PR split**
 1. Tool Window skeleton + list
@@ -192,7 +196,7 @@
 **Goal**: Find note text, snippets, class names, and tags from one search box.
 
 **Done criteria**
-- [ ] Schema v2: `note_fts` (trigram) + sync-trigger migration
+- [ ] Schema v2: `note_fts` (trigram) over title, body, snapshot, class name, and prompt + sync-trigger migration
 - [ ] Single `LIKE '%q%'` path, minimum 2 characters, tests for Korean particle cases
 - [ ] Keep most-recent-first order while searching; no-result guidance
 - [ ] Check response time with thousands of rows
@@ -279,24 +283,83 @@
 
 **Related**: intent.md section 4
 
-## 16. JSON export/import  `Other`
+## 16. JSON format v1 and export  `AI`
 
-**Goal**: Export notes to JSON and import them for backup and moving machines.
+**Goal**: Define a versioned JSON format that humans and AI can both produce, and export notes in it.
 
 **Done criteria**
-- [ ] Tools > JNote menu, cancellable Background Task
-- [ ] Import merges and skips duplicates
-- [ ] Includes tags and the schema version
+- [ ] Versioned format (`format_version`; notes with `uid`, tags, anchors using the raw git `repo_url`, AI source fields)
+- [ ] Export all or selected notes from Tools > JNote as a cancellable Background Task
+- [ ] Format spec written in `docs/ai-format.md` (fields, examples, prompt examples)
+- [ ] Serializer/deserializer round-trip tests (pure logic)
 
 **PR split**
-1. Export
-2. Import (merge)
+1. Format model + serializer/deserializer
+2. Export action
+3. `docs/ai-format.md`
 
-**ADR topic**: JSON format and duplicate detection criteria
+**ADR topic**: JSON format, versioning, and `uid` semantics
 
-**Related**: intent.md section 4
+**Related**: intent.md section 4, 10
 
-## 17. Convenience features and concurrent access  `Other`
+## 17. JSON import: upsert, preview, backup  `AI`
+
+**Goal**: Let AI-written or exported JSON update notes safely, with a human confirmation step.
+
+**Done criteria**
+- [ ] Import from a file or from the clipboard
+- [ ] Upsert by `uid` (update if present, create otherwise); normalize `repo_url` into the project key on import; unknown tags register automatically
+- [ ] Preview dialog: new N, updated M, titles per note, Apply / Cancel
+- [ ] Create `jnote.pre-import.bak` right before applying (overwrites the previous one)
+- [ ] Import never deletes notes
+- [ ] Invalid items are skipped; reasons are collected into one notification
+- [ ] Cancellable Background Task
+
+**PR split**
+1. Import engine: validate + upsert (pure logic)
+2. Preview dialog + apply
+3. Clipboard import + pre-import backup
+
+**ADR topic**: Upsert semantics, preview, backup, and the no-delete rule
+
+**Related**: intent.md section 4, 10
+
+## 18. Inbox check on focus  `AI`
+
+**Goal**: Pick up JSON files that an AI agent dropped into the inbox folder.
+
+**Done criteria**
+- [ ] When the Tool Window gains focus, check `~/.jnote/inbox/*.json` once (no watching, no polling)
+- [ ] Notification "N AI notes waiting · Review" opens the import preview
+- [ ] Processed files move to `inbox/done/`
+
+**PR split**
+1. Inbox scan on focus + notification
+2. Hook into the preview + move to done
+
+**ADR topic**: Inbox contract
+
+**Related**: intent.md section 4, 10
+
+## 19. Copy for AI  `AI`
+
+**Goal**: Make notes easy to paste into an AI chat, and tell web AIs the format.
+
+**Done criteria**
+- [ ] Copy selected notes as Markdown (title, file location, snippet, note text)
+- [ ] Copy selected notes as JSON (format v1)
+- [ ] "Copy format instructions for AI" copies a prompt built from the spec file, which is bundled as a resource at build time
+- [ ] Single source for the instruction text (`docs/ai-format.md`)
+
+**PR split**
+1. Copy as Markdown / JSON
+2. Copy format instructions
+
+**ADR topic**: Copy formats and instruction text source
+
+**Related**: intent.md section 7, 10
+
+## 20. Convenience features and concurrent access  `Other`
 
 **Goal**: Polish the 1.0 usability items and multi-window use.
 
@@ -305,18 +368,43 @@
 - [ ] "Current file notes only" toggle
 - [ ] Snippet syntax highlighting (read-only, created only on selection)
 - [ ] Refresh once when the Tool Window gains focus (no polling)
+- [ ] "AI notes only" filter
 
 **PR split**
 1. Copy snippet + keyboard control
 2. Current file toggle
 3. Syntax highlighting
 4. Refresh on focus
+5. AI notes filter
 
 **ADR topic**: When highlighting is created and how refresh works
 
 **Related**: intent.md section 4, 7
 
-## 18. Release preparation  `Step 6`
+## 21. Claude Code skill and its marketplace  `AI`
+
+**Goal**: Let Claude Code capture, recall, and organize notes through a skill installed from a Claude Code plugin marketplace.
+
+**Done criteria**
+- [ ] Skill `jnote` with three flows: capture, recall (read-only queries on `v_notes_export`), organize (uid upsert JSON)
+- [ ] Capture fills file path, line range, snippet, and `repo_url` for code notes
+- [ ] Writes only into `~/.jnote/inbox/`; reads only through `v_notes_export`, read-only
+- [ ] Root `.claude-plugin/marketplace.json` and a `claude-plugin/` plugin directory (`plugin.json` + `skills/jnote/SKILL.md`)
+- [ ] Installable with `/plugin marketplace add Driflux/jnote` then `/plugin install`
+- [ ] The skill refers to `docs/ai-format.md` as the single spec
+- [ ] Verified by running the skill against a real DB and the plugin preview
+
+**PR split**
+1. Plugin directory + SKILL.md (capture)
+2. Recall
+3. Organize
+4. Marketplace manifest + install docs
+
+**ADR topic**: Skill instead of MCP; inbox and view as the contract
+
+**Related**: intent.md section 3, 10
+
+## 22. Release preparation  `Step 6`
 
 **Goal**: Get everything needed for Marketplace registration.
 
@@ -325,6 +413,7 @@
 - [ ] Description (English with Korean), screenshots, icon, change notes
 - [ ] State "local only, no telemetry"
 - [ ] Final Marketplace name check, LICENSE (MIT)
+- [ ] Mention the AI skill and its install steps in the description
 
 **PR split**
 1. Docs and resources
@@ -332,5 +421,11 @@
 
 **ADR topic**: Release procedure and versioning policy
 
-**Related**: intent.md section 3
+**Related**: intent.md section 3, 10
 
+## Later (not scheduled)
+
+- Markdown rendering of note text (needs a decision on the Markdown plugin dependency vs. a custom renderer; see the performance principles)
+- Markdown export to a file (the clipboard copy ships in 1.0)
+- Instruction files for other agents (`AGENTS.md` style) based on `docs/ai-format.md`
+- Verifying other JetBrains IDEs

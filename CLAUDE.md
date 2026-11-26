@@ -29,3 +29,4 @@ Never make the IDE slower. Do not make changes that break the following (details
 - Search: FTS5 trigram + `LIKE '%q%'`, minimum 2 characters.
 - Relocation: exact match, then similarity (about 80%), then ORPHAN. Automatic only up to 5,000 lines.
 - Delete is immediate with an undo notification.
+- AI integration (intent.md section 10): JSON format v1 with `uid` upsert, import preview + pre-import backup, inbox checked on focus, read-only view `v_notes_export`, and a Claude Code skill. No MCP, and the plugin never calls an AI.
