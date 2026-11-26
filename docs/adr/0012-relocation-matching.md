@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #12
-- PR: (to be filled)
+- PR: #32, #33
 
 ## Context
 Notes store a code snapshot. When the file changes (other branch, worktree, edits), the note must find its code again (intent.md section 6). The order is fixed: exact match after whitespace normalization, then similarity, then none. The core must stay cheap (intent.md section 2): it runs in the background on files that can be large, the caller limits automatic similarity runs to 5,000 lines, and manual runs have no limit. So the core must not assume that limit and must be cancellable. The core is pure Kotlin in `relocate/` with no IntelliJ API, so it is tested with plain JUnit.
