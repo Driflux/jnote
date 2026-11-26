@@ -44,7 +44,7 @@ class NoteLineMarkerProvider : LineMarkerProviderDescriptor(), DumbAware {
         if (notes.isNullOrEmpty()) return
         val document = PsiDocumentManager.getInstance(project).getCachedDocument(file) ?: return
         project.service<OpenValidationService>().validateOncePerOpen(document, relPath)
-        val targets = GutterLines.group(notes).mapNotNull { target(it, document) }
+        val targets = GutterLines.group(project.service<GutterNoteService>().track(document, notes)).mapNotNull { target(it, document) }
         if (targets.isEmpty()) return
 
         // 잎 요소는 파일을 겹치지 않게 나누므로 목표마다 그 위치를 담은 잎 하나에만 마커가 붙는다.

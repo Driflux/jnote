@@ -5,7 +5,10 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import com.intellij.openapi.editor.Document
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiManager
@@ -25,12 +28,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 프로젝트별 거터 노트 캐시. plugin.xml에 등록하지 않는 라이트 서비스라 마커 제공자가 처음 부를 때
- * 만들어지며, 그때 [NotesChanged]를 구독한다. 서비스가 프로젝트마다 하나이고 프로젝트 키는 바뀌지 않으므로
+ * 만들어지며, 그때 [NotesChanged]와 파일 닫기를 구독한다. 서비스가 프로젝트마다 하나이고 프로젝트 키는 바뀌지 않으므로
  * 캐시 항목은 상대 경로만으로 (프로젝트 키, 상대 경로)를 가리킨다.
  */
 @Service(Service.Level.PROJECT)
 internal class GutterNoteService(private val project: Project) : Disposable {
     private val cache = FileNoteCache(::load)
+    private val positions = NotePositions()
 
     // 캐시를 채운 DB. 다른 DB의 노트를 보여 주지 않도록 바뀌면 캐시를 통째로 버린다
     private var seenDatabase: DatabaseService.Current? = null
@@ -42,9 +46,21 @@ internal class GutterNoteService(private val project: Project) : Disposable {
     init {
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(NotesChanged.TOPIC, NotesChangedListener { onNotesChanged() })
+        project.messageBus.connect(this).subscribe(
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+                    // 다른 분할 창에 아직 열려 있으면 마커가 계속 따라가야 한다
+                    if (source.isFileOpen(file)) return
+                    FileDocumentManager.getInstance().getCachedDocument(file)?.let { positions.forget(it) }
+                }
+            },
+        )
     }
 
     internal val isIdle: Boolean get() = cache.isIdle
+
+    internal fun isTracking(document: Document): Boolean = positions.isTracking(document)
 
     /**
      * 파일의 노트. 아직 못 읽었으면 null을 돌려주고 EDT 밖에서 읽기를 시작하며, 읽은 값이 그릴 것을 바꾸면
@@ -56,6 +72,12 @@ internal class GutterNoteService(private val project: Project) : Disposable {
         return cache.lookup(relPath, onChanged = { restart(file) }, onFailed = { failed(file, relPath, it) })
     }
 
+    /** [notes]를 열린 문서의 마커가 가리키는 현재 줄로 바꿔 돌려준다. 범위가 지워진 노트는 빠진다. */
+    fun track(document: Document, notes: List<CachedNote>): List<CachedNote> {
+        val database = synchronized(this) { seenDatabase?.database } ?: return notes
+        return positions.sync(document, database, notes)
+    }
+
     private fun discardIfDatabaseChanged() {
         val now = DatabaseService.getInstance().current()
         synchronized(this) {
@@ -65,6 +87,7 @@ internal class GutterNoteService(private val project: Project) : Disposable {
             seenDatabase = now
             if (same) return
             cache.clear()
+            positions.clear()
             failureReported.set(false)
         }
     }
@@ -122,5 +145,6 @@ internal class GutterNoteService(private val project: Project) : Disposable {
     override fun dispose() {
         disposed = true
         cache.clear()
+        positions.clear()
     }
 }
