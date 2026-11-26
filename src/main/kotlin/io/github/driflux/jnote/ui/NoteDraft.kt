@@ -44,6 +44,9 @@ data class NoteDraft(
         )
     }
 
+    /** AI 출처 구역에 채울 값이 하나라도 있는지. 편집할 때 접어 둔 구역에 값이 숨지 않게 펼치는 기준이다. */
+    fun hasAiSource(): Boolean = listOf(aiSource, sourceUrl, prompt).any { it.isNotBlank() }
+
     private fun String.trimToNull(): String? = trim().takeIf { it.isNotEmpty() }
 
     companion object {
