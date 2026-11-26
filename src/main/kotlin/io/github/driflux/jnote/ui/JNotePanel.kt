@@ -6,10 +6,13 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.ui.CollectionListModel
 import com.intellij.ui.OnePixelSplitter
+import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.concurrency.AppExecutorUtil
+import com.intellij.util.ui.AsyncProcessIcon
+import com.intellij.util.ui.JBUI
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
 import io.github.driflux.jnote.NotesChangedListener
@@ -23,7 +26,12 @@ import java.util.concurrent.CompletionException
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.ListSelectionModel
 
-class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayout()), Disposable {
+class JNotePanel internal constructor(
+    private val project: Project,
+    scheduler: DelayScheduler,
+) : JBPanel<JNotePanel>(BorderLayout()), Disposable {
+    constructor(project: Project) : this(project, AppDelayScheduler)
+
     private class Loaded(val projectKey: String, val notes: List<Note>)
 
     private val model = CollectionListModel<NoteRow>()
@@ -34,6 +42,27 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
 
     internal val detail = NoteDetailPanel(onGoToCode = { CodeNavigator.goTo(project, it) }, onDelete = { delete(it) })
 
+    // reload()가 어느 스레드에서든 불리므로 Swing 부품 대신 이 값을 읽는다
+    @Volatile
+    private var allProjects = false
+
+    internal val allProjectsBox = JBCheckBox(JNoteBundle.message("toolWindow.allProjects")).apply {
+        addActionListener {
+            allProjects = isSelected
+            reload()
+        }
+    }
+    private val spinnerIcon = AsyncProcessIcon("JNote").apply { isVisible = false }
+
+    internal val spinner = DelayedSpinner(scheduler, onVisibleChanged = {
+        spinnerIcon.isVisible = it
+        if (it) spinnerIcon.resume() else spinnerIcon.suspend()
+    })
+
+    // EDT에서만 바꾼다
+    internal var state = ToolWindowState()
+        private set
+
     // 늦게 끝난 옛 읽기가 새 결과를 덮지 않도록 번호를 매긴다
     private val generation = AtomicInteger()
 
@@ -42,6 +71,12 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
 
     init {
         list.addListSelectionListener { if (!it.valueIsAdjusting) detail.show(list.selectedValue?.note) }
+        val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            border = JBUI.Borders.empty(2, 8)
+            add(allProjectsBox, BorderLayout.WEST)
+            add(spinnerIcon, BorderLayout.EAST)
+        }
+        add(header, BorderLayout.NORTH)
         add(OnePixelSplitter(true, 0.5f).apply {
             firstComponent = JBScrollPane(list)
             secondComponent = detail
@@ -55,9 +90,12 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
     /** 어느 스레드에서 불러도 된다. 읽기는 EDT 밖에서, 화면 갱신은 EDT에서 한다. */
     fun reload() {
         val ticket = generation.incrementAndGet()
-        load(allProjects = false).whenComplete { loaded, error ->
+        val allProjects = allProjects
+        onEdt { spinner.start() }
+        load(allProjects).whenComplete { loaded, error ->
             onEdt {
                 if (disposed || ticket != generation.get()) return@onEdt
+                spinner.stop()
                 if (loaded != null) show(loaded) else ToolWindowNotifier.loadFailed(project, error.cause ?: error)
             }
         }
@@ -105,10 +143,23 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
     private fun show(loaded: Loaded) {
         val free = JNoteBundle.message("toolWindow.subtitle.free")
         val selectedId = list.selectedValue?.note?.id
-        model.replaceAll(loaded.notes.map { NoteRows.of(it, loaded.projectKey, free) })
+        val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free) }
+        state = ToolWindowState(rows, allProjects)
+        model.replaceAll(rows)
+        showEmptyText()
         // 다시 읽어도 보던 노트를 유지하고, 그 사이 지워졌다면 상세를 비운다
         val index = model.items.indexOfFirst { it.note.id == selectedId }
         if (index >= 0) list.selectedIndex = index else detail.show(null)
+    }
+
+    private fun showEmptyText() {
+        val text = list.emptyText
+        if (state.showEmptyState) {
+            text.text = JNoteBundle.message("toolWindow.empty.title")
+            text.appendLine(JNoteBundle.message("toolWindow.empty.hint", JNoteBundle.message("toolWindow.empty.shortcut")))
+        } else {
+            text.clear()
+        }
     }
 
     override fun dispose() {
