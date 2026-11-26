@@ -22,6 +22,8 @@ internal class NoteDetailPanel(
     private val onGoToCode: (Note) -> Unit,
     private val onDelete: (Note) -> Unit,
     private val onEdit: (Note) -> Unit,
+    private val onRelocate: (Note) -> Unit,
+    private val canRelocate: (Note) -> Boolean,
 ) : JBPanel<NoteDetailPanel>(BorderLayout()) {
     private var note: Note? = null
 
@@ -36,6 +38,9 @@ internal class NoteDetailPanel(
     internal val goToCodeButton = JButton(JNoteBundle.message("toolWindow.detail.goToCode")).apply {
         addActionListener { note?.let(onGoToCode) }
     }
+    internal val relocateButton = JButton(JNoteBundle.message("toolWindow.detail.relocate")).apply {
+        addActionListener { note?.let(onRelocate) }
+    }
     internal val editButton = JButton(JNoteBundle.message("toolWindow.detail.edit")).apply {
         addActionListener { note?.let(onEdit) }
     }
@@ -44,6 +49,7 @@ internal class NoteDetailPanel(
     }
     internal val buttons = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
         add(goToCodeButton)
+        add(relocateButton)
         add(editButton)
         add(deleteButton)
     }
@@ -90,6 +96,7 @@ internal class NoteDetailPanel(
         aiPromptArea.isVisible = detail.ai?.prompt != null
         aiSection.isVisible = detail.ai != null
         goToCodeButton.isVisible = detail.canGoToCode
+        relocateButton.isVisible = detail.canGoToCode && canRelocate(note)
     }
 
     private fun readOnlyArea(wrap: Boolean) = JBTextArea().apply {

@@ -24,6 +24,7 @@ import io.github.driflux.jnote.NoteSelectRequested
 import io.github.driflux.jnote.NoteSelectRequestedListener
 import io.github.driflux.jnote.NotesChangedListener
 import io.github.driflux.jnote.action.NoteSaver
+import io.github.driflux.jnote.action.RelocateNotesTask
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.model.Note
@@ -51,7 +52,16 @@ class JNotePanel internal constructor(
         selectionMode = ListSelectionModel.SINGLE_SELECTION
     }
 
-    internal val detail = NoteDetailPanel(onGoToCode = { CodeNavigator.goTo(project, it) }, onDelete = { delete(it) }, onEdit = { edit(it) })
+    internal val detail = NoteDetailPanel(
+        onGoToCode = { CodeNavigator.goTo(project, it) },
+        onDelete = { delete(it) },
+        onEdit = { edit(it) },
+        onRelocate = { note -> note.relPath?.let { RelocateNotesTask(project, it).queue() } },
+        canRelocate = { note -> note.project != null && note.project == shownProjectKey },
+    )
+
+    // 다시 찾기는 지금 프로젝트의 파일과 노트로만 하므로, "모든 프로젝트" 보기의 다른 프로젝트 노트에는 버튼을 숨긴다. EDT에서만 쓴다
+    private var shownProjectKey: String? = null
 
     // reload()가 어느 스레드에서든 불리므로 Swing 부품 대신 이 값을 읽는다
     @Volatile
@@ -185,6 +195,7 @@ class JNotePanel internal constructor(
     private fun show(loaded: Loaded) {
         val free = JNoteBundle.message("toolWindow.subtitle.free")
         val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free) }
+        shownProjectKey = loaded.projectKey
         state = state.copy(notes = rows, allProjects = allProjects)
         render()
     }
