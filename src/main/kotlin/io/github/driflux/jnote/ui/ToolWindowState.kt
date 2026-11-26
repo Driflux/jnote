@@ -7,7 +7,6 @@ data class SearchMatch(val query: String, val ids: Set<Long>)
 
 /**
  * [notes]가 null이면 아직 한 번도 읽지 않은 것이고, 아니면 필터 전의 전체 행이다.
- * Swing에 기대지 않으므로 필터와 빈 상태 규칙을 단위 테스트로 검증한다.
  */
 data class ToolWindowState(
     val notes: List<NoteRow>? = null,

@@ -529,7 +529,6 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         assertEquals(listOf("sql", "todo", "unused"), tagRepo.list().get().map { it.name })
     }
 
-    // 입력 지연을 건너뛰고 검색을 바로 적용한다
     private fun search(panel: JNotePanel, text: String) {
         panel.searchField.text = text
         panel.applyQuery(text)

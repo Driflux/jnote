@@ -210,10 +210,6 @@ class JNotePanel internal constructor(
             }
         }
 
-    /**
-     * 붙은 태그를 EDT 밖에서 읽은 뒤 다이얼로그를 띄워 편집하고, 확인하면 EDT 밖에서 저장한다.
-     * 취소하면 아무것도 저장하지 않는다. 모두 끝나면 완료되는 future를 돌려준다.
-     */
     internal fun edit(note: Note): CompletableFuture<*> {
         val done = CompletableFuture<Unit>()
         TagRepository(DatabaseService.getInstance().database).tagsOf(note.id).whenComplete { tags, readError ->
@@ -238,7 +234,6 @@ class JNotePanel internal constructor(
         return done
     }
 
-    /** 근사 위치를 지금 줄 범위로 확인한다. 성공하면 저장소의 알림으로 목록과 거터가 다시 읽힌다. */
     internal fun confirmLocation(note: Note): CompletableFuture<*> =
         saver.confirmLocation(project, note).whenComplete { _, error ->
             if (error != null) onEdt { ToolWindowNotifier.confirmFailed(project, (error as? CompletionException)?.cause ?: error) }
@@ -328,7 +323,6 @@ class JNotePanel internal constructor(
         add(JMenuItem(JNoteBundle.message("toolWindow.tag.delete")).apply { addActionListener { deleteTag(tag) } })
     }
 
-    /** 새 이름을 물어 모든 노트에 적용한다. 취소하면 바로 끝나는 future를 돌려준다. */
     internal fun renameTag(tag: Tag): CompletableFuture<*> {
         val name = askTagName(project, tag, state.tags) ?: return CompletableFuture.completedFuture(null)
         return TagRepository(DatabaseService.getInstance().database).rename(tag.id, name).whenComplete { result, error ->
@@ -343,7 +337,6 @@ class JNotePanel internal constructor(
         }
     }
 
-    /** 확인을 받으면 태그와 노트 연결만 지운다(노트는 그대로). 취소하면 바로 끝나는 future를 돌려준다. */
     internal fun deleteTag(tag: Tag): CompletableFuture<*> {
         if (!confirmTagDelete(project, tag)) return CompletableFuture.completedFuture(null)
         return TagRepository(DatabaseService.getInstance().database).delete(tag.id).whenComplete { _, error ->

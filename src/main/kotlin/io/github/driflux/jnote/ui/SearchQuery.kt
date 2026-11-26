@@ -2,7 +2,6 @@ package io.github.driflux.jnote.ui
 
 import io.github.driflux.jnote.db.SearchRepository
 
-/** 검색창 입력에 대한 규칙. Swing 없이 테스트한다. */
 object SearchQuery {
     /** 앞뒤 공백을 뺀다. SearchRepository도 같은 방식으로 다듬는다. */
     fun normalize(text: String): String = text.trim()
