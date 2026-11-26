@@ -1,6 +1,7 @@
 package io.github.driflux.jnote.db
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import java.nio.file.Path
@@ -13,16 +14,23 @@ class DatabaseService : Disposable {
     private val lock = Any()
     private var path: Path? = null
     private var current: Database? = null
+    private var disposed = false
 
     val database: Database
-        get() = synchronized(lock) { current ?: Database(pathLocked()).also { current = it } }
+        get() = synchronized(lock) {
+            check(!disposed) { "DatabaseService is disposed" }
+            current ?: Database(pathLocked()).also { current = it }
+        }
 
     fun currentPath(): Path = synchronized(lock) { pathLocked() }
 
     /** 경로와 DB를 따로 읽으면 그 사이 전환이 끼어들어 서로 다른 DB의 것이 될 수 있어 한 번에 읽는다. */
-    fun current(): Current = synchronized(lock) { Current(pathLocked(), current) }
+    fun current(): Current = synchronized(lock) {
+        check(!disposed) { "DatabaseService is disposed" }
+        Current(pathLocked(), current)
+    }
 
-    /** 만들어졌고 연결까지 열린 DB. 한 번도 쓰지 않았다면 null이라 복사할 때 파일을 만들지 않는다. */
+    /** 만들어졌고 연결까지 열린 DB. 한 번도 쓰지 않았다면 null이다. */
     fun openDatabaseOrNull(): Database? = synchronized(lock) { current?.takeIf { it.isOpen } }
 
     /**
@@ -30,7 +38,7 @@ class DatabaseService : Disposable {
      * 기다리지 않으므로 옛 DB의 스레드 안에서도 부를 수 있다.
      */
     fun replace(expected: Current, newPath: Path): Boolean = synchronized(lock) {
-        if (current !== expected.database || pathLocked() != expected.path) return false
+        if (disposed || current !== expected.database || pathLocked() != expected.path) return false
         current = null
         path = newPath
         true
@@ -50,7 +58,12 @@ class DatabaseService : Disposable {
     private fun pathLocked(): Path = path ?: DatabasePaths.default().also { path = it }
 
     override fun dispose() {
-        synchronized(lock) { current }?.close()
+        val old = synchronized(lock) {
+            disposed = true
+            current.also { current = null }
+        }
+        // EDT에서 불릴 수 있어 닫기를 기다리지 않는다. 한 번도 쓰지 않았다면 닫을 DB도 없다
+        if (old != null) ApplicationManager.getApplication().executeOnPooledThread { old.close() }
     }
 
     companion object {
