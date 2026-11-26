@@ -40,6 +40,17 @@ object Migrations {
         );
         CREATE INDEX idx_note_project_path ON note(project, rel_path);
         """.trimIndent(),
+        // v2: 에이전트가 읽는 외부 계약 뷰. 열 이름과 순서를 바꾸지 않는다
+        """
+        CREATE VIEW v_notes_export AS
+        SELECT n.uid, n.kind, n.project, n.rel_path, n.class_name, n.start_line, n.end_line,
+               n.snapshot, n.status, n.title, n.body, n.ai_source, n.source_url, n.prompt,
+               n.created_at, n.updated_at,
+               (SELECT group_concat(name, ',')
+                  FROM (SELECT t.name AS name FROM note_tag nt JOIN tag t ON t.id = nt.tag_id
+                         WHERE nt.note_id = n.id ORDER BY t.name)) AS tags
+          FROM note n
+        """.trimIndent(),
     )
 
     fun run(connection: Connection, migrations: List<String> = ALL) {
