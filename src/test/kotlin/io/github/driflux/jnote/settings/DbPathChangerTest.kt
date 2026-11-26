@@ -88,7 +88,8 @@ class DbPathChangerTest : BasePlatformTestCase() {
         DbPathChanger.request(dir) // 폴더
         val n = notifications.single()
         assertEquals(NotificationType.ERROR, n.type)
-        assertTrue(n.content.isNotBlank())
+        assertEquals(JNoteBundle.message("notification.dbPath.invalid.title"), n.title)
+        assertEquals(JNoteBundle.message("settings.dbPath.invalid.isDirectory"), n.content)
         assertEquals(current, DatabaseService.getInstance().currentPath())
         assertEquals(current.toString(), DbPathSettings.getInstance().state.dbPath)
     }
@@ -97,7 +98,56 @@ class DbPathChangerTest : BasePlatformTestCase() {
         DbPathNotifier.failed(IllegalStateException("disk full"))
         val n = notifications.single()
         assertEquals(NotificationType.ERROR, n.type)
-        assertTrue(n.content.contains("disk full"))
+        assertEquals(JNoteBundle.message("notification.dbPath.failed.title"), n.title)
+        assertEquals(JNoteBundle.message("notification.dbPath.failed.content", "disk full"), n.content)
+    }
+
+    private fun createProbe(): Database = DatabaseService.getInstance().database.also { db ->
+        db.submitAndWait { c ->
+            c.createStatement().use { s ->
+                s.execute("create table probe(x integer)")
+                s.execute("insert into probe values (42)")
+            }
+        }
+    }
+
+    fun testMissingTargetGetsACopyOfTheCurrentDatabase() {
+        createProbe()
+        val target = dir.resolve("moved/next.db")
+        DbPathChanger.request(target)
+        assertTrue(notifications.isEmpty())
+        assertEquals(target, DatabaseService.getInstance().currentPath())
+        assertEquals(target.toString(), DbPathSettings.getInstance().state.dbPath)
+        assertTrue(Files.exists(current))
+        assertEquals(1, DatabaseService.getInstance().database.submitAndWait { c ->
+            c.createStatement().use { s -> s.executeQuery("select count(*) from probe").use { it.next(); it.getInt(1) } }
+        })
+    }
+
+    fun testCopyThatCannotFinishIsReportedAndNothingChanges() {
+        val db = createProbe()
+        // 시도마다 5초씩 기다리지 않도록 이 연결의 대기 시간만 줄인다
+        db.submitAndWait { c -> c.createStatement().use { it.execute("PRAGMA busy_timeout = 50") } }
+        val target = dir.resolve("next.db")
+        // 다른 연결이 읽기 트랜잭션을 연 채로 있어 체크포인트가 끝나지 않는다
+        org.sqlite.JDBC().connect("jdbc:sqlite:$current", java.util.Properties())!!.use { reader ->
+            reader.autoCommit = false
+            reader.createStatement().use { s -> s.executeQuery("select count(*) from probe").use { it.next() } }
+            DbPathChanger.request(target)
+        }
+        val n = notifications.single()
+        assertEquals(NotificationType.ERROR, n.type)
+        assertEquals(JNoteBundle.message("notification.dbPath.failed.title"), n.title)
+        assertEquals(
+            JNoteBundle.message(
+                "notification.dbPath.failed.content",
+                "WAL checkpoint could not finish because another connection is reading the database",
+            ),
+            n.content,
+        )
+        assertEquals(current, DatabaseService.getInstance().currentPath())
+        assertEquals(current.toString(), DbPathSettings.getInstance().state.dbPath)
+        assertFalse(Files.exists(target))
     }
 
     fun testStaleWalAtTheNewLocationIsReportedAndNothingChanges() {
