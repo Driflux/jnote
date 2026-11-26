@@ -3,7 +3,9 @@ package io.github.driflux.jnote.ui
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
+import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Disposer
 import com.intellij.ui.CollectionListModel
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.components.JBCheckBox
@@ -13,6 +15,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.util.ui.AsyncProcessIcon
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
 import io.github.driflux.jnote.NotesChangedListener
@@ -52,12 +55,19 @@ class JNotePanel internal constructor(
             reload()
         }
     }
-    private val spinnerIcon = AsyncProcessIcon("JNote").apply { isVisible = false }
+    internal val spinnerIcon = AsyncProcessIcon("JNote").apply { isVisible = false }
 
+    // 닫힌 뒤에 늦게 도착한 타이머가 이미 정리된 아이콘을 다시 돌리지 못하게 한다
     internal val spinner = DelayedSpinner(scheduler, onVisibleChanged = {
-        spinnerIcon.isVisible = it
-        if (it) spinnerIcon.resume() else spinnerIcon.suspend()
+        if (!disposed) {
+            spinnerIcon.isVisible = it
+            if (it) spinnerIcon.resume() else spinnerIcon.suspend()
+        }
     })
+
+    // 아직 끝나지 않은 읽기 수. 테스트가 DB 경로를 바꾸기 전에 읽기가 끝났는지 확인하는 데 쓴다
+    private val pendingLoads = AtomicInteger()
+    internal val isIdle: Boolean get() = pendingLoads.get() == 0
 
     // EDT에서만 바꾼다
     internal var state = ToolWindowState()
@@ -70,6 +80,7 @@ class JNotePanel internal constructor(
     private var disposed = false
 
     init {
+        Disposer.register(this, spinnerIcon)
         list.addListSelectionListener { if (!it.valueIsAdjusting) detail.show(list.selectedValue?.note) }
         val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(2, 8)
@@ -91,8 +102,10 @@ class JNotePanel internal constructor(
     fun reload() {
         val ticket = generation.incrementAndGet()
         val allProjects = allProjects
-        onEdt { spinner.start() }
+        pendingLoads.incrementAndGet()
+        onEdt { if (!disposed) spinner.start() }
         load(allProjects).whenComplete { loaded, error ->
+            pendingLoads.decrementAndGet()
             onEdt {
                 if (disposed || ticket != generation.get()) return@onEdt
                 spinner.stop()
@@ -156,13 +169,30 @@ class JNotePanel internal constructor(
         val text = list.emptyText
         if (state.showEmptyState) {
             text.text = JNoteBundle.message("toolWindow.empty.title")
-            text.appendLine(JNoteBundle.message("toolWindow.empty.hint", JNoteBundle.message("toolWindow.empty.shortcut")))
+            text.appendLine(emptyHint())
         } else {
             text.clear()
         }
     }
 
+    // 단축키는 사용자가 바꿀 수 있고 메뉴 이름은 액션의 문구이므로, 둘 다 실제 값에서 가져온다
+    private fun emptyHint(): String {
+        val action = JNoteBundle.message("action.addNote.text")
+        val shortcut = KeymapUtil.getFirstKeyboardShortcutText(ADD_NOTE_ACTION_ID)
+        return if (shortcut.isEmpty()) {
+            JNoteBundle.message("toolWindow.empty.hint.noShortcut", action)
+        } else {
+            JNoteBundle.message("toolWindow.empty.hint", action, shortcut)
+        }
+    }
+
     override fun dispose() {
         disposed = true
+        // 대기 중인 타이머를 취소하고 보이는 상태를 끈다. DelayedSpinner는 EDT에서만 쓴다
+        UIUtil.invokeLaterIfNeeded { spinner.stop() }
+    }
+
+    companion object {
+        internal const val ADD_NOTE_ACTION_ID = "JNote.AddNote"
     }
 }

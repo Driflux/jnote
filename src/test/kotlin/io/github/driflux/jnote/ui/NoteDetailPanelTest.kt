@@ -37,10 +37,18 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         dbService.switchTo(dir.resolve("jnote.db"))
     }
 
+    // 테스트가 만든 패널. 닫고 읽기가 끝나야 DB 경로를 바꿔도 늦은 읽기가 엉뚱한 DB를 열지 않는다
+    private val panels = mutableListOf<JNotePanel>()
+
     override fun tearDown() {
         try {
-            dbService.switchTo(DatabasePaths.default())
-            dir.toFile().deleteRecursively()
+            try {
+                panels.forEach { Disposer.dispose(it) }
+                awaitUntil("pending loads drained") { panels.all { it.isIdle } }
+            } finally {
+                dbService.switchTo(DatabasePaths.default())
+                dir.toFile().deleteRecursively()
+            }
         } finally {
             super.tearDown()
         }
@@ -60,6 +68,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
 
     private fun newPanel(expected: Int): JNotePanel {
         val panel = JNotePanel(project)
+        panels += panel
         Disposer.register(testRootDisposable, panel)
         awaitUntil("list loaded") { panel.list.model.size == expected }
         return panel

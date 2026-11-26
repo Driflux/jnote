@@ -35,11 +35,6 @@ class DelayedSpinnerTest {
     private val spinner = DelayedSpinner(scheduler, { changes += it })
 
     @Test
-    fun defaultDelayIs300Ms() {
-        assertEquals(300L, DelayedSpinner.DEFAULT_DELAY_MS)
-    }
-
-    @Test
     fun fastLoadNeverShowsTheSpinner() {
         spinner.start()
         scheduler.advance(299)
@@ -76,7 +71,7 @@ class DelayedSpinnerTest {
         spinner.start()
         scheduler.advance(300)
         spinner.start()
-        assertEquals(1, scheduler.jobs.size + 1)
+        assertTrue(scheduler.jobs.isEmpty())
         assertTrue(spinner.visible)
     }
 
