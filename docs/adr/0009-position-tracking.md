@@ -43,3 +43,15 @@ Two other issues write the same columns. Issue #13 validates a file's notes once
   - The FTS update trigger rewrites a note's index row on each position update. It is one row per moved note.
 - Follow-up work
   - The range bar of #23 can read the same current lines from the marker pass.
+
+## Measurements
+Measured with `JNOTE_PERF=1 ./gradlew test --tests '*NoteLineMarkerPassCostTest*' --rerun -i` on an Apple M2 Pro (10 cores, 32 GB, macOS 26.6.2). `--rerun` makes Gradle run the test even when nothing changed. Other builds were running on the machine (load average 7 to 8), so the code before and after this change ran alternately, 5 runs each. Each run reports the median of 9 rounds. A round is 2,000 passes for a file without notes and 50 passes for a file with 20 notes. Each cell is the median of the 5 run medians, with their range.
+
+| File (5,000 lines) | Code | No notes | 20 notes | Leaf scan alone |
+|---|---|---|---|---|
+| XML | before | 0.002 ms (0.002 to 0.003) | 3.73 ms (3.53 to 3.95) | 2.92 ms (2.78 to 3.05) |
+| XML | after | 0.002 ms (0.002 to 0.003) | 3.85 ms (3.64 to 4.11) | 3.02 ms (2.80 to 3.40) |
+| Kotlin | before | 0.002 ms (0.001 to 0.002) | 4.04 ms (3.89 to 4.63) | 3.17 ms (2.93 to 3.74) |
+| Kotlin | after | 0.002 ms (0.001 to 0.003) | 4.20 ms (4.01 to 4.78) | 3.30 ms (3.06 to 3.98) |
+
+There is no measurable difference. A file without notes returns before `NotePositions` is touched and stays at about 0.002 ms. For the file with 20 notes the median rose by 0.12 ms (XML) and 0.16 ms (Kotlin). The leaf scan runs none of the new code and rose by 0.10 ms and 0.13 ms in the same runs, and the ranges overlap. The pass minus the leaf scan went from 0.82 to 0.84 ms (XML) and from 0.87 to 0.90 ms (Kotlin), within the spread of single runs. A one-off probe on the same files timed `GutterNoteService.track` alone at 0.002 to 0.003 ms per call with 20 tracked notes. The daemon calls the provider twice per root, so a pass pays this twice. Creating and disposing the 20 markers took 0.03 to 0.04 ms, which the first pass after a file's notes load pays once. The leaf scan still dominates the pass.
