@@ -7,4 +7,12 @@
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationConfigurable parentId="tools"
+                                 id="io.github.driflux.jnote.settings"
+                                 instance="io.github.driflux.jnote.settings.JNoteConfigurable"
+                                 bundle="messages.JNoteBundle"
+                                 key="settings.displayName"/>
+    </extensions>
 </idea-plugin>
