@@ -16,6 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 연결 하나와 단일 스레드 실행기를 소유한다.
  * 연결은 첫 submit 때 실행기 스레드에서 열리며, 모든 DB 접근은 그 스레드에서만 일어난다.
  */
+/** 닫힌 [Database]에 일을 맡겼을 때의 실패. 호출자가 DB 경로 전환과 구분해서 다룰 수 있게 타입으로 남긴다. */
+class DatabaseClosedException : IllegalStateException("database is closed")
+
 class Database internal constructor(
     private val path: Path,
     private val closeTimeoutMillis: Long,
@@ -82,7 +85,7 @@ class Database internal constructor(
         }
     }
 
-    private fun closedError() = IllegalStateException("database is closed")
+    private fun closedError() = DatabaseClosedException()
 
     companion object {
         const val THREAD_NAME = "JNote-DB"
