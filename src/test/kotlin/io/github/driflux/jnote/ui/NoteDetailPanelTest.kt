@@ -11,9 +11,15 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.newvfs.impl.VfsRootAccess
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.intellij.notification.NotificationAction
+import com.intellij.testFramework.TestActionEvent
+import io.github.driflux.jnote.JNoteBundle
+import io.github.driflux.jnote.NotesChanged
+import io.github.driflux.jnote.NotesChangedListener
 import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
+import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.project.ProjectKeyService
@@ -110,22 +116,14 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
     }
 
     fun testGoToCodeWithMissingFileNotifiesAndOpensNothing() {
+        captureNotifications()
         val key = projectKey()
-        val shown = mutableListOf<Notification>()
-        project.messageBus.connect(testRootDisposable).subscribe(
-            Notifications.TOPIC,
-            object : Notifications {
-                override fun notify(notification: Notification) {
-                    shown += notification
-                }
-            },
-        )
         val note = repo.create(NewNote.code(key, "src/Gone.kt", 1, 1, "n")).get()
 
         val opened = PlatformTestUtil.waitForFuture(CodeNavigator.goTo(project, note), 10_000)
 
         assertFalse(opened)
-        assertTrue(shown.any { it.content.contains("src/Gone.kt") })
+        assertTrue(shownNotifications().any { it.content.contains("src/Gone.kt") })
         assertNull(FileEditorManager.getInstance(project).selectedTextEditor)
     }
 
@@ -251,5 +249,137 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
     fun testFreeNoteHasNoTarget() {
         val note = repo.create(NewNote.free("q")).get()
         assertFalse(CodeNavigator.goTo(project, note).get())
+    }
+
+    private val captured = java.util.concurrent.CopyOnWriteArrayList<Notification>()
+
+    private fun shownNotifications(): List<Notification> = captured.toList()
+
+    private fun captureNotifications() {
+        val listener = object : Notifications {
+            override fun notify(notification: Notification) {
+                if (captured.none { it === notification }) captured += notification
+            }
+        }
+        project.messageBus.connect(testRootDisposable).subscribe(Notifications.TOPIC, listener)
+        ApplicationManager.getApplication().messageBus.connect(testRootDisposable).subscribe(Notifications.TOPIC, listener)
+    }
+
+    private fun awaitDeletedNotification(): Notification {
+        val title = JNoteBundle.message("toolWindow.notification.deleted")
+        awaitUntil("deleted notification shown, got " + shownNotifications().map { it.title + ": " + it.content }) { shownNotifications().any { it.content == title } }
+        return shownNotifications().single { it.content == title }
+    }
+
+    fun testDeleteButtonDeletesImmediatelyThenUndoRestoresEverything() {
+        captureNotifications()
+        val key = projectKey()
+        val tags = TagRepository(dbService.database)
+        val tag = tags.getOrCreate("keep").get()
+        val note = repo.create(NewNote.code(key, "src/Foo.kt", 2, 3, "doomed", body = "b", aiSource = "Claude")).get()
+        tags.attach(note.id, tag.id).get()
+        val panel = newPanel(1)
+        panel.list.selectedIndex = 0
+
+        panel.detail.deleteButton.doClick()
+
+        awaitUntil("list emptied") { panel.list.model.size == 0 }
+        assertNull(repo.get(note.id).get())
+        assertFalse(panel.detail.isVisible)
+        val notification = awaitDeletedNotification()
+        val undo = notification.actions.single() as NotificationAction
+
+        undo.actionPerformed(TestActionEvent.createTestEvent(undo), notification)
+
+        awaitUntil("list restored") { panel.list.model.size == 1 }
+        assertEquals(note, repo.get(note.id).get())
+        assertEquals(listOf(tag), tags.tagsOf(note.id).get())
+        assertEquals("doomed", panel.list.model.getElementAt(0).title)
+    }
+
+    fun testDeleteNotifiesListenersOnDeleteAndOnUndo() {
+        captureNotifications()
+        val key = projectKey()
+        val note = repo.create(NewNote.code(key, "src/Foo.kt", 1, 1, "n")).get()
+        val events = java.util.concurrent.atomic.AtomicInteger()
+        ApplicationManager.getApplication().messageBus.connect(testRootDisposable)
+            .subscribe(NotesChanged.TOPIC, NotesChangedListener { events.incrementAndGet() })
+        val panel = newPanel(1)
+
+        panel.delete(note).get()
+        awaitUntil("delete event") { events.get() == 1 }
+        val notification = awaitDeletedNotification()
+        val undo = notification.actions.single() as NotificationAction
+        undo.actionPerformed(TestActionEvent.createTestEvent(undo), notification)
+
+        awaitUntil("undo event") { events.get() == 2 }
+    }
+
+    fun testUndoAfterTheDatabaseWasSwitchedReportsAnErrorInsteadOfRestoringElsewhere() {
+        captureNotifications()
+        val key = projectKey()
+        val note = repo.create(NewNote.code(key, "src/Foo.kt", 1, 1, "n")).get()
+        val panel = newPanel(1)
+        panel.delete(note).get()
+        val notification = awaitDeletedNotification()
+
+        val otherDir = Files.createTempDirectory("jnote-detail-other").toRealPath()
+        try {
+            dbService.switchTo(otherDir.resolve("other.db"))
+            val undo = notification.actions.single() as NotificationAction
+            undo.actionPerformed(TestActionEvent.createTestEvent(undo), notification)
+
+            val restoreFailed = JNoteBundle.message("toolWindow.error.restore.title")
+            awaitUntil("restore error shown") { shownNotifications().any { it.title == restoreFailed } }
+            val error = shownNotifications().single { it.title == restoreFailed }
+            assertTrue(error.content, error.content.contains(JNoteBundle.message("toolWindow.error.restore.databaseSwitched")))
+            assertNull(repo.get(note.id).get())
+        } finally {
+            dbService.switchTo(dir.resolve("jnote.db"))
+            otherDir.toFile().deleteRecursively()
+        }
+    }
+
+    private val delays = mutableListOf<Long>()
+    private val tasks = mutableListOf<Runnable>()
+    private val futures = mutableListOf<java.util.concurrent.ScheduledFuture<*>>()
+    private val pending by lazy { java.util.concurrent.ScheduledThreadPoolExecutor(1) }
+
+    // 시간을 기다리지 않고 만료 작업을 직접 돌리기 위한 스케줄러
+    private fun recordingSchedule(task: Runnable, delayMs: Long): java.util.concurrent.ScheduledFuture<*> {
+        delays += delayMs
+        tasks += task
+        return pending.schedule({}, 1, java.util.concurrent.TimeUnit.HOURS).also { futures += it }
+    }
+
+    fun testDefaultExpiryIsEightSecondsAndDismissingCancelsIt() {
+        try {
+            val expiring = ToolWindowNotifier.deleted(project, schedule = ::recordingSchedule) { }
+            assertEquals(listOf(8_000L), delays)
+            assertFalse(expiring.isExpired)
+            tasks.single().run()
+            assertTrue(expiring.isExpired)
+
+            ToolWindowNotifier.deleted(project, schedule = ::recordingSchedule) { }.expire()
+            assertTrue("dismissing must cancel the pending expiry", futures[1].isCancelled)
+        } finally {
+            pending.shutdownNow()
+        }
+    }
+
+    fun testDeletedNotificationExpires() {
+        val notification = ToolWindowNotifier.deleted(project, expireAfterMs = 100) { }
+        awaitUntil("notification expired") { notification.isExpired }
+    }
+
+    fun testDeletingAnAlreadyDeletedNoteStillRefreshes() {
+        val key = projectKey()
+        val note = repo.create(NewNote.code(key, "src/Foo.kt", 1, 1, "n")).get()
+        val panel = newPanel(1)
+        repo.delete(note.id).get()
+
+        panel.delete(note).get()
+
+        awaitUntil("list emptied") { panel.list.model.size == 0 }
     }
 }

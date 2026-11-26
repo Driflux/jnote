@@ -19,6 +19,7 @@ import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.awt.BorderLayout
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.ListSelectionModel
 
@@ -31,7 +32,7 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
         selectionMode = ListSelectionModel.SINGLE_SELECTION
     }
 
-    internal val detail = NoteDetailPanel { CodeNavigator.goTo(project, it) }
+    internal val detail = NoteDetailPanel(onGoToCode = { CodeNavigator.goTo(project, it) }, onDelete = { delete(it) })
 
     // 늦게 끝난 옛 읽기가 새 결과를 덮지 않도록 번호를 매긴다
     private val generation = AtomicInteger()
@@ -55,11 +56,43 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
     fun reload() {
         val ticket = generation.incrementAndGet()
         load(allProjects = false).whenComplete { loaded, error ->
-            ApplicationManager.getApplication().invokeLater {
-                if (disposed || project.isDisposed || ticket != generation.get()) return@invokeLater
+            onEdt {
+                if (disposed || ticket != generation.get()) return@onEdt
                 if (loaded != null) show(loaded) else ToolWindowNotifier.loadFailed(project, error.cause ?: error)
             }
         }
+    }
+
+    internal fun delete(note: Note): CompletableFuture<*> =
+        deleteOn(NoteDeletion.onCurrentDatabase(), note)
+
+    // 되돌리기는 지운 그 DB로 가야 하므로 같은 NoteDeletion을 알림 동작까지 들고 간다
+    private fun deleteOn(deletion: NoteDeletion, note: Note): CompletableFuture<*> =
+        deletion.delete(note.id).whenComplete { deleted, error ->
+            onEdt {
+                when {
+                    error != null -> ToolWindowNotifier.deleteFailed(project, error.cause ?: error)
+                    deleted != null -> {
+                        publishChanged()
+                        ToolWindowNotifier.deleted(project) { undo(deletion, deleted) }
+                    }
+                    // 이미 지워진 노트라면 목록만 새로 고친다
+                    else -> publishChanged()
+                }
+            }
+        }
+
+    private fun undo(deletion: NoteDeletion, deleted: DeletedNote) {
+        deletion.undo(deleted).whenComplete { _, error ->
+            onEdt { if (error == null) publishChanged() else ToolWindowNotifier.restoreFailed(project, (error as? CompletionException)?.cause ?: error) }
+        }
+    }
+
+    private fun publishChanged() =
+        ApplicationManager.getApplication().messageBus.syncPublisher(NotesChanged.TOPIC).notesChanged()
+
+    private fun onEdt(block: () -> Unit) {
+        ApplicationManager.getApplication().invokeLater({ block() }, project.disposed)
     }
 
     private fun load(allProjects: Boolean): CompletableFuture<Loaded> =

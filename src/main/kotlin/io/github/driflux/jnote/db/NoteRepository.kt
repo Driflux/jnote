@@ -82,11 +82,86 @@ class NoteRepository(
         if (changed == 0) null else findById(c, note.id)
     }
 
-    /** 노트와 (cascade로) 태그 연결을 지운다. 지운 행이 있으면 true. */
+    /**
+     * 지웠던 노트를 id, uid, 두 타임스탬프까지 그대로 되살리고 [tagIds] 중 아직 있는 태그를 다시 붙인다.
+     * 한 트랜잭션이라 중간에 실패하면 아무것도 남지 않는다. 같은 id나 uid가 이미 있으면 SQLException으로 끝난다.
+     */
+    fun restore(note: Note, tagIds: List<Long>): CompletableFuture<Note> = database.submit { c ->
+        c.autoCommit = false
+        try {
+            c.prepareStatement(RESTORE).use { s ->
+                var i = 1
+                s.setLong(i++, note.id)
+                s.setString(i++, note.uid)
+                s.setString(i++, note.kind.name)
+                s.setString(i++, note.project)
+                s.setString(i++, note.relPath)
+                s.setString(i++, note.className)
+                s.setObject(i++, note.startLine)
+                s.setObject(i++, note.endLine)
+                s.setString(i++, note.snapshot)
+                s.setString(i++, note.status.name)
+                s.setString(i++, note.title)
+                s.setString(i++, note.body)
+                s.setString(i++, note.aiSource)
+                s.setString(i++, note.sourceUrl)
+                s.setString(i++, note.prompt)
+                s.setLong(i++, note.createdAt)
+                s.setLong(i, note.updatedAt)
+                s.executeUpdate()
+            }
+            // 그 사이 지워진 태그는 건너뛴다. 외래 키 오류로 복원 전체가 실패하면 안 된다
+            c.prepareStatement("INSERT OR IGNORE INTO note_tag (note_id, tag_id) SELECT ?, id FROM tag WHERE id = ?").use { s ->
+                for (tagId in tagIds) {
+                    s.setLong(1, note.id)
+                    s.setLong(2, tagId)
+                    s.executeUpdate()
+                }
+            }
+            c.commit()
+        } catch (e: Throwable) {
+            c.rollback()
+            throw e
+        } finally {
+            c.autoCommit = true
+        }
+        requireNotNull(findById(c, note.id))
+    }
+
     fun delete(id: Long): CompletableFuture<Boolean> = database.submit { c ->
         c.prepareStatement("DELETE FROM note WHERE id = ?").use { s ->
             s.setLong(1, id)
             s.executeUpdate() > 0
+        }
+    }
+
+    /**
+     * 노트와 붙어 있던 태그 id를 읽고 같은 트랜잭션에서 지운다. 읽은 것과 지운 것이 어긋나지 않아
+     * 되돌리기가 정확히 지운 것을 되살린다. 이미 없으면 null.
+     * 읽기 뒤에 쓰기로 올리다 다른 프로세스에 밀리지 않도록 처음부터 쓰기 잠금을 잡는다(BEGIN IMMEDIATE).
+     */
+    internal fun deleteReturningTagIds(id: Long): CompletableFuture<Pair<Note, List<Long>>?> = database.submit { c ->
+        c.createStatement().use { it.execute("BEGIN IMMEDIATE") }
+        try {
+            val note = findById(c, id)
+            val result = if (note == null) {
+                null
+            } else {
+                val tagIds = c.prepareStatement("SELECT tag_id FROM note_tag WHERE note_id = ? ORDER BY tag_id").use { s ->
+                    s.setLong(1, id)
+                    s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getLong(1) else null }.toList() }
+                }
+                c.prepareStatement("DELETE FROM note WHERE id = ?").use { s ->
+                    s.setLong(1, id)
+                    s.executeUpdate()
+                }
+                note to tagIds
+            }
+            c.createStatement().use { it.execute("COMMIT") }
+            result
+        } catch (e: Throwable) {
+            c.createStatement().use { it.execute("ROLLBACK") }
+            throw e
         }
     }
 
@@ -106,6 +181,9 @@ class NoteRepository(
         const val INSERT = "INSERT INTO note (uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, " +
             "status, title, body, ai_source, source_url, prompt, created_at, updated_at) " +
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        const val RESTORE = "INSERT INTO note (id, uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, " +
+            "status, title, body, ai_source, source_url, prompt, created_at, updated_at) " +
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         const val UPDATE = "UPDATE note SET kind=?, project=?, rel_path=?, class_name=?, start_line=?, end_line=?, " +
             "snapshot=?, status=?, title=?, body=?, ai_source=?, source_url=?, prompt=?, updated_at=? WHERE id=?"
     }

@@ -179,4 +179,89 @@ class NoteRepositoryTest {
         assertTrue(e.cause is java.sql.SQLException)
         assertNotNull(repo.get(created.id).get())
     }
+
+    @Test
+    fun restoreBringsBackTheSameIdUidAndTimestamps() {
+        val created = repo.create(code()).get()
+        now = 9_000
+        repo.delete(created.id).get()
+        assertNull(repo.get(created.id).get())
+
+        val restored = repo.restore(created, emptyList()).get()
+
+        assertEquals(created, restored)
+        assertEquals(created, repo.get(created.id).get())
+        assertEquals(created.id, repo.getByUid(created.uid).get()?.id)
+        assertEquals(1_000L, restored.updatedAt)
+    }
+
+    @Test
+    fun restoreReattachesTags() {
+        val tags = TagRepository(db)
+        val a = tags.getOrCreate("a").get()
+        val b = tags.getOrCreate("b").get()
+        val created = repo.create(code()).get()
+        tags.attach(created.id, a.id).get()
+        tags.attach(created.id, b.id).get()
+        val tagIds = tags.tagsOf(created.id).get().map { it.id }
+        repo.delete(created.id).get()
+        assertTrue(tags.tagsOf(created.id).get().isEmpty())
+
+        repo.restore(created, tagIds).get()
+
+        assertEquals(listOf(a, b), tags.tagsOf(created.id).get())
+    }
+
+    @Test
+    fun restoreSkipsTagsThatNoLongerExist() {
+        val tags = TagRepository(db)
+        val gone = tags.getOrCreate("gone").get()
+        val kept = tags.getOrCreate("kept").get()
+        val created = repo.create(code()).get()
+        repo.delete(created.id).get()
+        tags.delete(gone.id).get()
+
+        repo.restore(created, listOf(gone.id, kept.id)).get()
+
+        assertEquals(listOf(kept), tags.tagsOf(created.id).get())
+    }
+
+    @Test
+    fun restoreOfAnExistingIdFailsAndChangesNothing() {
+        val tags = TagRepository(db)
+        val tag = tags.getOrCreate("t").get()
+        val created = repo.create(code("original")).get()
+
+        val e = assertThrows(java.util.concurrent.ExecutionException::class.java) {
+            repo.restore(created.copy(title = "changed"), listOf(tag.id)).get()
+        }
+
+        assertTrue(e.cause is java.sql.SQLException)
+        assertEquals(created, repo.get(created.id).get())
+        assertTrue(tags.tagsOf(created.id).get().isEmpty())
+        // 실패한 뒤에도 연결이 자동 커밋으로 돌아와 다음 쓰기가 된다
+        assertNotNull(repo.create(code("next")).get())
+    }
+
+    @Test
+    fun restoreWithATakenUidFails() {
+        val a = repo.create(code("a")).get()
+        val b = repo.create(code("b")).get()
+        repo.delete(b.id).get()
+
+        assertThrows(java.util.concurrent.ExecutionException::class.java) {
+            repo.restore(b.copy(uid = a.uid), emptyList()).get()
+        }
+
+        assertNull(repo.get(b.id).get())
+    }
+
+    @Test
+    fun restoredNoteIsFoundByTheFullTextIndexAgain() {
+        val created = repo.create(NewNote.free("needle title", "needle body")).get()
+        repo.delete(created.id).get()
+        repo.restore(created, emptyList()).get()
+
+        assertEquals(listOf(created.id), SearchRepository(db).search("needle", null, true).get())
+    }
 }
