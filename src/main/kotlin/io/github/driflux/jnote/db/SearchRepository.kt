@@ -18,27 +18,17 @@ class SearchRepository(private val database: Database) {
         allProjects: Boolean,
         limit: Int = DEFAULT_LIMIT,
     ): CompletableFuture<List<Long>> {
-        if (query.codePointCount(0, query.length) < MIN_QUERY_LENGTH) {
+        val trimmed = query.trim()
+        if (trimmed.codePointCount(0, trimmed.length) < MIN_QUERY_LENGTH) {
             return CompletableFuture.completedFuture(emptyList())
         }
-        val needsEscape = query.any { it in SPECIAL }
-        val pattern = "%" + (if (needsEscape) escapeLike(query) else query) + "%"
+        val needsEscape = trimmed.any { it in SPECIAL }
+        val pattern = "%" + (if (needsEscape) escapeLike(trimmed) else trimmed) + "%"
         return database.submit { run(it, pattern, needsEscape, project, allProjects, limit) }
     }
 
     private fun run(c: Connection, pattern: String, needsEscape: Boolean, project: String?, allProjects: Boolean, limit: Int): List<Long> {
-        val escape = if (needsEscape) " ESCAPE '\\'" else ""
-        val matchSql = COLUMNS.joinToString(" OR ") { "$it LIKE ?1$escape" }
-        val sql = """
-            SELECT n.id FROM note n
-             WHERE (n.id IN (SELECT rowid FROM note_fts WHERE $matchSql)
-                    OR n.id IN (SELECT nt.note_id FROM note_tag nt JOIN tag t ON t.id = nt.tag_id
-                                 WHERE t.name LIKE ?1$escape))
-               AND (?2 = 1 OR n.project IS NULL OR n.project = ?3)
-             ORDER BY n.updated_at DESC, n.id DESC
-             LIMIT ?4
-        """.trimIndent()
-        return c.prepareStatement(sql).use { ps ->
+        return c.prepareStatement(sql(needsEscape)).use { ps ->
             ps.setString(1, pattern)
             ps.setInt(2, if (allProjects) 1 else 0)
             ps.setString(3, project)
@@ -54,6 +44,20 @@ class SearchRepository(private val database: Database) {
         const val DEFAULT_LIMIT = 200
         private val SPECIAL = setOf('%', '_', '\\')
         private val COLUMNS = listOf("title", "body", "snapshot", "class_name", "prompt")
+
+        internal fun sql(needsEscape: Boolean): String {
+            val escape = if (needsEscape) " ESCAPE '\\'" else ""
+            val matchSql = COLUMNS.joinToString(" OR ") { "$it LIKE ?1$escape" }
+            return """
+                SELECT n.id FROM note n
+                 WHERE (n.id IN (SELECT rowid FROM note_fts WHERE $matchSql)
+                        OR n.id IN (SELECT nt.note_id FROM note_tag nt JOIN tag t ON t.id = nt.tag_id
+                                     WHERE t.name LIKE ?1$escape))
+                   AND (?2 = 1 OR n.project IS NULL OR n.project = ?3)
+                 ORDER BY n.updated_at DESC, n.id DESC
+                 LIMIT ?4
+            """.trimIndent()
+        }
 
         /** 사용자 입력의 % _ 와 이스케이프 문자 자체를 문자 그대로 매칭하도록 한다. */
         internal fun escapeLike(query: String): String =

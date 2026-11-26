@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #11
-- PR: (to be filled)
+- PR: #36
 
 ## Context
 Users search note text, code snippets, class names, and tags from one box (intent.md section 5). Notes are short, mixed Korean and English, and Korean is agglutinative (`취소건을` must be found by `취소`), so word tokenizers do not fit. Search must be cheap (intent.md section 2): it runs on the DB thread, never on the EDT, and adds no dependency. The bundled `sqlite-jdbc` 3.54.1.0 ships SQLite with FTS5 and the `trigram` tokenizer; migration v3 and its tests prove it.

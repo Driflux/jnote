@@ -75,6 +75,17 @@ class SearchRepositoryTest {
     private fun search(q: String, project: String? = null, all: Boolean = true, limit: Int = 200): List<Long> =
         repo.search(q, project, all, limit).get()
 
+    private fun plan(query: String): List<String> = db.submitAndWait { c ->
+        val escape = query.any { it in "%_\\" }
+        c.prepareStatement("EXPLAIN QUERY PLAN " + SearchRepository.sql(escape)).use { ps ->
+            ps.setString(1, "%$query%")
+            ps.setInt(2, 1)
+            ps.setString(3, null)
+            ps.setInt(4, 10)
+            ps.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.getString("detail")) } }
+        }
+    }
+
     @Test
     fun migrationV3FromEmptyDatabaseCreatesFtsAndTriggers() {
         val names = db.submitAndWait { c ->
@@ -122,7 +133,7 @@ class SearchRepositoryTest {
     }
 
     @Test
-    fun twoCharacterQueriesUseFullScanPath() {
+    fun twoCharacterQueriesMatchKoreanAndAscii() {
         val ko = note(body = "취소 처리")
         val en = note(body = "an id field")
         note(body = "unrelated")
@@ -222,33 +233,41 @@ class SearchRepositoryTest {
     }
 
     @Test
-    fun thousandsOfRowsSearchQuickly() {
-        db.submitAndWait { c ->
-            c.autoCommit = false
-            for (i in 0 until ROWS) {
-                val marker = if (i == ROWS / 2) "unique-needle" else "filler"
-                insertNote(c, "title " + i, "본문 " + i + " 결제 처리 " + marker + " lorem ipsum dolor", "P", "val x" + i + " = " + i, "Class" + i, null, i.toLong(), emptyList())
-            }
-            c.commit()
-            c.autoCommit = true
-        }
-        search("warm")
-        val three = timed { search("unique-needle", "P", false) }
-        val two = timed { search("x9", "P", false) }
-        println("search timing rows=" + ROWS + " threeChar=" + three.first + "ms hits=" + three.second + " twoChar=" + two.first + "ms hits=" + two.second)
-        assertEquals(1, three.second)
-        assertTrue(two.second > 0)
-        assertTrue("3+ char search took " + three.first + "ms", three.first < 2000)
-        assertTrue("2 char search took " + two.first + "ms", two.first < 2000)
+    fun threeOrMoreCharacterQueryUsesTrigramIndex() {
+        val ftsScans = plan("abc").filter { "note_fts" in it }
+        assertTrue("plan: $ftsScans", ftsScans.isNotEmpty() && ftsScans.all { Regex("INDEX 0:L\\d").containsMatchIn(it) })
     }
 
-    private fun timed(block: () -> List<Long>): Pair<Long, Int> {
-        val start = System.nanoTime()
-        val r = block()
-        return (System.nanoTime() - start) / 1_000_000 to r.size
+    // 알려진 한계: 밑줄이 든 질의는 ESCAPE 때문에 FTS 인덱스를 못 쓰고 전체 스캔으로 떨어진다
+    @Test
+    fun queryWithUnderscoreFallsBackToScan() {
+        val ftsScans = plan("a_c").filter { "note_fts" in it }
+        assertTrue("plan: $ftsScans", ftsScans.isNotEmpty() && ftsScans.none { Regex("INDEX 0:L\\d").containsMatchIn(it) })
     }
 
-    companion object {
-        const val ROWS = 5000
+    @Test
+    fun blankAndPaddedQueriesAreTrimmedBeforeLengthCheck() {
+        val id = note(body = "needle")
+        assertEquals(emptyList<Long>(), search("   "))
+        assertEquals(emptyList<Long>(), search(" a "))
+        assertEquals(emptyList<Long>(), search("\t\n"))
+        assertEquals(listOf(id), search("  needle \n"))
+        assertEquals(listOf(id), search(" ne "))
+    }
+
+    @Test
+    fun projectFilterAppliesToTagOnlyMatches() {
+        val a = note(title = "x", project = "A", tags = listOf("billing"))
+        val b = note(title = "y", project = "B", tags = listOf("billing"))
+        val g = note(title = "z", project = null, tags = listOf("billing"))
+        assertEquals(setOf(a, g), search("billing", "A", all = false).toSet())
+        assertEquals(setOf(b, g), search("billing", "B", all = false).toSet())
+    }
+
+    @Test
+    fun nullProjectWithoutAllProjectsReturnsOnlyGlobalNotes() {
+        note(body = "needle", project = "A")
+        val g = note(body = "needle", project = null)
+        assertEquals(listOf(g), search("needle", null, all = false))
     }
 }
