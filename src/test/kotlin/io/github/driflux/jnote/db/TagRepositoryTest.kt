@@ -269,4 +269,19 @@ class TagRepositoryTest {
         assertEquals(listOf("a"), tags.tagsOf(n.id).get().map { it.name })
         assertEquals(listOf("a"), tags.list().get().map { it.name })
     }
+
+    @Test
+    fun assignmentsGroupsTagsByNoteAndSkipsUntaggedNotes() {
+        val a = note("a")
+        val b = note("b")
+        note("untagged")
+        tags.replaceTags(a.id, listOf("y", "x")).get()
+        tags.replaceTags(b.id, listOf("x")).get()
+
+        val result = tags.assignments().get()
+
+        assertEquals(setOf(a.id, b.id), result.keys)
+        assertEquals(listOf("x", "y"), result.getValue(a.id).map { it.name })
+        assertEquals(listOf("x"), result.getValue(b.id).map { it.name })
+    }
 }

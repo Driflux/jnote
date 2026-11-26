@@ -325,4 +325,102 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         select(panel, NoteFilter.ALL)
         assertEquals(JNoteBundle.message("toolWindow.empty.title"), emptyTextLines(panel).first())
     }
+
+    private val tagRepo get() = io.github.driflux.jnote.db.TagRepository(dbService.database)
+
+    private fun chipTexts(panel: JNotePanel) = panel.tagBar.components.filterIsInstance<javax.swing.JToggleButton>().map { it.text }
+
+    private fun chip(panel: JNotePanel, name: String) =
+        panel.tagBar.components.filterIsInstance<javax.swing.JToggleButton>().single { it.text == name }
+
+    private fun taggedNotes(): Pair<String, List<String>> {
+        val key = projectKey()
+        val a = repo.create(NewNote.code(key, "src/A.kt", 1, 2, "a")).get()
+        val b = repo.create(NewNote.free("b")).get()
+        repo.create(NewNote.free("plain")).get()
+        tagRepo.replaceTags(a.id, listOf("sql", "todo")).get()
+        tagRepo.replaceTags(b.id, listOf("sql")).get()
+        tagRepo.getOrCreate("unused").get()
+        return key to listOf("a", "b", "plain")
+    }
+
+    fun testTagBarShowsTheWholeDictionaryAndIsHiddenWhenItIsEmpty() {
+        val empty = newPanel()
+        awaitUntil("empty load") { empty.state.notes != null }
+        assertFalse(empty.tagBar.isVisible)
+
+        taggedNotes()
+        val panel = newPanel()
+        awaitUntil("tag bar built") { chipTexts(panel) == listOf("sql", "todo", "unused") }
+        assertTrue(panel.tagBar.isVisible)
+        assertTrue(panel.tagBar.components.filterIsInstance<javax.swing.JToggleButton>().none { it.isSelected })
+    }
+
+    fun testClickingTagChipsNarrowsTheListWithAnd() {
+        taggedNotes()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel).size == 3 && chipTexts(panel).size == 3 }
+
+        chip(panel, "sql").doClick()
+        assertEquals(setOf("a", "b"), titles(panel).toSet())
+
+        chip(panel, "todo").doClick()
+        assertEquals(listOf("a"), titles(panel))
+
+        chip(panel, "todo").doClick()
+        chip(panel, "sql").doClick()
+        assertEquals(3, titles(panel).size)
+    }
+
+    fun testRowsShowTheirTags() {
+        taggedNotes()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel).size == 3 }
+        val rows = (0 until 3).map { panel.list.model.getElementAt(it) }
+        assertEquals(listOf("sql", "todo"), rows.single { it.title == "a" }.tags.map { it.name })
+        assertTrue(rows.single { it.title == "plain" }.tags.isEmpty())
+    }
+
+    fun testTagFilterSurvivesAReloadAndPicksUpNewTags() {
+        taggedNotes()
+        val panel = newPanel()
+        awaitUntil("listed") { chipTexts(panel).size == 3 }
+        chip(panel, "todo").doClick()
+
+        val plain = repo.list(null, true).get().single { it.title == "plain" }
+        tagRepo.replaceTags(plain.id, listOf("todo", "fresh")).get()
+        panel.reload()
+
+        awaitUntil("reloaded with the filter") { chipTexts(panel).contains("fresh") && titles(panel).toSet() == setOf("a", "plain") }
+        assertTrue(chip(panel, "todo").isSelected)
+    }
+
+    fun testDeletingAFilteredTagDropsItsChipAndTheFilter() {
+        taggedNotes()
+        val panel = newPanel()
+        awaitUntil("listed") { chipTexts(panel).size == 3 }
+        chip(panel, "todo").doClick()
+        assertEquals(listOf("a"), titles(panel))
+
+        tagRepo.delete(tagRepo.list().get().single { it.name == "todo" }.id).get()
+        panel.reload()
+
+        awaitUntil("filter dropped") { titles(panel).size == 3 && !chipTexts(panel).contains("todo") }
+        assertFalse(panel.state.tagFilterActive)
+    }
+
+    fun testEmptyTextExplainsATagFilterThatMatchesNothing() {
+        val key = projectKey()
+        taggedNotes()
+        repo.create(NewNote.code(key, "src/Z.kt", 1, 1, "z")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { chipTexts(panel).size == 3 && titles(panel).size == 4 }
+
+        chip(panel, "unused").doClick()
+
+        assertEquals(
+            listOf(JNoteBundle.message("toolWindow.empty.tags.title"), JNoteBundle.message("toolWindow.empty.tags.hint")),
+            emptyTextLines(panel),
+        )
+    }
 }

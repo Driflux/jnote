@@ -20,6 +20,14 @@ Tags are a registered dictionary (intent.md section 5). The repository from #3 a
   - A combo box with free text and a tag list below: two controls for one idea, and no at-a-glance view of the dictionary.
   - Registering the tag when the user presses Enter: leaves a dictionary entry behind when the dialog is then cancelled. Registration happens at save only.
 
+### Tag filter chips (PR 2)
+- **Where.** A chip bar under the Tool Window header lists the whole dictionary, including tags no note uses yet, so a new tag can be seen before it is applied. The bar is hidden while the dictionary is empty.
+- **One read.** The list load now also reads `TagRepository.list()` and `TagRepository.assignments()` (every note-to-tag link, grouped by note) next to `NoteRepository.list`, all on the DB thread, in the same load that already runs for a reload. Each `NoteRow` carries its tags, so toggling a chip filters rows already in memory and does not touch the DB. The row also shows its tags in a small line.
+- **AND semantics.** With several chips on, a note must have every chosen tag. Chips narrow the list, the same way the kind filter does, and the two filters combine. OR was rejected because it makes the list grow when the user adds a chip, which reads as the opposite of "filter".
+- **State.** `ToolWindowState` holds the dictionary and the chosen tag ids, and `visibleNotes` applies both filters, so the rules are unit-tested without Swing. Chosen ids survive a reload. A tag that no longer exists in the freshly read dictionary (deleted elsewhere) is dropped from the chosen set, so a stale chip cannot hide every note.
+- **Empty list.** When the tag filter hides everything, the empty text says that no note has the selected tags and tells the user to turn a chip off, instead of the "no notes yet" guidance.
+- **Cost.** `assignments()` reads all links, not only those of listed notes. For a personal note count this is one small query; scoping it to the project is not worth a second query shape.
+
 ## Consequences
 - Pros
   - Auto registration is atomic and idempotent; two IDE processes saving the same new tag do not fail.

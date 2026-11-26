@@ -147,6 +147,19 @@ class TagRepository(private val database: Database) {
         }
     }
 
+    /** 모든 노트의 태그를 노트 id별로 묶어 돌려준다. 태그가 없는 노트는 키가 없다. 목록 화면이 한 번에 읽는다. */
+    fun assignments(): CompletableFuture<Map<Long, List<Tag>>> = database.submit { c ->
+        c.prepareStatement(
+            "SELECT nt.note_id, t.id, t.name FROM note_tag nt JOIN tag t ON t.id = nt.tag_id ORDER BY nt.note_id, t.name",
+        ).use { s ->
+            s.executeQuery().use { rs ->
+                val result = LinkedHashMap<Long, MutableList<Tag>>()
+                while (rs.next()) result.getOrPut(rs.getLong(1)) { mutableListOf() } += Tag(rs.getLong(2), rs.getString(3))
+                result
+            }
+        }
+    }
+
     /** 태그가 붙은 노트. 정렬은 [NoteRepository.list]와 같다. */
     fun notesOf(tagId: Long): CompletableFuture<List<Note>> = database.submit { c ->
         c.prepareStatement(

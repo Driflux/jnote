@@ -18,6 +18,7 @@ import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.util.ui.AsyncProcessIcon
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import com.intellij.util.ui.WrapLayout
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
 import io.github.driflux.jnote.NoteSelectRequested
@@ -29,6 +30,7 @@ import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.Note
+import io.github.driflux.jnote.model.Tag
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.awt.BorderLayout
 import java.awt.FlowLayout
@@ -45,7 +47,7 @@ class JNotePanel internal constructor(
 ) : JBPanel<JNotePanel>(BorderLayout()), Disposable {
     constructor(project: Project) : this(project, AppDelayScheduler)
 
-    private class Loaded(val projectKey: String, val notes: List<Note>)
+    private class Loaded(val projectKey: String, val notes: List<Note>, val dictionary: List<Tag>, val noteTags: Map<Long, List<Tag>>)
 
     private val model = CollectionListModel<NoteRow>()
     internal val list = JBList(model).apply {
@@ -83,6 +85,8 @@ class JNotePanel internal constructor(
             render()
         }
     }
+    // 사전이 다시 읽힐 때마다 칩을 새로 만든다. 켜고 끄는 것은 이 줄이 아니라 state가 기억한다
+    internal val tagBar = JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 2)).apply { isVisible = false }
     internal val spinnerIcon = AsyncProcessIcon("JNote").apply { isVisible = false }
 
     // 닫힌 뒤에 늦게 도착한 타이머가 이미 정리된 아이콘을 다시 돌리지 못하게 한다
@@ -118,7 +122,10 @@ class JNotePanel internal constructor(
             }, BorderLayout.WEST)
             add(spinnerIcon, BorderLayout.EAST)
         }
-        add(header, BorderLayout.NORTH)
+        add(JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            add(header, BorderLayout.NORTH)
+            add(tagBar, BorderLayout.CENTER)
+        }, BorderLayout.NORTH)
         add(OnePixelSplitter(true, 0.5f).apply {
             firstComponent = JBScrollPane(list)
             secondComponent = detail
@@ -217,15 +224,35 @@ class JNotePanel internal constructor(
         // 프로젝트 키는 git 설정 파일을 읽으므로 DB 스레드가 아니라 풀 스레드에서 구한다
         CompletableFuture.supplyAsync({ project.service<ProjectKeyService>().resolve().key }, AppExecutorUtil.getAppExecutorService())
             .thenCompose { key ->
-                NoteRepository(DatabaseService.getInstance().database).list(key, allProjects).thenApply { Loaded(key, it) }
+                val database = DatabaseService.getInstance().database
+                val tags = TagRepository(database)
+                val notes = NoteRepository(database).list(key, allProjects)
+                val dictionary = tags.list()
+                val assignments = tags.assignments()
+                CompletableFuture.allOf(notes, dictionary, assignments)
+                    .thenApply { Loaded(key, notes.join(), dictionary.join(), assignments.join()) }
             }
 
     private fun show(loaded: Loaded) {
         val free = JNoteBundle.message("toolWindow.subtitle.free")
-        val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free) }
+        val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free, loaded.noteTags[it.id].orEmpty()) }
         shownProjectKey = loaded.projectKey
-        state = state.copy(notes = rows, allProjects = allProjects)
+        state = state.copy(notes = rows, allProjects = allProjects).withTags(loaded.dictionary)
+        rebuildTagBar()
         render()
+    }
+
+    private fun rebuildTagBar() {
+        tagBar.removeAll()
+        state.tags.forEach { tag ->
+            tagBar.add(tagChip(tag.name, tag.id in state.selectedTagIds) {
+                state = state.toggleTag(tag.id)
+                render()
+            })
+        }
+        tagBar.isVisible = state.tags.isNotEmpty()
+        tagBar.revalidate()
+        tagBar.repaint()
     }
 
     private fun render() {
@@ -257,7 +284,10 @@ class JNotePanel internal constructor(
 
     private fun showEmptyText() {
         val text = list.emptyText
-        if (state.showEmptyState) {
+        if (state.showEmptyState && state.tagFilterActive) {
+            text.text = JNoteBundle.message("toolWindow.empty.tags.title")
+            text.appendLine(JNoteBundle.message("toolWindow.empty.tags.hint"))
+        } else if (state.showEmptyState) {
             text.text = JNoteBundle.message(state.filter.emptyTitleKey)
             text.appendLine(if (state.filter == NoteFilter.FREE) JNoteBundle.message("toolWindow.empty.free.hint") else emptyHint())
         } else {
