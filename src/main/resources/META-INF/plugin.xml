@@ -18,6 +18,12 @@
                            displayType="BALLOON"
                            bundle="messages.JNoteBundle"
                            key="notification.group.name"/>
+
+        <toolWindow id="JNote"
+                    anchor="right"
+                    icon="AllIcons.Toolwindows.Documentation"
+                    doNotActivateOnStart="true"
+                    factoryClass="io.github.driflux.jnote.ui.JNoteToolWindowFactory"/>
     </extensions>
 
     <actions>
