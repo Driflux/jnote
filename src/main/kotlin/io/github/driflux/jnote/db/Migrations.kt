@@ -81,6 +81,14 @@ object Migrations {
         if (file.isNullOrEmpty()) return
         WalCheckpoint.truncateOrFail(connection)
         val source = Paths.get(file)
-        Files.copy(source, source.resolveSibling(source.fileName.toString() + ".bak"), StandardCopyOption.REPLACE_EXISTING)
+        val backup = source.resolveSibling(source.fileName.toString() + ".bak")
+        val partial = source.resolveSibling(source.fileName.toString() + ".bak.tmp")
+        // 복사가 중간에 실패해도 이전 백업이 남도록 임시 파일에 복사한 뒤 한 번에 바꿔 끼운다
+        try {
+            Files.copy(source, partial, StandardCopyOption.REPLACE_EXISTING)
+            Files.move(partial, backup, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(partial)
+        }
     }
 }

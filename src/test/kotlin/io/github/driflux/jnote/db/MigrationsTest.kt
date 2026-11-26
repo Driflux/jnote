@@ -6,12 +6,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.sqlite.JDBC
 import org.sqlite.SQLiteConfig
 import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
 import java.sql.Connection
 import java.sql.SQLException
 
@@ -171,6 +173,29 @@ class MigrationsTest {
             }
         }
         assertArrayEquals(previousBackup, Files.readAllBytes(bakPath))
+        assertEquals(setOf("jnote.db", "jnote.db.bak"), tmp.root.list()!!.toSet() - setOf("jnote.db-wal", "jnote.db-shm"))
+    }
+
+    @Test
+    fun failedBackupCopyKeepsThePreviousBackup() {
+        assumeTrue(dbPath.fileSystem.supportedFileAttributeViews().contains("posix"))
+        val previousBackup = "previous backup".toByteArray()
+        val db = newDatabase()
+        db.submitAndWait { exec(it, insertNote.format("a", "FREE")) }
+        Files.write(bakPath, previousBackup)
+        val permissions = Files.getPosixFilePermissions(dbPath)
+        // 열린 연결은 그대로 쓰면서 파일 복사만 실패하게 만든다
+        Files.setPosixFilePermissions(dbPath, PosixFilePermissions.fromString("---------"))
+        try {
+            db.submitAndWait { Migrations.run(it, Migrations.ALL + "CREATE TABLE extra(x)") }
+            fail("expected the backup copy to fail")
+        } catch (e: Exception) {
+            assertTrue(generateSequence<Throwable>(e) { it.cause }.any { it is java.io.IOException })
+        } finally {
+            Files.setPosixFilePermissions(dbPath, permissions)
+        }
+        assertArrayEquals(previousBackup, Files.readAllBytes(bakPath))
+        assertEquals(Migrations.ALL.size, db.submitAndWait { version(it) })
         assertEquals(setOf("jnote.db", "jnote.db.bak"), tmp.root.list()!!.toSet() - setOf("jnote.db-wal", "jnote.db-shm"))
     }
 }
