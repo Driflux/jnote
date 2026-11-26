@@ -7,7 +7,6 @@ import io.github.driflux.jnote.JNoteBundle
 import java.awt.FlowLayout
 import javax.swing.JToggleButton
 
-/** 이름을 눌러 켜고 끄는 태그 칩. 다이얼로그와 Tool Window 필터가 함께 쓴다. */
 internal fun tagChip(name: String, selected: Boolean, onToggle: () -> Unit): JToggleButton =
     JToggleButton(name, selected).apply {
         isFocusable = true

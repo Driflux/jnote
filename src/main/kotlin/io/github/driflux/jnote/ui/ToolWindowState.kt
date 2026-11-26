@@ -10,7 +10,6 @@ data class ToolWindowState(
     val notes: List<NoteRow>? = null,
     val allProjects: Boolean = false,
     val filter: NoteFilter = NoteFilter.ALL,
-    /** 태그 사전 전체(이름순). 칩 줄이 이것을 그린다. */
     val tags: List<Tag> = emptyList(),
     /** 켜 둔 태그 칩. 비어 있으면 태그로는 거르지 않는다. */
     val selectedTagIds: Set<Long> = emptySet(),

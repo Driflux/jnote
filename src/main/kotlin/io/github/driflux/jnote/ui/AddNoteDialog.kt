@@ -22,7 +22,6 @@ import java.util.concurrent.CompletableFuture
 import javax.swing.JComponent
 
 /**
- * 노트를 쓰는 다이얼로그. 추가와 편집이 함께 쓴다.
  * 앵커는 읽기 전용 요약으로만 보여 주고, null이면(FREE 노트) 요약을 그리지 않는다.
  * [initial]은 편집할 때 채워 둘 값이다. [knownTags]는 태그 사전으로, 늦게 도착해도 칩으로 더한다.
  */

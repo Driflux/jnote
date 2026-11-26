@@ -241,7 +241,6 @@ class TagRepositoryTest {
         assertEquals(listOf("keep", "new"), result.map { it.name })
         assertEquals(result, tags.tagsOf(n.id).get())
         assertEquals(keep, result.first { it.name == "keep" })
-        // 떼어 낸 태그는 사전에 남는다
         assertEquals(listOf("gone", "keep", "new"), tags.list().get().map { it.name })
     }
 
