@@ -20,7 +20,8 @@
 ```
 src/main/kotlin/io/github/driflux/jnote
   db/          SQLite access, schema, migrations (single-thread executor)
-  model/       Note, Tag, NoteStatus
+  model/       Note, NewNote, NoteKind, NoteStatus, Tag
+  anchor/      code anchor (CodeAnchor, line range, relative path, snapshot, class name resolver)
   relocate/    relocation (exact match, similarity, file path recovery)
   project/     project key computation (git origin, commondir)
   ui/          Tool Window, dialogs, gutter icon
