@@ -109,4 +109,40 @@ class ToolWindowStateTest {
     fun aTagFilterThatMatchesNothingShowsTheEmptyState() {
         assertTrue(ToolWindowState(notes = listOf(row), selectedTagIds = setOf(10)).showEmptyState)
     }
+
+    @Test
+    fun searchKeepsOnlyMatchedRowsInListOrder() {
+        val state = ToolWindowState(notes = listOf(row, codeRow), query = "ab", match = SearchMatch("ab", setOf(2L, 1L)))
+        assertEquals(listOf(row, codeRow), state.visibleNotes)
+        assertEquals(listOf(codeRow), state.copy(match = SearchMatch("ab", setOf(2L))).visibleNotes)
+    }
+
+    @Test
+    fun aQueryShorterThanTheMinimumLeavesTheListAlone() {
+        val state = ToolWindowState(notes = listOf(row, codeRow), query = "a", match = SearchMatch("ab", setOf(2L)))
+        assertEquals(listOf(row, codeRow), state.visibleNotes)
+        assertFalse(state.noSearchResults)
+    }
+
+    @Test
+    fun searchAndKindFilterCombine() {
+        val state = ToolWindowState(
+            notes = listOf(row, codeRow), filter = NoteFilter.CODE, query = "ab", match = SearchMatch("ab", setOf(1L, 2L)),
+        )
+        assertEquals(listOf(codeRow), state.visibleNotes)
+    }
+
+    @Test
+    fun noResultsOnlyOnceTheCurrentQueryAnswered() {
+        val waiting = ToolWindowState(notes = listOf(row), query = "ab", match = SearchMatch("a-old", setOf(1L)))
+        assertFalse(waiting.noSearchResults)
+        val answered = ToolWindowState(notes = listOf(row), query = "ab", match = SearchMatch("ab", emptySet()))
+        assertTrue(answered.noSearchResults)
+        assertTrue(answered.showEmptyState)
+    }
+
+    @Test
+    fun matchesPresentWithoutRowsAreNotNoResultsBeforeTheFirstLoad() {
+        assertFalse(ToolWindowState(query = "ab", match = SearchMatch("ab", emptySet())).showEmptyState)
+    }
 }
