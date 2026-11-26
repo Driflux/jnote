@@ -3,7 +3,6 @@ package io.github.driflux.jnote.settings
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** DB 경로를 바꿀 때 무엇을 할지 정하는 순수 함수. 파일을 읽기만 하고 아무것도 바꾸지 않는다. */
 object DbPathChange {
     enum class Reason(val messageKey: String) {
         NOT_ABSOLUTE("settings.dbPath.invalid.notAbsolute"),
@@ -15,7 +14,6 @@ object DbPathChange {
     sealed interface Plan {
         data object NoChange : Plan
 
-        /** 새 경로에 파일이 없다: 현재 DB를 복사한 뒤 전환한다. */
         data class CopyThenSwitch(val target: Path) : Plan
 
         /** 새 경로에 파일이 이미 있다: 확인을 받고 그 DB로 전환한다(병합하지 않는다). */

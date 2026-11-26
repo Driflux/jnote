@@ -1,12 +1,22 @@
 package io.github.driflux.jnote.settings
 
+import com.intellij.openapi.components.RoamingType
 import com.intellij.util.xmlb.XmlSerializer
 import io.github.driflux.jnote.db.DatabasePaths
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Test
 import java.nio.file.Paths
 
 class DbPathSettingsTest {
+    @Test
+    fun storageIsNotRoamed() {
+        val state = DbPathSettings::class.java.getAnnotation(com.intellij.openapi.components.State::class.java)
+        val storage = state.storages.singleOrNull { it.value == "jnote.xml" }
+        assertNotNull(storage)
+        assertEquals(RoamingType.DISABLED, storage!!.roamingType)
+    }
+
     @Test
     fun defaultsToEmptyMeaningBuiltInPath() {
         assertEquals("", DbPathSettings().state.dbPath)

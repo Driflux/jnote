@@ -1,6 +1,7 @@
 package io.github.driflux.jnote.settings
 
 import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.RoamingType
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
@@ -10,7 +11,7 @@ import java.nio.file.Path
 
 /** DB 경로 설정. 앱 서비스로 첫 사용 때 만들어지며 plugin.xml 등록이 필요 없다. */
 @Service(Service.Level.APP)
-@State(name = "JNoteSettings", storages = [Storage("jnote.xml")])
+@State(name = "JNoteSettings", storages = [Storage("jnote.xml", roamingType = RoamingType.DISABLED)])
 class DbPathSettings : PersistentStateComponent<DbPathSettings.State> {
     /** dbPath가 비어 있으면 기본 경로를 뜻한다. */
     class State(var dbPath: String = "")

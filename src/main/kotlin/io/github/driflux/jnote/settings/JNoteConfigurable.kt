@@ -9,7 +9,6 @@ import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.db.DatabasePaths
 import java.nio.file.InvalidPathException
 
-/** Settings > Tools > JNote. 항목은 DB 경로 하나뿐이며, 화면 구성과 입력 형태 검사만 맡고 파일 시스템을 보는 판단은 DbPathChange에 맡긴다. */
 class JNoteConfigurable : BoundConfigurable(JNoteBundle.message("settings.displayName")) {
     override fun createPanel(): DialogPanel = panel {
         row(JNoteBundle.message("settings.dbPath.label")) {
