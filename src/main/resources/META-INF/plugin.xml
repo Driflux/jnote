@@ -21,7 +21,7 @@
 
         <toolWindow id="JNote"
                     anchor="right"
-                    icon="AllIcons.Toolwindows.Documentation"
+                    icon="/icons/toolWindowNote.svg"
                     doNotActivateOnStart="true"
                     factoryClass="io.github.driflux.jnote.ui.JNoteToolWindowFactory"/>
 
