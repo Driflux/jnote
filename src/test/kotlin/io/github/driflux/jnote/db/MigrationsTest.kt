@@ -1,6 +1,7 @@
 package io.github.driflux.jnote.db
 
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -8,6 +9,8 @@ import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import org.sqlite.JDBC
+import org.sqlite.SQLiteConfig
 import java.nio.file.Files
 import java.sql.Connection
 import java.sql.SQLException
@@ -136,5 +139,38 @@ class MigrationsTest {
             count(c, "SELECT count(*) FROM note_tag")
         }
         assertEquals(0, remaining)
+    }
+
+    private fun connectWithoutBusyWait(): Connection {
+        val config = SQLiteConfig().apply {
+            setJournalMode(SQLiteConfig.JournalMode.WAL)
+            setBusyTimeout(0)
+        }
+        return checkNotNull(JDBC().connect("jdbc:sqlite:$dbPath", config.toProperties()))
+    }
+
+    @Test
+    fun upgradeIsAbortedWhenAReaderBlocksTheBackupCheckpoint() {
+        val previousBackup = "previous backup".toByteArray()
+        Files.write(bakPath, previousBackup)
+        connectWithoutBusyWait().use { writer ->
+            connectWithoutBusyWait().use { reader ->
+                Migrations.run(writer)
+                exec(writer, insertNote.format("a", "FREE"))
+                reader.autoCommit = false
+                reader.createStatement().use { s -> s.executeQuery("SELECT count(*) FROM note").use { it.next() } }
+                try {
+                    Migrations.run(writer, Migrations.ALL + "CREATE TABLE extra(x)")
+                    fail("expected the upgrade to stop when the backup cannot be made consistent")
+                } catch (e: IllegalStateException) {
+                    // 체크포인트가 끝나지 않으면 업그레이드하지 않는다
+                }
+                assertEquals(Migrations.ALL.size, version(writer))
+                assertEquals(0, count(writer, "SELECT count(*) FROM sqlite_master WHERE name = 'extra'"))
+                reader.rollback()
+            }
+        }
+        assertArrayEquals(previousBackup, Files.readAllBytes(bakPath))
+        assertEquals(setOf("jnote.db", "jnote.db.bak"), tmp.root.list()!!.toSet() - setOf("jnote.db-wal", "jnote.db-shm"))
     }
 }

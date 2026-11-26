@@ -79,7 +79,7 @@ object Migrations {
             }
         }
         if (file.isNullOrEmpty()) return
-        connection.createStatement().use { it.execute("PRAGMA wal_checkpoint(TRUNCATE)") }
+        WalCheckpoint.truncateOrFail(connection)
         val source = Paths.get(file)
         Files.copy(source, source.resolveSibling(source.fileName.toString() + ".bak"), StandardCopyOption.REPLACE_EXISTING)
     }
