@@ -30,6 +30,12 @@ class RepoUrlTest {
         assertNull(RepoUrl.normalize("https://user:pa/ss@github.com/org/repo.git"))
     }
 
+    @Test fun passwordStartingWithDigitsAndSlashDoesNotLeakIntoKey() {
+        assertNull(RepoUrl.normalize("https://user:1234/ss@github.com/org/repo.git"))
+    }
+
+    @Test fun ipv6HostIsNotNormalized() = assertNull(RepoUrl.normalize("ssh://git@[::1]:22/org/repo.git"))
+
     @Test fun atSignInPathIsKept() = assertNormalized("https://github.com/org/re@po", "github.com/org/re@po")
 
     @Test fun lastAtOfAuthorityStripsUserInfo() = assertNormalized("https://a@b:pw@github.com/org/repo")

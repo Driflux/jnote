@@ -25,9 +25,9 @@ object GitConfigReader {
      * 그 아래 비git 프로젝트가 저장소의 origin을 가져가기 때문이다.
      */
     fun findGitDir(start: Path, home: Path? = userHome): Path? {
-        val stop = home?.toAbsolutePath()?.normalize()
+        val stop = home?.let { realOrNormalized(it) }
         var dir: Path? = start.toAbsolutePath().normalize()
-        while (dir != null && dir != stop) {
+        while (dir != null && (stop == null || realOrNormalized(dir) != stop)) {
             val dotGit = dir.resolve(".git")
             if (Files.isDirectory(dotGit)) return dotGit
             if (Files.isRegularFile(dotGit)) return readGitDirFile(dotGit)
@@ -69,6 +69,13 @@ object GitConfigReader {
             }
         }
         return null
+    }
+
+    // 홈이 심볼릭 링크여도 같은 곳으로 보도록 실제 경로로 비교한다. 풀 수 없으면 정규화한 경로를 쓴다
+    private fun realOrNormalized(path: Path): Path = try {
+        path.toRealPath()
+    } catch (e: IOException) {
+        path.toAbsolutePath().normalize()
     }
 
     private fun readGitDirFile(file: Path): Path? {

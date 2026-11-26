@@ -13,6 +13,8 @@ object RepoUrl {
         // 사용자 정보는 authority 안의 마지막 @까지만 떼고, 남은 포트가 숫자가 아니면 경로의 @ 때문에 잘못 나뉜 것이다
         val hostPort = authority.substringAfterLast('@')
         if (':' in hostPort && !hostPort.substringAfter(':').all { it.isDigit() }) return null
+        // 사용자 정보 없이 포트만 있는데 경로에 @가 있으면, 숫자로 시작하는 비밀번호가 "/"에서 잘린 것일 수 있다
+        if ('@' !in authority && ':' in hostPort && '@' in path) return null
         val host = hostPort.substringBefore(':').lowercase()
         val repoPath = path.trim('/').removeSuffix(".git").trimEnd('/')
         if (host.isEmpty() || repoPath.isEmpty()) return null

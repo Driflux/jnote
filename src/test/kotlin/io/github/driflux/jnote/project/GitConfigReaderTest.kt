@@ -2,6 +2,7 @@ package io.github.driflux.jnote.project
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assume
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -169,6 +170,23 @@ class GitConfigReaderTest {
         val project = dir("home", "plain-project", "sub")
         assertNull(GitConfigReader.findGitDir(project, home))
         assertNull(GitConfigReader.findGitDir(home, home))
+    }
+
+    @Test fun homeIsMatchedByRealPathWhenItIsASymlink() {
+        val real = dir("real-root")
+        val home = dir("real-root", "home")
+        dir("real-root", "home", ".git")
+        val project = dir("real-root", "home", "plain-project")
+        val link = tmp.root.toPath().toRealPath().resolve("link-root")
+        try {
+            Files.createSymbolicLink(link, real)
+        } catch (e: UnsupportedOperationException) {
+            Assume.assumeNoException(e)
+        } catch (e: java.io.IOException) {
+            Assume.assumeNoException(e)
+        }
+        assertNull(GitConfigReader.findGitDir(project, link.resolve("home")))
+        assertNull(GitConfigReader.findGitDir(home, link.resolve("home")))
     }
 
     @Test fun findGitDirStillFindsRepoInsideHome() {
