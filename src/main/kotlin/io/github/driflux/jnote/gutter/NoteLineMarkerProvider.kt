@@ -91,13 +91,15 @@ class NoteLineMarkerProvider : LineMarkerProviderDescriptor(), DumbAware {
         val accessibleName = group.notes.joinToString(", ") { it.title }
         // 마커의 줄은 범위 시작 위치로 정해지므로, 여러 줄에 걸친 잎(일반 텍스트 등)도 시작 줄에 놓인다
         val range = TextRange(target.offset, maxOf(target.offset, minOf(target.lineEnd, leaf.textRange.endOffset)))
-        val firstId = group.notes.first().id
         return LineMarkerInfo(
             leaf,
             range,
             if (group.approxOnly) GutterIcons.APPROX else GutterIcons.NOTE,
             { tooltip },
-            GutterIconNavigationHandler { _, _ -> NoteSelection.request(project, firstId) },
+            GutterIconNavigationHandler { event, _ ->
+                val single = group.notes.singleOrNull()
+                if (single != null) NoteSelection.request(project, single.id) else NoteChooser.show(event, project, group.notes)
+            },
             GutterIconRenderer.Alignment.RIGHT,
             { accessibleName },
         )
