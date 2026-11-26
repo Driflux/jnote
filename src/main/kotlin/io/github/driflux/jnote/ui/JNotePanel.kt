@@ -8,6 +8,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.CollectionListModel
 import com.intellij.ui.OnePixelSplitter
+import com.intellij.openapi.ui.ComboBox
+import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBPanel
@@ -25,6 +27,7 @@ import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.awt.BorderLayout
+import java.awt.FlowLayout
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 import java.util.concurrent.atomic.AtomicInteger
@@ -58,6 +61,14 @@ class JNotePanel internal constructor(
             reload()
         }
     }
+    internal val filterCombo = ComboBox(NoteFilter.entries.toTypedArray()).apply {
+        renderer = SimpleListCellRenderer.create("") { JNoteBundle.message(it.labelKey) }
+        // 필터는 이미 읽은 행에만 걸리므로 다시 읽지 않는다
+        addActionListener {
+            state = state.copy(filter = selectedItem as NoteFilter)
+            render()
+        }
+    }
     internal val spinnerIcon = AsyncProcessIcon("JNote").apply { isVisible = false }
 
     // 닫힌 뒤에 늦게 도착한 타이머가 이미 정리된 아이콘을 다시 돌리지 못하게 한다
@@ -87,7 +98,10 @@ class JNotePanel internal constructor(
         list.addListSelectionListener { if (!it.valueIsAdjusting) detail.show(list.selectedValue?.note) }
         val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(2, 8)
-            add(allProjectsBox, BorderLayout.WEST)
+            add(JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+                add(allProjectsBox)
+                add(filterCombo)
+            }, BorderLayout.WEST)
             add(spinnerIcon, BorderLayout.EAST)
         }
         add(header, BorderLayout.NORTH)
@@ -166,10 +180,14 @@ class JNotePanel internal constructor(
 
     private fun show(loaded: Loaded) {
         val free = JNoteBundle.message("toolWindow.subtitle.free")
-        val selectedId = list.selectedValue?.note?.id
         val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free) }
-        state = ToolWindowState(rows, allProjects)
-        model.replaceAll(rows)
+        state = state.copy(notes = rows, allProjects = allProjects)
+        render()
+    }
+
+    private fun render() {
+        val selectedId = list.selectedValue?.note?.id
+        model.replaceAll(state.visibleNotes)
         showEmptyText()
         // 다시 읽어도 보던 노트를 유지하고, 그 사이 지워졌다면 상세를 비운다
         val index = model.items.indexOfFirst { it.note.id == selectedId }
@@ -179,8 +197,8 @@ class JNotePanel internal constructor(
     private fun showEmptyText() {
         val text = list.emptyText
         if (state.showEmptyState) {
-            text.text = JNoteBundle.message("toolWindow.empty.title")
-            text.appendLine(emptyHint())
+            text.text = JNoteBundle.message(state.filter.emptyTitleKey)
+            text.appendLine(if (state.filter == NoteFilter.FREE) JNoteBundle.message("toolWindow.empty.free.hint") else emptyHint())
         } else {
             text.clear()
         }
