@@ -15,9 +15,6 @@ import io.github.driflux.jnote.anchor.CodeAnchor
 import io.github.driflux.jnote.model.Note
 import javax.swing.JComponent
 
-/**
- * 앵커가 null이면(FREE 노트) 요약을 그리지 않는다.
- */
 class AddNoteDialog(
     project: Project,
     private val anchor: CodeAnchor?,
@@ -92,6 +89,10 @@ class AddNoteDialog(
 
         /** 확인으로 닫으면 입력값, 취소하면 null. UI 스레드에서 호출한다. */
         fun ask(project: Project, anchor: CodeAnchor): NoteDraft? = show(AddNoteDialog(project, anchor))
+
+        /** UI 스레드에서 호출한다. */
+        fun askFree(project: Project): NoteDraft? =
+            show(AddNoteDialog(project, null, dialogTitle = JNoteBundle.message("dialog.newNote.title")))
 
         /** 저장된 [note]의 값을 채워 편집한다. 앵커는 보여 주기만 하고 바꾸지 않는다. UI 스레드에서 호출한다. */
         fun edit(project: Project, note: Note): NoteDraft? = show(

@@ -32,5 +32,7 @@
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt N"/>
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="ctrl alt N"/>
         </action>
+
+        <action id="JNote.NewFreeNote" class="io.github.driflux.jnote.action.NewFreeNoteAction"/>
     </actions>
 </idea-plugin>
