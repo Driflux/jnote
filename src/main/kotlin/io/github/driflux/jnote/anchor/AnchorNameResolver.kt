@@ -10,11 +10,6 @@ interface AnchorNameResolver {
     fun resolve(file: PsiFile, offset: Int): String?
 }
 
-/**
- * 언어에 상관없는 공통 PSI 구현. 오프셋의 요소에서 위로 올라가며 이름 있는 [PsiNameIdentifierOwner]
- * (클래스, 함수 등)의 이름을 모아 바깥쪽부터 `.`로 잇는다. 가장 안쪽부터 [MAX_LEVELS]단계까지만 쓴다.
- * 이름 있는 컨테이너가 없으면 null.
- */
 class PsiAnchorNameResolver : AnchorNameResolver {
     override fun resolve(file: PsiFile, offset: Int): String? {
         if (file.textLength == 0) return null

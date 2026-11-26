@@ -22,7 +22,6 @@ object AnchorLines {
         return LineRange(startLine + 1, lastLine + 1)
     }
 
-    /** 프로젝트 루트 아래 파일의 `/` 구분 상대 경로. 루트 밖이거나 루트를 알 수 없으면 null. */
     fun relativePath(basePath: String?, filePath: String): String? {
         if (basePath == null) return null
         val base = basePath.replace('\\', '/').trimEnd('/')

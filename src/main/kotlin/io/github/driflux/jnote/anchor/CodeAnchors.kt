@@ -21,12 +21,8 @@ data class AnchorDraft(
     val nameOffset: Int,
 )
 
-/** 앵커를 모으는 두 진입점(에디터 선택, 명시적 줄 범위)과 클래스 이름 해석. */
 object CodeAnchors {
-    /**
-     * 주 캐럿의 선택으로 초안을 만든다. 선택이 없으면 캐럿 줄 하나를 쓴다.
-     * 문서만 읽으므로 EDT에서 불러도 가볍다. 프로젝트 밖 파일이면 null.
-     */
+    /** 문서만 읽으므로 EDT에서 불러도 가볍다. */
     fun fromEditor(project: Project, editor: Editor): AnchorDraft? {
         val document = editor.document
         val file = FileDocumentManager.getInstance().getFile(document) ?: return null
