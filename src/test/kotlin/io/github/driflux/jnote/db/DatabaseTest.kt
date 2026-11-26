@@ -4,10 +4,17 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.sql.Connection
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 class DatabaseTest {
     @get:Rule
@@ -64,5 +71,71 @@ class DatabaseTest {
         val db = newDatabase()
         db.close()
         assertFalse(tmp.root.toPath().resolve("sub").toFile().exists())
+    }
+
+    private fun assertFailsAsClosed(future: CompletableFuture<*>) {
+        try {
+            future.get(5, TimeUnit.SECONDS)
+            fail("expected the job to fail because the database is closed")
+        } catch (e: ExecutionException) {
+            assertTrue(e.cause.toString(), e.cause is IllegalStateException)
+        }
+    }
+
+    @Test
+    fun closeCanBeCalledRepeatedlyAndConcurrently() {
+        val db = newDatabase()
+        db.submitAndWait { 1 }
+        val errors = ConcurrentLinkedQueue<Throwable>()
+        val closers = (1..8).map { Thread { runCatching { db.close() }.onFailure { errors += it } } }
+        closers.forEach { it.start() }
+        closers.forEach { it.join(15_000) }
+        db.close()
+        assertTrue(errors.toString(), errors.isEmpty())
+        assertFalse(db.isOpen)
+    }
+
+    @Test
+    fun submitAfterCloseReturnsFailedFuture() {
+        val db = newDatabase()
+        db.submitAndWait { 1 }
+        db.close()
+        assertFailsAsClosed(db.submit { 1 })
+    }
+
+    @Test
+    fun jobQueuedBehindCloseFails() {
+        val db = newDatabase()
+        val release = CountDownLatch(1)
+        db.submit { release.await() }
+        val closer = Thread { db.close() }.apply { start() }
+        // closer가 닫기 작업을 큐에 넣고 그 완료를 기다리기 시작한 뒤에 다음 작업을 넣어야 순서가 보장된다
+        while (closer.state != Thread.State.TIMED_WAITING) Thread.onSpinWait()
+        val queued = db.submit { c -> c.createStatement().use { it.execute("SELECT 1") } }
+        release.countDown()
+        closer.join(15_000)
+        assertFailsAsClosed(queued)
+    }
+
+    @Test
+    fun closeShutsDownEvenWhenARunningJobOutlivesTheWait() {
+        val db = Database(tmp.root.toPath().resolve("sub/jnote.db"), closeTimeoutMillis = 100).also { opened += it }
+        val release = CountDownLatch(1)
+        val running = db.submit { c -> release.await(); c }
+        try {
+            db.close()
+            fail("expected close to time out while a job is running")
+        } catch (e: TimeoutException) {
+            // 대기 시간 초과는 호출자에게 알린다
+        }
+        assertFalse(db.isOpen)
+        assertFailsAsClosed(db.submit { 1 })
+        db.close()
+
+        release.countDown()
+        val connection = running.get(5, TimeUnit.SECONDS)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (!connection.isClosed && System.nanoTime() < deadline) Thread.sleep(10)
+        assertTrue(connection.isClosed)
     }
 }
