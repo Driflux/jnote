@@ -102,7 +102,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         }
     }
 
-    /** 진행 중인 읽기가 끝나고, 그 끝에 EDT로 넘긴 데몬 재시작과 알림까지 처리된 상태로 만든다. */
     private fun settle() {
         // EDT에서 처리한 일이 새 읽기를 시작할 수 있으므로, 이벤트를 비운 뒤에도 읽기가 없을 때까지 되풀이한다
         while (true) {
@@ -119,7 +118,7 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
     }
 
     /**
-     * 데몬 없이 제공자를 직접 불러 한 번의 패스를 흉내 낸다. 테스트 픽스처의 하이라이팅은 기다리는 동안 EDT 이벤트를
+     * 테스트 픽스처의 하이라이팅은 기다리는 동안 EDT 이벤트를
      * 처리하므로, 그 안에서 읽기가 끝나면 데몬 재시작이 하이라이팅 도중에 실행되어 픽스처가 막는다.
      */
     private fun directPass(): List<LineMarkerInfo<*>> {
@@ -195,7 +194,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         }
 
         assertEquals(listOf(4), found.map { lineOf(it) })
-        // 마커는 줄의 첫 글자 위치에 놓인다
         assertEquals("fun", myFixture.editor.document.text.substring(found.single().startOffset, found.single().startOffset + 3))
     }
 
@@ -298,7 +296,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         dbService.switchTo(other)
         note("GutterA.txt", 5, 5, "new database")
 
-        // 바뀐 뒤 첫 패스는 옛 DB의 노트를 그리지 않는다
         assertEquals(listOf(5), loadedMarkers().map { lineOf(it) })
         assertEquals(listOf("new database"), gutter.notesFor(file, "src/GutterA.txt")!!.map { it.title })
     }
@@ -347,7 +344,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         assertEquals("first<br>second", found.single().lineMarkerTooltip)
     }
 
-    /** 클릭으로 열리는 팝업을 화면에 띄우지 않고 가로챈다. */
     private fun interceptPopups(): List<ListPopup> {
         val shown = mutableListOf<ListPopup>()
         UiInterceptors.register(

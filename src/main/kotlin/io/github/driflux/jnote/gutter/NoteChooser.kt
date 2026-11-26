@@ -11,7 +11,6 @@ import io.github.driflux.jnote.ui.NoteSelection
 import java.awt.event.MouseEvent
 import javax.swing.Icon
 
-/** 한 줄에 노트가 여럿일 때 클릭한 자리에 띄우는 선택 팝업. 고른 노트를 Tool Window에서 선택한다. */
 internal object NoteChooser {
     fun show(event: MouseEvent, project: Project, notes: List<CachedNote>) {
         JBPopupFactory.getInstance().createListPopup(Step(project, notes)).show(RelativePoint(event))
