@@ -1,6 +1,6 @@
 package io.github.driflux.jnote.model
 
-/** 저장 전 노트 초안. id, uid, 타임스탬프는 저장소가 채운다. 줄 번호는 1-based, 끝 줄 포함. */
+/** id, uid, 타임스탬프는 저장소가 채운다. 줄 번호는 1-based, 끝 줄 포함. */
 data class NewNote(
     val kind: NoteKind,
     val project: String?,

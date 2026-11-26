@@ -1,6 +1,6 @@
 package io.github.driflux.jnote.model
 
-/** 저장된 노트. 스키마 v1의 열과 1:1로 대응한다. 줄 번호는 1-based, 끝 줄 포함. */
+/** 스키마 v1의 열과 1:1로 대응한다. 줄 번호는 1-based, 끝 줄 포함. */
 data class Note(
     val id: Long,
     val uid: String,

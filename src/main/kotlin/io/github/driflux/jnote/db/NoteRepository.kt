@@ -11,14 +11,13 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
 /**
- * 노트 CRUD. 모든 접근은 [Database.submit]을 거치므로 EDT에서 호출해도 블로킹하지 않는다.
+ * 모든 접근은 [Database.submit]을 거치므로 EDT에서 호출해도 블로킹하지 않는다.
  * 제약 위반 등 SQL 오류는 반환된 future가 예외로 완료되는 것으로 드러난다.
  */
 class NoteRepository(
     private val database: Database,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    /** uid를 UUID로 생성하고 createdAt, updatedAt을 같은 시각으로 채워 저장한다. */
     fun create(draft: NewNote): CompletableFuture<Note> = database.submit { c ->
         val now = clock()
         val uid = UUID.randomUUID().toString()
