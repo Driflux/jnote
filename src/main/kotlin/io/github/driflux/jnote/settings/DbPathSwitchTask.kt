@@ -8,7 +8,7 @@ import io.github.driflux.jnote.db.DatabaseService
 import java.util.concurrent.CancellationException
 
 /** 복사와 전환을 취소 가능한 백그라운드 작업으로 실행한다. 취소하거나 실패하면 옛 DB가 그대로 쓰인다. */
-class DbPathSwitchTask(private val plan: DbPathChange.Plan) :
+class DbPathSwitchTask(private val plan: DbPathChange.Plan, private val finished: () -> Unit) :
     Task.Backgroundable(null, JNoteBundle.message("task.dbPath.switching"), true) {
 
     override fun run(indicator: ProgressIndicator) {
@@ -22,4 +22,6 @@ class DbPathSwitchTask(private val plan: DbPathChange.Plan) :
     }
 
     override fun onThrowable(error: Throwable) = DbPathNotifier.failed(error)
+
+    override fun onFinished() = finished()
 }

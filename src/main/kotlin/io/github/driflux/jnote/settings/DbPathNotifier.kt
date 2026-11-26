@@ -10,9 +10,15 @@ object DbPathNotifier {
     const val GROUP_ID = "JNote"
 
     fun invalid(reason: DbPathChange.Reason) =
-        error(JNoteBundle.message("notification.dbPath.invalid.title"), JNoteBundle.message(reason.messageKey))
+        show(JNoteBundle.message("notification.dbPath.invalid.title"), JNoteBundle.message(reason.messageKey))
 
-    fun failed(cause: Throwable) = error(
+    fun busy() = show(
+        JNoteBundle.message("notification.dbPath.invalid.title"),
+        JNoteBundle.message("notification.dbPath.busy.content"),
+        NotificationType.WARNING,
+    )
+
+    fun failed(cause: Throwable) = show(
         JNoteBundle.message("notification.dbPath.failed.title"),
         when (cause) {
             // 새 위치의 파일은 덮어쓰지 않으므로, 쓰기 권한이 아니라 그 파일이 원인이라고 알려 준다
@@ -21,9 +27,9 @@ object DbPathNotifier {
         },
     )
 
-    private fun error(title: String, content: String) {
+    private fun show(title: String, content: String, type: NotificationType = NotificationType.ERROR) {
         NotificationGroupManager.getInstance().getNotificationGroup(GROUP_ID)
-            .createNotification(title, content, NotificationType.ERROR)
+            .createNotification(title, content, type)
             .notify(null)
     }
 }

@@ -59,6 +59,26 @@ class DbPathChangerTest : BasePlatformTestCase() {
         assertEquals(JNoteBundle.message("settings.dbPath.invalid.isDirectory"), notifications.single().content)
     }
 
+    fun testSecondRequestWhileOneIsRunningIsRejected() {
+        val other = dir.resolve("other.db").also { Files.writeString(it, "x") }
+        val another = dir.resolve("another.db")
+        DbPathChanger.request(other) {
+            // 첫 요청이 확인을 기다리는 동안 두 번째 Apply가 온 상황
+            DbPathChanger.request(another) { true }
+            false
+        }
+        val n = notifications.single()
+        assertEquals(NotificationType.WARNING, n.type)
+        assertEquals(JNoteBundle.message("notification.dbPath.invalid.title"), n.title)
+        assertEquals(JNoteBundle.message("notification.dbPath.busy.content"), n.content)
+        assertEquals(current, DatabaseService.getInstance().currentPath())
+        assertFalse(Files.exists(another))
+
+        // 첫 요청이 끝나면 다음 요청을 받는다
+        DbPathChanger.request(another)
+        assertEquals(another, DatabaseService.getInstance().currentPath())
+    }
+
     fun testNotificationGroupIsRegistered() {
         assertNotNull(NotificationGroupManager.getInstance().getNotificationGroup(DbPathNotifier.GROUP_ID))
     }

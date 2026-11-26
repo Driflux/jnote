@@ -14,7 +14,8 @@ object DbPathSwitcher {
     ) {
         when (plan) {
             is DbPathChange.Plan.CopyThenSwitch -> {
-                DatabaseCopier.copy(service.currentPath(), plan.target, service.openDatabaseOrNull(), checkCancelled)
+                val (source, database) = service.current()
+                DatabaseCopier.copy(source, plan.target, database, checkCancelled)
                 switch(plan.target, service, settings, checkCancelled)
             }
             is DbPathChange.Plan.SwitchToExisting -> switch(plan.target, service, settings, checkCancelled)
