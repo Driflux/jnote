@@ -56,8 +56,15 @@ class Database internal constructor(
             setBusyTimeout(BUSY_TIMEOUT_MS)
             enforceForeignKeys(true)
         }
-        return JDBC().connect("jdbc:sqlite:$path", config.toProperties())
+        val opened = JDBC().connect("jdbc:sqlite:$path", config.toProperties())
             ?: error("sqlite-jdbc rejected url for $path")
+        try {
+            Migrations.run(opened)
+        } catch (e: Throwable) {
+            opened.close()
+            throw e
+        }
+        return opened
     }
 
     override fun close() {
