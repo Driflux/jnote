@@ -76,47 +76,55 @@ object Migrations {
     )
 
     fun run(connection: Connection, migrations: List<String> = ALL) {
-        val current = userVersion(connection)
-        check(current <= migrations.size) {
-            "Database schema version $current is newer than this JNote version supports (${migrations.size}). Update the plugin."
+        while (true) {
+            val current = userVersion(connection)
+            check(current <= migrations.size) {
+                "Database schema version $current is newer than this JNote version supports (${migrations.size}). Update the plugin."
+            }
+            if (current == migrations.size) return
+            // .bak은 본 파일만 복사하므로 WAL을 먼저 비워야 한다. 체크포인트는 트랜잭션 안에서 SQLITE_LOCKED로 실패해서 쓰기 잠금 전에 한다
+            if (current > 0) {
+                try {
+                    WalCheckpoint.truncateOrFail(connection)
+                } catch (e: IllegalStateException) {
+                    // 기다리는 사이 다른 연결이 버전을 올렸으면 이 체크포인트는 필요 없었으므로 새 버전으로 다시 판단한다
+                    if (userVersion(connection) != current) continue
+                    throw e
+                }
+            }
+            if (upgrade(connection, migrations, current)) return
         }
-        if (current == migrations.size) return
-        if (current > 0) backup(connection)
-        for (version in current + 1..migrations.size) apply(connection, version, migrations[version - 1])
+    }
+
+    /**
+     * 남은 마이그레이션을 한 트랜잭션으로 적용해 다른 연결이 중간 버전을 보지 않게 한다.
+     * 잠금 안의 버전이 [from]이 아니면 다른 연결이 그사이 올린 것이므로 아무것도 하지 않고 false를 돌려준다.
+     */
+    private fun upgrade(connection: Connection, migrations: List<String>, from: Int): Boolean {
+        connection.createStatement().use { s ->
+            s.execute("BEGIN IMMEDIATE")
+            try {
+                val upgraded = userVersion(connection) == from
+                if (upgraded) {
+                    if (from > 0) backup(connection)
+                    for (version in from + 1..migrations.size) {
+                        s.executeUpdate(migrations[version - 1])
+                        // user_version은 트랜잭션에 포함되므로 스크립트가 실패하면 함께 되돌아간다
+                        s.executeUpdate("PRAGMA user_version = $version")
+                    }
+                }
+                s.execute("COMMIT")
+                return upgraded
+            } catch (e: Throwable) {
+                runCatching { s.execute("ROLLBACK") }.exceptionOrNull()?.let(e::addSuppressed)
+                throw e
+            }
+        }
     }
 
     private fun userVersion(connection: Connection): Int =
         connection.createStatement().use { s -> s.executeQuery("PRAGMA user_version").use { it.next(); it.getInt(1) } }
 
-    private fun apply(connection: Connection, version: Int, sql: String) {
-        // 쓰기 잠금을 먼저 잡아야 다른 프로세스와 동시에 시작해도 같은 버전을 두 번 적용하지 않는다
-        execute(connection, "BEGIN IMMEDIATE")
-        try {
-            // 잠금을 잡기 전에 다른 프로세스가 먼저 적용했을 수 있으므로 버전을 다시 확인한다
-            if (userVersion(connection) < version) {
-                connection.createStatement().use { s ->
-                    s.executeUpdate(sql)
-                    // user_version은 트랜잭션에 포함되므로 스크립트가 실패하면 함께 되돌아간다
-                    s.executeUpdate("PRAGMA user_version = $version")
-                }
-            }
-            execute(connection, "COMMIT")
-        } catch (e: Throwable) {
-            // 롤백 실패가 원래 예외를 가리지 않게 덧붙여 둔다
-            try {
-                execute(connection, "ROLLBACK")
-            } catch (rollbackError: Exception) {
-                e.addSuppressed(rollbackError)
-            }
-            throw e
-        }
-    }
-
-    private fun execute(connection: Connection, sql: String) {
-        connection.createStatement().use { it.execute(sql) }
-    }
-
-    /** WAL을 본 파일로 비운 뒤 복사해야 .bak 하나만으로 일관된 상태가 된다. */
     private fun backup(connection: Connection) {
         val file = connection.createStatement().use { s ->
             s.executeQuery("PRAGMA database_list").use { rs ->
@@ -126,7 +134,6 @@ object Migrations {
             }
         }
         if (file.isNullOrEmpty()) return
-        WalCheckpoint.truncateOrFail(connection)
         val source = Paths.get(file)
         val backup = source.resolveSibling(source.fileName.toString() + ".bak")
         val partial = source.resolveSibling(source.fileName.toString() + ".bak.tmp")
