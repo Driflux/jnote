@@ -52,6 +52,38 @@ class TagRepositoryTest {
     }
 
     @Test
+    fun commaInNameIsRejected() {
+        val e = assertThrows(ExecutionException::class.java) { tags.getOrCreate("a,b").get() }
+        assertTrue(e.cause is IllegalArgumentException)
+        assertTrue(tags.list().get().isEmpty())
+    }
+
+    @Test
+    fun concurrentGetOrCreateFromTwoConnectionsReturnsTheSameTag() {
+        val other = Database(tmp.root.toPath().resolve("jnote.db"))
+        try {
+            val otherTags = TagRepository(other)
+            repeat(20) { i ->
+                val name = "race-$i"
+                val a = tags.getOrCreate(name)
+                val b = otherTags.getOrCreate(name)
+                assertEquals(a.get(), b.get())
+            }
+            assertEquals(20, tags.list().get().size)
+        } finally {
+            other.close()
+        }
+    }
+
+    @Test
+    fun getOrCreateKeepsExistingRowWhenNameIsTaken() {
+        val first = tag("dup")
+        db.submit { c -> c.createStatement().use { it.executeUpdate("INSERT OR IGNORE INTO tag (name) VALUES ('dup')") } }.get()
+        assertEquals(first, tag("dup"))
+        assertEquals(1, tags.list().get().size)
+    }
+
+    @Test
     fun listIsSortedByName() {
         listOf("b", "c", "a").forEach { tag(it) }
         assertEquals(listOf("a", "b", "c"), tags.list().get().map { it.name })
@@ -78,6 +110,19 @@ class TagRepositoryTest {
         val a = tag("a")
         assertEquals(TagRenameResult.NotFound, tags.rename(999, "x").get())
         assertEquals(TagRenameResult.InvalidName, tags.rename(a.id, " ").get())
+    }
+
+    @Test
+    fun renameRejectsCommaAndChangesNothing() {
+        val a = tag("a")
+        assertEquals(TagRenameResult.InvalidName, tags.rename(a.id, "x,y").get())
+        assertEquals(listOf("a"), tags.list().get().map { it.name })
+    }
+
+    @Test
+    fun renameOfMissingIdToExistingNameIsNotFound() {
+        tag("taken")
+        assertEquals(TagRenameResult.NotFound, tags.rename(999, "taken").get())
     }
 
     @Test

@@ -4,7 +4,6 @@ import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.Tag
 import java.sql.ResultSet
 import java.sql.SQLException
-import java.sql.Statement
 import java.util.concurrent.CompletableFuture
 
 /** 태그 이름 변경 결과. 중복은 예외가 아니라 값으로 돌려준다. */
@@ -20,15 +19,17 @@ sealed interface TagRenameResult {
  * 이름은 앞뒤 공백을 자르며 대소문자를 구분해 유일하다.
  */
 class TagRepository(private val database: Database) {
-    /** 이미 있으면 그 태그를, 없으면 만들어 돌려준다. 빈 이름이면 future가 IllegalArgumentException으로 끝난다. */
+    /** 이미 있으면 그 태그를, 없으면 만들어 돌려준다. 빈 이름이나 쉼표가 든 이름이면 future가 IllegalArgumentException으로 끝난다. */
     fun getOrCreate(name: String): CompletableFuture<Tag> = database.submit { c ->
         val trimmed = name.trim()
         require(trimmed.isNotEmpty()) { "tag name must not be blank" }
-        findByName(c, trimmed) ?: c.prepareStatement("INSERT INTO tag (name) VALUES (?)", Statement.RETURN_GENERATED_KEYS).use { s ->
+        require(',' !in trimmed) { "tag name must not contain a comma" }
+        // IDE 프로세스 둘이 같은 이름을 동시에 만들어도 UNIQUE로 실패하지 않도록 넣고 나서 읽는다
+        c.prepareStatement("INSERT OR IGNORE INTO tag (name) VALUES (?)").use { s ->
             s.setString(1, trimmed)
             s.executeUpdate()
-            Tag(s.generatedKeys.use { it.next(); it.getLong(1) }, trimmed)
         }
+        checkNotNull(findByName(c, trimmed))
     }
 
     /** 이름순(바이너리 순서) 전체 태그 */
@@ -40,7 +41,9 @@ class TagRepository(private val database: Database) {
 
     fun rename(id: Long, newName: String): CompletableFuture<TagRenameResult> = database.submit { c ->
         val trimmed = newName.trim()
-        if (trimmed.isEmpty()) return@submit TagRenameResult.InvalidName
+        // 쉼표는 v_notes_export의 tags 열(group_concat) 구분자와 겹친다
+        if (trimmed.isEmpty() || ',' in trimmed) return@submit TagRenameResult.InvalidName
+        if (!exists(c, id)) return@submit TagRenameResult.NotFound
         val clash = findByName(c, trimmed)
         when {
             clash != null && clash.id != id -> TagRenameResult.Conflict
@@ -101,6 +104,12 @@ class TagRepository(private val database: Database) {
             s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.toNote() else null }.toList() }
         }
     }
+
+    private fun exists(c: java.sql.Connection, id: Long): Boolean =
+        c.prepareStatement("SELECT 1 FROM tag WHERE id = ?").use { s ->
+            s.setLong(1, id)
+            s.executeQuery().use { it.next() }
+        }
 
     private fun findByName(c: java.sql.Connection, name: String): Tag? =
         c.prepareStatement("SELECT id, name FROM tag WHERE name = ?").use { s ->
