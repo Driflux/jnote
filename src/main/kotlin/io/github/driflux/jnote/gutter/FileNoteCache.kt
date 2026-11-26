@@ -59,7 +59,6 @@ internal class FileNoteCache(
 
     fun contains(relPath: String): Boolean = synchronized(lock) { relPath in entries }
 
-    /** 모든 파일의 항목을 낡은 것으로 표시한다. 다음 조회가 다시 읽는다. */
     fun invalidate() {
         synchronized(lock) { version++ }
     }

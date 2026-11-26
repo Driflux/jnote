@@ -127,7 +127,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         return sink
     }
 
-    /** 첫 패스가 읽기를 시작하고, 읽기가 끝난 뒤 데몬의 패스가 마커를 그린다. */
     private fun loadedMarkers(): List<LineMarkerInfo<*>> {
         assertTrue(directPass().isEmpty())
         settle()
@@ -243,7 +242,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         assertEquals(StringUtil.escapeXmlEntities("<b>bold</b> & co"), loadedMarkers().single().lineMarkerTooltip)
     }
 
-    /** 캐시를 비운 새 서비스로 첫 조회를 하고, 읽기가 끝난 뒤 그 파일이 다시 분석 대상이 되었는지 본다. */
     private fun dirtyAfterFirstLoad(file: VirtualFile, relPath: String): Boolean {
         markers()
         assertFalse("file should be clean before the load", isDirty(file))

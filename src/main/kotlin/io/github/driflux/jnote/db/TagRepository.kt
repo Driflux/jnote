@@ -58,7 +58,6 @@ class TagRepository(private val database: Database) {
         }
     }
 
-    /** 태그와 그 연결을 지운다(노트는 그대로). 지운 태그가 있으면 true. */
     fun delete(id: Long): CompletableFuture<Boolean> = database.submit { c ->
         c.prepareStatement("DELETE FROM tag WHERE id = ?").use { s ->
             s.setLong(1, id)

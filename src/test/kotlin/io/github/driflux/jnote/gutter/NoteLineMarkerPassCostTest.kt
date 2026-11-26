@@ -84,7 +84,6 @@ class NoteLineMarkerPassCostTest : BasePlatformTestCase() {
         leaves
     }
 
-    /** 라운드마다 [repeats]번 돌린 평균(ms)을 모아 중앙값, 최소, 최대를 돌려준다. */
     private fun measure(rounds: Int, repeats: Int, block: () -> Int): String {
         repeat(repeats) { block() }
         val perRound = (1..rounds).map {

@@ -210,7 +210,6 @@ internal fun findById(c: Connection, id: Long): Note? =
         s.executeQuery().use { if (it.next()) it.toNote() else null }
     }
 
-/** [COLUMNS] 순서의 현재 행을 노트로 읽는다. */
 internal fun ResultSet.toNote(): Note = Note(
     id = getLong(1),
     uid = getString(2),

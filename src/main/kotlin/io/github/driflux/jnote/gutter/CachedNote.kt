@@ -47,7 +47,6 @@ data class CachedNote(
     }
 }
 
-/** 한 줄에 마커로 묶이는 노트들. [notes]는 id순이다. */
 data class LineGroup(val line: Int, val notes: List<CachedNote>) {
     /** 모두 근사 위치(APPROX)일 때만 근사 아이콘을 쓴다. 정확한 노트가 하나라도 있으면 일반 아이콘. */
     val approxOnly: Boolean get() = notes.all { it.status == NoteStatus.APPROX }
