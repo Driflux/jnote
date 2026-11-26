@@ -138,7 +138,6 @@ class RelocatorTest {
         assertEquals(1, r.startLine)
     }
 
-    /** isCancelled를 몇 번 확인하는지 센다. 취소는 하지 않는다 */
     private fun pollCount(run: (() -> Boolean) -> Unit): Int {
         var polls = 0
         run { polls++; false }

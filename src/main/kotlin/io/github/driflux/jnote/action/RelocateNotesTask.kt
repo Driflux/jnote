@@ -19,7 +19,6 @@ import io.github.driflux.jnote.ui.CodeTargets
 import io.github.driflux.jnote.ui.ToolWindowNotifier
 
 /**
- * 한 파일의 노트를 파일 크기와 상관없이 다시 찾는 취소 가능한 백그라운드 작업(intent.md 6절의 수동 재배치).
  * 열린 에디터의 저장하지 않은 내용까지 본다. 찾는 도중 취소하면 DB를 바꾸지 않는다.
  * 인자는 테스트에서 저장소와 프로젝트 키를 바꿔 끼우기 위한 것이다.
  */

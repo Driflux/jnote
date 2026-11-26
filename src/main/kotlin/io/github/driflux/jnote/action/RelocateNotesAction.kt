@@ -9,10 +9,7 @@ import com.intellij.openapi.project.Project
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.anchor.AnchorLines
 
-/**
- * 에디터 우클릭 메뉴의 "이 파일의 노트 다시 찾기". 파일 크기와 상관없이 [RelocateNotesTask]를 시작한다.
- * 인자는 테스트에서 작업 시작을 바꿔 끼우기 위한 것이다.
- */
+/** 인자는 테스트에서 작업 시작을 바꿔 끼우기 위한 것이다. */
 class RelocateNotesAction(
     private val start: (Project, String) -> Unit = { project, relPath -> RelocateNotesTask(project, relPath).queue() },
 ) : AnAction(), DumbAware {

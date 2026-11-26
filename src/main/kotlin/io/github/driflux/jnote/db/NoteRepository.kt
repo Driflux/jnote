@@ -55,10 +55,6 @@ class NoteRepository(
         }
     }
 
-    /**
-     * id, uid, createdAt을 제외한 모든 필드를 덮어쓰고 updatedAt을 갱신한다. 태그는 건드리지 않는다.
-     * 해당 id가 없으면 null.
-     */
     fun update(note: Note): CompletableFuture<Note?> = database.submit { c ->
         val now = clock()
         val changed = c.prepareStatement(UPDATE).use { s ->
@@ -84,8 +80,7 @@ class NoteRepository(
     }
 
     /**
-     * 경로, 줄 범위, 상태만 한 트랜잭션으로 바꾼다. 제목, 본문, 태그, updated_at은 그대로 둔다.
-     * 사용자가 고친 것이 아니므로 "최근 수정 순" 목록의 순서를 바꾸지 않는다.
+     * 사용자가 고친 것이 아니므로 "최근 수정 순" 목록의 순서를 바꾸지 않는다(updated_at 유지).
      * 값이 이미 같은 노트와 그 사이 지워진 노트는 건너뛰고, 실제로 바뀐 노트 수를 돌려준다.
      */
     fun updateAnchors(updates: List<AnchorUpdate>): CompletableFuture<Int> = database.submit { c ->
@@ -111,10 +106,7 @@ class NoteRepository(
         }
     }
 
-    /**
-     * 지웠던 노트를 id, uid, 두 타임스탬프까지 그대로 되살리고 [tagIds] 중 아직 있는 태그를 다시 붙인다.
-     * 한 트랜잭션이라 중간에 실패하면 아무것도 남지 않는다. 같은 id나 uid가 이미 있으면 SQLException으로 끝난다.
-     */
+    /** 한 트랜잭션이라 중간에 실패하면 아무것도 남지 않는다. 같은 id나 uid가 이미 있으면 SQLException으로 끝난다. */
     fun restore(note: Note, tagIds: List<Long>): CompletableFuture<Note> = database.submit { c ->
         c.autoCommit = false
         try {

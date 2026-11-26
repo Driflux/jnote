@@ -16,19 +16,16 @@ import kotlin.io.path.extension
 import kotlin.io.path.readLines
 
 /**
- * 재배치 벤치마크: 5,000줄 파일에서 자리를 옮긴 노트 20개를 FileRelocation으로 다시 찾는 시간.
  * 시간은 기계마다 달라 단정하지 않고 출력만 하며, JNOTE_PERF=1일 때만 돈다.
  * 실행: JNOTE_PERF=1 ./gradlew test --tests '*RelocationBenchmarkTest*' -i | grep JNOTE-PERF
  */
 class RelocationBenchmarkTest {
-    /** 노트 하나를 옮기는 방식. 모든 노트는 파일 맨 앞에 끼운 줄 때문에 함께 밀린다 */
     private enum class Change { MOVED, EDITED, DELETED }
 
     private class Case(val document: List<String>, val notes: List<Note>, val expected: List<AnchorUpdate?>)
 
     private val snippetSizes = listOf(3, 5, 8, 12, 20)
 
-    /** [source]에 노트 20개를 고르게 앉힌 뒤, 맨 앞에 50줄을 끼우고 노트마다 [change]대로 코드를 바꾼다. */
     private fun displaced(source: List<String>, change: (Int) -> Change): Case {
         val step = source.size / NOTES
         val notes = ArrayList<Note>()
@@ -64,7 +61,6 @@ class RelocationBenchmarkTest {
         return Case(document, notes, expected)
     }
 
-    /** 가장 긴 줄의 공백 아닌 글자를 다섯 개마다 하나씩 바꾼다. 이름을 고친 정도의 편집이다 */
     private fun edit(snippet: List<String>): List<String> {
         val longest = snippet.indices.maxBy { snippet[it].length }
         val chars = snippet[longest].toCharArray()
@@ -112,7 +108,6 @@ class RelocationBenchmarkTest {
     private fun outcomes(updates: List<AnchorUpdate>) =
         NoteStatus.entries.joinToString(" ") { status -> "$status=${updates.count { it.status == status }}" }
 
-    /** 결과가 정해진 노트(옮김, 편집)는 기대한 자리와 상태여야 한다. 맞은 수를 돌려준다 */
     private fun check(case: Case, updates: List<AnchorUpdate>): Int {
         assertEquals(case.notes.size, updates.size)
         return case.expected.indices.count { case.expected[it] == null || case.expected[it] == updates[it] }

@@ -74,7 +74,6 @@ internal class NoteDetailPanel(
         show(null)
     }
 
-    /** null이면 비운다. */
     fun show(note: Note?) {
         this.note = note
         isVisible = note != null

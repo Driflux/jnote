@@ -82,7 +82,6 @@ class RelocateNotesTaskTest : BasePlatformTestCase() {
     private fun task(relPath: String = "src/A.kt", projectKey: () -> String = { KEY }) =
         RelocateNotesTask(project, relPath, repository = { repo }, projectKey = { projectKey() })
 
-    /** 액션과 같은 길(ProgressManager)로 돌리고 알림이 올 때까지 기다린다. */
     private fun runAndAwaitNotification(task: RelocateNotesTask) {
         ProgressManager.getInstance().run(task)
         PlatformTestUtil.waitWithEventsDispatching("no notification", { notifications.isNotEmpty() }, 20)
