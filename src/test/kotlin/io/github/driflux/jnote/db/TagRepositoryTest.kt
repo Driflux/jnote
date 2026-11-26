@@ -1,0 +1,165 @@
+package io.github.driflux.jnote.db
+
+import io.github.driflux.jnote.model.NewNote
+import io.github.driflux.jnote.model.Tag
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.sql.SQLException
+import java.util.concurrent.ExecutionException
+
+class TagRepositoryTest {
+    @get:Rule
+    val tmp = TemporaryFolder()
+
+    private val db by lazy { Database(tmp.root.toPath().resolve("jnote.db")) }
+    private var now = 1_000L
+    private val notes by lazy { NoteRepository(db) { now } }
+    private val tags by lazy { TagRepository(db) }
+
+    @After
+    fun close() = db.close()
+
+    private fun note(title: String = "n") = notes.create(NewNote.code("p", "a.kt", 1, 2, title)).get()
+    private fun tag(name: String) = tags.getOrCreate(name).get()
+
+    @Test
+    fun getOrCreateIsIdempotentAndTrims() {
+        val a = tag("sql")
+        assertEquals(a, tag("sql"))
+        assertEquals(a, tag("  sql "))
+        assertEquals("sql", a.name)
+        assertEquals(1, tags.list().get().size)
+    }
+
+    @Test
+    fun namesAreCaseSensitive() {
+        assertNotEquals(tag("SQL").id, tag("sql").id)
+    }
+
+    @Test
+    fun blankNameIsRejected() {
+        val e = assertThrows(ExecutionException::class.java) { tags.getOrCreate("   ").get() }
+        assertTrue(e.cause is IllegalArgumentException)
+        assertTrue(tags.list().get().isEmpty())
+    }
+
+    @Test
+    fun listIsSortedByName() {
+        listOf("b", "c", "a").forEach { tag(it) }
+        assertEquals(listOf("a", "b", "c"), tags.list().get().map { it.name })
+    }
+
+    @Test
+    fun renameChangesTheName() {
+        val t = tag("old")
+        assertEquals(TagRenameResult.Renamed(Tag(t.id, "new")), tags.rename(t.id, " new ").get())
+        assertEquals(listOf("new"), tags.list().get().map { it.name })
+        assertEquals(TagRenameResult.Renamed(Tag(t.id, "new")), tags.rename(t.id, "new").get())
+    }
+
+    @Test
+    fun renameConflictIsAValueAndChangesNothing() {
+        val a = tag("a")
+        tag("b")
+        assertEquals(TagRenameResult.Conflict, tags.rename(a.id, "b").get())
+        assertEquals(listOf("a", "b"), tags.list().get().map { it.name })
+    }
+
+    @Test
+    fun renameReportsMissingAndBlank() {
+        val a = tag("a")
+        assertEquals(TagRenameResult.NotFound, tags.rename(999, "x").get())
+        assertEquals(TagRenameResult.InvalidName, tags.rename(a.id, " ").get())
+    }
+
+    @Test
+    fun deleteRemovesTagAndLinksButKeepsNotes() {
+        val n = note()
+        val t = tag("x")
+        tags.attach(n.id, t.id).get()
+        assertTrue(tags.delete(t.id).get())
+        assertFalse(tags.delete(t.id).get())
+        assertTrue(tags.list().get().isEmpty())
+        assertTrue(tags.tagsOf(n.id).get().isEmpty())
+        assertNotNull(notes.get(n.id).get())
+    }
+
+    @Test
+    fun detachKeepsTheTagInTheDictionary() {
+        val n = note()
+        val t = tag("x")
+        tags.attach(n.id, t.id).get()
+        assertTrue(tags.detach(n.id, t.id).get())
+        assertFalse(tags.detach(n.id, t.id).get())
+        assertTrue(tags.tagsOf(n.id).get().isEmpty())
+        assertEquals(listOf(t), tags.list().get())
+    }
+
+    @Test
+    fun attachTwiceIsIdempotent() {
+        val n = note()
+        val t = tag("x")
+        tags.attach(n.id, t.id).get()
+        tags.attach(n.id, t.id).get()
+        assertEquals(listOf(t), tags.tagsOf(n.id).get())
+    }
+
+    @Test
+    fun attachToMissingNoteOrTagFails() {
+        val n = note()
+        val t = tag("x")
+        val e1 = assertThrows(ExecutionException::class.java) { tags.attach(999, t.id).get() }
+        assertTrue(e1.cause is SQLException)
+        val e2 = assertThrows(ExecutionException::class.java) { tags.attach(n.id, 999).get() }
+        assertTrue(e2.cause is SQLException)
+    }
+
+    @Test
+    fun tagsOfNoteAreSortedByName() {
+        val n = note()
+        listOf("b", "c", "a").map { tag(it) }.forEach { tags.attach(n.id, it.id).get() }
+        assertEquals(listOf("a", "b", "c"), tags.tagsOf(n.id).get().map { it.name })
+    }
+
+    @Test
+    fun notesOfTagUseRecentFirstOrder() {
+        val a = note("a")
+        val b = note("b")
+        val other = note("other")
+        val t = tag("x")
+        tags.attach(a.id, t.id).get()
+        tags.attach(b.id, t.id).get()
+        assertEquals(listOf(b.id, a.id), tags.notesOf(t.id).get().map { it.id })
+        now = 2_000
+        notes.update(a.copy(title = "a2")).get()
+        assertEquals(listOf(a.id, b.id), tags.notesOf(t.id).get().map { it.id })
+        assertFalse(tags.notesOf(t.id).get().any { it.id == other.id })
+    }
+
+    @Test
+    fun deletingNoteCascadesLinksButKeepsTag() {
+        val n = note()
+        val t = tag("x")
+        tags.attach(n.id, t.id).get()
+        notes.delete(n.id).get()
+        assertTrue(tags.notesOf(t.id).get().isEmpty())
+        assertEquals(listOf(t), tags.list().get())
+    }
+
+    @Test
+    fun updatingNoteKeepsItsTags() {
+        val n = note()
+        val t = tag("x")
+        tags.attach(n.id, t.id).get()
+        notes.update(n.copy(title = "changed")).get()
+        assertEquals(listOf(t), tags.tagsOf(n.id).get())
+    }
+}
