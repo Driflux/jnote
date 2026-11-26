@@ -29,6 +29,19 @@ class RelocatorTest {
     }
 
     @Test
+    fun similarityOffFindsOnlyExactMatches() {
+        val edited = listOf(
+            "fun compute(total: Int): Int {",
+            "    val tripled = total * 3",
+            "    return tripled + 1",
+            "}",
+        )
+        val off = RelocationOptions(similarity = false)
+        assertEquals(RelocationResult.None, locate(filler(10) + edited, snippet, 11, off))
+        assertEquals(RelocationResult.Match(11, 14), locate(filler(10) + snippet, snippet, 1, off))
+    }
+
+    @Test
     fun emptyAndOversizeSnapshotReturnNone() {
         assertEquals(RelocationResult.None, locate(snippet, emptyList(), 1))
         assertEquals(RelocationResult.None, locate(snippet, snippet + "extra", 1))
@@ -125,7 +138,6 @@ class RelocatorTest {
         assertEquals(1, r.startLine)
     }
 
-    /** isCancelled를 몇 번 확인하는지 센다. 취소는 하지 않는다 */
     private fun pollCount(run: (() -> Boolean) -> Unit): Int {
         var polls = 0
         run { polls++; false }

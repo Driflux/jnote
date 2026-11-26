@@ -1,8 +1,12 @@
 package io.github.driflux.jnote.relocate
 
-/** @property isCancelled 구간마다, 유사도 구간 안에서는 16줄마다 확인한다. true가 되면 검색을 멈추고 None을 돌려준다. */
+/**
+ * @property similarity false면 정확 일치만 찾는다. 큰 파일에서 유사도 검색 비용을 피하려는 호출자가 끈다.
+ * @property isCancelled 구간마다, 유사도 구간 안에서는 16줄마다 확인한다. true가 되면 검색을 멈추고 None을 돌려준다.
+ */
 data class RelocationOptions(
     val similarityThreshold: Double = 0.8,
+    val similarity: Boolean = true,
     val isCancelled: () -> Boolean = { false },
 ) {
     init {
@@ -27,7 +31,7 @@ object Relocator {
         if (snapshot.size > document.size) return RelocationResult.None
 
         ExactMatcher.find(document, snapshot, originalStartLine, options.isCancelled)?.let { return it }
-        if (options.isCancelled()) return RelocationResult.None
+        if (!options.similarity || options.isCancelled()) return RelocationResult.None
         return SimilarityMatcher(options.similarityThreshold, options.isCancelled)
             .find(document, snapshot, originalStartLine) ?: RelocationResult.None
     }

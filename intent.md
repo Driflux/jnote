@@ -67,7 +67,7 @@ Stay with Kotlin/JVM. A plugin must run in the IDE's own JVM, and a separate nat
   3. Otherwise **ORPHAN**. The snapshot and note text are preserved.
 - If the file path is broken, search once more by class or file name using `FilenameIndex`.
 - Applying results: update automatically. A similarity match is marked APPROX ("approximate location"); once the user confirms or edits the note, the mark disappears and the snapshot is refreshed.
-- Auto vs manual: exact match is always automatic (background). Similarity is automatic only for files of 5,000 lines or fewer; larger files become NEEDS_RELOCATE. Manual relocation has no size limit and runs with a progress indicator. A "disable validation on open" setting is added only if measurements show it is needed.
+- Auto vs manual: exact match is always automatic (background). Similarity is automatic only for files of 5,000 lines or fewer. For larger files only the exact match runs, and an OK note that no longer matches exactly becomes NEEDS_RELOCATE; APPROX, ORPHAN, and NEEDS_RELOCATE notes keep their status and lines, since an exact match could never find them anyway. Manual relocation has no size limit and runs with a progress indicator. A "disable validation on open" setting is added only if measurements show it is needed.
 - This solves line numbers differing across worktrees and branches.
 
 ## 7. UI and usability

@@ -37,6 +37,10 @@
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="ctrl alt N"/>
         </action>
 
+        <action id="JNote.RelocateNotes" class="io.github.driflux.jnote.action.RelocateNotesAction">
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="JNote.AddNote"/>
+        </action>
+
         <action id="JNote.NewFreeNote" class="io.github.driflux.jnote.action.NewFreeNoteAction"/>
     </actions>
 </idea-plugin>
