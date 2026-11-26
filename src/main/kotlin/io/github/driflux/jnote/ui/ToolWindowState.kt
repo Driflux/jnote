@@ -1,7 +1,7 @@
 package io.github.driflux.jnote.ui
 
 /**
- * 목록 화면의 상태. [notes]가 null이면 아직 한 번도 읽지 않은 것이고, 아니면 필터 전의 전체 행이다.
+ * [notes]가 null이면 아직 한 번도 읽지 않은 것이고, 아니면 필터 전의 전체 행이다.
  * Swing에 기대지 않으므로 필터와 빈 상태 규칙을 단위 테스트로 검증한다.
  */
 data class ToolWindowState(
@@ -9,7 +9,6 @@ data class ToolWindowState(
     val allProjects: Boolean = false,
     val filter: NoteFilter = NoteFilter.ALL,
 ) {
-    /** 필터를 거친 행. 아직 읽지 않았다면 비어 있다. */
     val visibleNotes: List<NoteRow> get() = notes.orEmpty().filter { filter.accepts(it.note) }
 
     /**
