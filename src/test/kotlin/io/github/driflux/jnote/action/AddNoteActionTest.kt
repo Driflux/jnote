@@ -22,6 +22,9 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
 import io.github.driflux.jnote.NotesChangedListener
+import com.intellij.openapi.project.Project
+import com.intellij.psi.PsiFile
+import io.github.driflux.jnote.anchor.AnchorNameResolver
 import io.github.driflux.jnote.anchor.CodeAnchor
 import io.github.driflux.jnote.db.Database
 import io.github.driflux.jnote.db.NoteRepository
@@ -29,7 +32,9 @@ import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.ui.NoteDraft
 import java.nio.file.Files
 import java.nio.file.Path
+import java.lang.reflect.Proxy
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.KeyStroke
 
@@ -169,6 +174,91 @@ class AddNoteActionTest : BasePlatformTestCase() {
 
         assertTrue(repo.list("key", true).get().isEmpty())
         assertEquals(0, published.get())
+        assertTrue(notifications.isEmpty())
+    }
+
+    fun testClassNameResolveFailureStillSavesWithNullName() {
+        val editor = openProjectFile("A.kt", source)
+        val repo = NoteRepository(db)
+        val action = AddNoteAction(
+            askUser = { _, _ -> NoteDraft("Title") },
+            saver = NoteSaver(repository = { repo }, projectKey = { "key" }),
+            nameResolver = object : AnchorNameResolver {
+                override fun resolve(file: PsiFile, offset: Int): String? = error("psi broke")
+            },
+        )
+        action.actionPerformed(eventFor(action, editor, myFixture.file.virtualFile))
+        PlatformTestUtil.waitWithEventsDispatching("note was not saved", { notifications.isNotEmpty() }, 20)
+
+        val note = repo.list("key", false).get().single()
+        assertNull(note.className)
+        assertEquals(1, note.startLine)
+        assertEquals(NotificationType.INFORMATION, notifications.single().type)
+    }
+
+    // 닫힌 프로젝트는 서비스나 알림에 닿으면 안 되므로, 닿은 메서드를 기록하는 프록시로 확인한다
+    private class ProjectProbe(var disposed: Boolean) {
+        val touched = CopyOnWriteArrayList<String>()
+        val disposedChecks = AtomicInteger()
+        val project: Project = Proxy.newProxyInstance(Project::class.java.classLoader, arrayOf(Project::class.java)) { _, method, _ ->
+            when (method.name) {
+                "isDisposed" -> {
+                    disposedChecks.incrementAndGet()
+                    disposed
+                }
+                "toString" -> "ProjectProbe"
+                "hashCode" -> 1
+                "equals" -> false
+                else -> {
+                    touched += method.name
+                    null
+                }
+            }
+        } as Project
+    }
+
+    private val anchor = CodeAnchor("src/A.kt", 1, 1, "snap", null)
+    private val direct = Executor { it.run() }
+
+    fun testNothingHappensWhenProjectIsAlreadyClosed() {
+        val probe = ProjectProbe(disposed = true)
+        var asked = false
+        val action = AddNoteAction(askUser = { _, _ -> asked = true; NoteDraft("T") }, saver = NoteSaver(repository = { error("no") }))
+        action.askAndSave(probe.project, anchor)
+        assertFalse(asked)
+        assertTrue(probe.touched.toString(), probe.touched.isEmpty())
+    }
+
+    fun testProjectClosedWhileDialogIsOpenSkipsSaving() {
+        val probe = ProjectProbe(disposed = false)
+        var saved = false
+        val action = AddNoteAction(
+            askUser = { _, _ -> probe.disposed = true; NoteDraft("T") },
+            saver = NoteSaver(repository = { saved = true; NoteRepository(db) }, projectKey = { "key" }),
+        )
+        action.askAndSave(probe.project, anchor)
+        assertFalse(saved)
+        assertTrue(probe.touched.toString(), probe.touched.isEmpty())
+    }
+
+    fun testProjectClosedWhileSavingDoesNotNotify() {
+        val probe = ProjectProbe(disposed = false)
+        val repo = NoteRepository(db)
+        val action = AddNoteAction(
+            askUser = { _, _ -> NoteDraft("T") },
+            saver = NoteSaver(
+                repository = { repo },
+                projectKey = { probe.disposed = true; "key" },
+                background = direct,
+                ui = direct,
+                publish = {},
+            ),
+        )
+        action.askAndSave(probe.project, anchor)
+        // 시작, 다이얼로그 뒤, 완료 콜백에서 한 번씩 확인하므로 3번째 확인이 끝난 뒤에 알림 여부를 본다
+        PlatformTestUtil.waitWithEventsDispatching("completion was not reached", { probe.disposedChecks.get() >= 3 }, 20)
+        assertEquals(1, repo.list("key", false).get().size)
+        assertTrue(probe.touched.toString(), probe.touched.isEmpty())
         assertTrue(notifications.isEmpty())
     }
 

@@ -20,7 +20,6 @@
                            key="notification.group.name"/>
     </extensions>
 
-    <!-- Add note action (issue 5) -->
     <actions>
         <action id="JNote.AddNote" class="io.github.driflux.jnote.action.AddNoteAction">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>

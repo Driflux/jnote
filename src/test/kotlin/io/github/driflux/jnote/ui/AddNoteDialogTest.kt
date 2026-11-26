@@ -33,6 +33,16 @@ class AddNoteDialogTest : BasePlatformTestCase() {
         assertEquals("My local model", dialog.draft().aiSource)
     }
 
+    fun testBlankTitleIsRejectedAndNonBlankAccepted() = withDialog { dialog ->
+        val titleField = UIUtil.findComponentsOfType(dialog.content, JBTextField::class.java).first()
+        titleField.text = ""
+        assertNotNull(dialog.doValidate())
+        titleField.text = "   "
+        assertNotNull(dialog.doValidate())
+        titleField.text = "A title"
+        assertNull(dialog.doValidate())
+    }
+
     fun testDraftReadsTheFields() = withDialog { dialog ->
         val titleField = UIUtil.findComponentsOfType(dialog.content, JBTextField::class.java).first()
         titleField.text = "A title"

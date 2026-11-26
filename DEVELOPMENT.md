@@ -28,6 +28,7 @@ src/main/kotlin/io/github/driflux/jnote
   action/      actions such as "add note"
   settings/    DB path setting
   ai/          JSON format v1, import (upsert, preview), inbox check, copy for AI
+  NotesChanged.kt   app-level topic that tells subscribers the notes changed
   JNoteBundle.kt
 src/main/resources/messages/JNoteBundle.properties, JNoteBundle_ko.properties
 src/test/kotlin/...

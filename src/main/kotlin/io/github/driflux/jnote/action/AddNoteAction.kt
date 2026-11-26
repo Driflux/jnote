@@ -12,6 +12,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.util.concurrency.AppExecutorUtil
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.anchor.AnchorLines
+import io.github.driflux.jnote.anchor.AnchorNameResolver
+import io.github.driflux.jnote.anchor.PsiAnchorNameResolver
 import io.github.driflux.jnote.anchor.AnchorDraft
 import io.github.driflux.jnote.anchor.CodeAnchor
 import io.github.driflux.jnote.anchor.CodeAnchors
@@ -30,6 +32,7 @@ import java.util.concurrent.CompletionException
 class AddNoteAction(
     private val askUser: (Project, CodeAnchor) -> NoteDraft? = AddNoteDialog::ask,
     private val saver: NoteSaver = NoteSaver(),
+    private val nameResolver: AnchorNameResolver = PsiAnchorNameResolver(),
 ) : AnAction(), DumbAware {
     init {
         templatePresentation.text = JNoteBundle.message("action.addNote.text")
@@ -54,20 +57,35 @@ class AddNoteAction(
     }
 
     private fun resolveAnchor(project: Project, draft: AnchorDraft) {
-        ReadAction.nonBlocking(Callable { CodeAnchors.resolve(project, draft) })
+        ReadAction.nonBlocking(Callable { resolveOrNameless(project, draft) })
             .expireWith(project)
             .finishOnUiThread(ModalityState.defaultModalityState()) { anchor -> askAndSave(project, anchor) }
             .submit(AppExecutorUtil.getAppExecutorService())
             .onError { cause ->
-                if (cause !is CancellationException && cause !is ProcessCanceledException) {
+                if (cause !is CancellationException && cause !is ProcessCanceledException && !project.isDisposed) {
                     AddNoteNotifier.failed(project, cause)
                 }
             }
     }
 
-    private fun askAndSave(project: Project, anchor: CodeAnchor) {
+    // 클래스 이름은 선택 값이라 해석이 실패해도 노트 저장을 막지 않는다. 취소는 그대로 전파한다
+    private fun resolveOrNameless(project: Project, draft: AnchorDraft): CodeAnchor = try {
+        CodeAnchors.resolve(project, draft, nameResolver)
+    } catch (e: ProcessCanceledException) {
+        throw e
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        CodeAnchor(draft.relPath, draft.startLine, draft.endLine, draft.snapshot, null)
+    }
+
+    internal fun askAndSave(project: Project, anchor: CodeAnchor) {
+        // 다이얼로그가 열려 있는 동안 프로젝트가 닫힐 수 있다
+        if (project.isDisposed) return
         val note = askUser(project, anchor) ?: return
+        if (project.isDisposed) return
         saver.save(project, anchor, note).whenComplete { saved, error ->
+            if (project.isDisposed) return@whenComplete
             if (error == null) {
                 AddNoteNotifier.saved(project, saved)
             } else {

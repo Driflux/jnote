@@ -62,7 +62,7 @@ class AddNoteDialog(project: Project, private val anchor: CodeAnchor) : DialogWr
 
     override fun getPreferredFocusedComponent(): JComponent = titleField
 
-    override fun doValidate(): ValidationInfo? =
+    public override fun doValidate(): ValidationInfo? =
         if (titleField.text.isBlank()) ValidationInfo(JNoteBundle.message("dialog.addNote.noteTitle.required"), titleField) else null
 
     fun draft(): NoteDraft = NoteDraft(
