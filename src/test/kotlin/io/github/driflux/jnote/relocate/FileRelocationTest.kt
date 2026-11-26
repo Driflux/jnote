@@ -82,6 +82,17 @@ class FileRelocationTest {
     }
 
     @Test
+    fun withoutSimilarityNotesThatExactSearchCouldNeverFindKeepTheirStatus() {
+        // APPROX는 스냅샷이 코드와 다르다는 뜻이라 정확 일치로는 찾을 수 없다. 큰 파일을 열 때마다 수동 재배치 결과가 지워지면 안 된다
+        for (status in listOf(NoteStatus.APPROX, NoteStatus.ORPHAN, NoteStatus.NEEDS_RELOCATE)) {
+            assertEquals(
+                listOf(AnchorUpdate("a", "src/A.kt", 7, 10, status)),
+                FileRelocation.relocate(listOf(note("a", 7, text, status)), filler(10) + edited, similarity = false),
+            )
+        }
+    }
+
+    @Test
     fun withoutSimilarityMovedCodeIsStillFound() {
         assertEquals(
             listOf(AnchorUpdate("a", "src/A.kt", 11, 14, NoteStatus.OK)),
@@ -107,15 +118,16 @@ class FileRelocationTest {
     }
 
     @Test
-    fun cancelledRunReturnsNullInsteadOfOrphan() {
-        // 찾지 못하는 노트의 유사도 검색 도중 취소한다. Relocator는 None을 돌려주지만 ORPHAN으로 적히면 안 된다
+    fun cancelDuringALaterSearchReturnsNullInsteadOfOrphan() {
+        // 첫 노트를 끝낸 뒤 둘째 노트를 찾는 도중 취소한다. Relocator는 None을 돌려주지만 ORPHAN으로 적히면 안 된다
         val doc = (0 until 3000).map { "val v$it = compute($it, ${it * 7}) // note" }
         val notes = listOf(note("found", 1, doc.subList(100, 104).joinToString("\n")), note("missing", 1, text))
-        var polls = 0
-        FileRelocation.relocate(notes, doc, isCancelled = { polls++; false })
-        val total = polls
-        var seen = 0
-        assertNull(FileRelocation.relocate(notes, doc, isCancelled = { ++seen >= total - 1 }))
+        var firstDone = false
+        var pollsAfterFirst = 0
+        val result = FileRelocation.relocate(notes, doc, isCancelled = { firstDone && ++pollsAfterFirst >= 3 }) { done, _ ->
+            if (done == 1) firstDone = true
+        }
+        assertNull(result)
     }
 
     @Test

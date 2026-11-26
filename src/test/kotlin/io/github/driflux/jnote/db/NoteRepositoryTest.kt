@@ -17,6 +17,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.util.UUID
+import java.util.concurrent.ExecutionException
 
 class NoteRepositoryTest {
     @get:Rule
@@ -320,6 +321,25 @@ class NoteRepositoryTest {
         assertEquals(1, changed)
         assertEquals(3, repo.get(same.id).get()?.startLine)
         assertEquals(4, repo.get(moved.id).get()?.startLine)
+    }
+
+    @Test
+    fun updateAnchorsRollsBackEveryNoteWhenOneWriteFails() {
+        val first = repo.create(code("first")).get()
+        val failing = repo.create(code("failing")).get()
+        db.submitAndWait { c ->
+            c.createStatement().use {
+                it.execute("CREATE TRIGGER fail_anchor BEFORE UPDATE ON note WHEN new.uid = '${failing.uid}' BEGIN SELECT RAISE(ABORT, 'boom'); END")
+            }
+        }
+        val write = repo.updateAnchors(
+            listOf(
+                AnchorUpdate(first.uid, "src/A.kt", 7, 9, NoteStatus.OK),
+                AnchorUpdate(failing.uid, "src/A.kt", 7, 9, NoteStatus.OK),
+            ),
+        )
+        assertThrows(ExecutionException::class.java) { write.get() }
+        assertEquals(first, repo.get(first.id).get())
     }
 
     @Test
