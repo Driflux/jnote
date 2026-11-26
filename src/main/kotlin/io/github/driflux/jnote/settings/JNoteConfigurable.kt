@@ -16,7 +16,7 @@ class JNoteConfigurable : BoundConfigurable(JNoteBundle.message("settings.displa
                 .align(AlignX.FILL)
                 .bindText(
                     { DatabasePaths.default().toString() },
-                    { DbPathSettings.getInstance().store(DatabasePaths.resolve(it)) },
+                    { DbPathChanger.request(DatabasePaths.resolve(it)) },
                 )
                 .validationOnInput { field -> invalidMessage(field.text)?.let { error(it) } }
                 .validationOnApply { field -> invalidMessage(field.text)?.let { error(it) } }
