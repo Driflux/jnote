@@ -61,7 +61,7 @@ object CodeAnchors {
         val startOffset = document.getLineStartOffset(range.start - 1)
         val endOffset = document.getLineEndOffset(range.end - 1)
         val text = document.charsSequence
-        val snapshot = AnchorLines.capSnapshot(text.subSequence(startOffset, endOffset).toString())
+        val snapshot = AnchorLines.snapshotOf(text, startOffset, endOffset)
         val lineEnd = document.getLineEndOffset(range.start - 1)
         var nameOffset = startOffset
         while (nameOffset < lineEnd && text[nameOffset].isWhitespace()) nameOffset++

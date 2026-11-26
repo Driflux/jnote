@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #5
-- PR: (to be filled)
+- PR: #39, #40
 
 ## Context
 Saving a note from the editor needs the code position (the anchor): the file, the line range, a snapshot of the code, and the enclosing class name. Relocation (intent.md section 6) reads exactly these values later. The gutter issue (23) must create the same anchor from an explicit line range, so the collection cannot be tied to the "Add note" action.

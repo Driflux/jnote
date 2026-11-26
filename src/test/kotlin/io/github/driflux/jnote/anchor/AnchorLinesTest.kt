@@ -1,6 +1,7 @@
 package io.github.driflux.jnote.anchor
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,6 +55,37 @@ class AnchorLinesTest {
         assertTrue(capped.length <= AnchorLines.MAX_SNAPSHOT_CHARS)
         assertTrue(text.startsWith(capped))
         assertTrue(capped.split("\n").all { it == line })
+    }
+
+    @Test fun cutInsideSurrogatePairDropsTheDanglingHalf() {
+        // 쌍이 홀수 인덱스에서 시작하므로 상한 경계가 쌍의 가운데에 걸린다
+        val emoji = String(Character.toChars(0x1F600))
+        val text = "a" + emoji.repeat(AnchorLines.MAX_SNAPSHOT_CHARS)
+        val capped = AnchorLines.capSnapshot(text)
+        assertEquals(AnchorLines.MAX_SNAPSHOT_CHARS - 1, capped.length)
+        assertFalse(capped.last().isHighSurrogate())
+    }
+
+    @Test fun snapshotOfHugeSelectionReadsOnlyLimitPlusOne() {
+        var maxRead = 0
+        val huge = object : CharSequence {
+            override val length = 50_000_000
+            override fun get(index: Int) = 'x'
+            override fun subSequence(startIndex: Int, endIndex: Int): CharSequence {
+                maxRead = maxOf(maxRead, endIndex - startIndex)
+                return "x".repeat(endIndex - startIndex)
+            }
+        }
+        val snapshot = AnchorLines.snapshotOf(huge, 0, huge.length)
+        assertEquals(AnchorLines.MAX_SNAPSHOT_CHARS, snapshot.length)
+        assertEquals(AnchorLines.MAX_SNAPSHOT_CHARS + 1, maxRead)
+    }
+
+    @Test fun snapshotOfHugeSelectionIsCutAtLineBoundary() {
+        val text = (1..5000).joinToString("\n") { "y".repeat(99) }
+        val snapshot = AnchorLines.snapshotOf(text, 0, text.length)
+        assertTrue(snapshot.length <= AnchorLines.MAX_SNAPSHOT_CHARS)
+        assertTrue(snapshot.split("\n").all { it == "y".repeat(99) })
     }
 
     @Test fun hugeSingleLineIsCutByChars() {

@@ -31,11 +31,22 @@ object AnchorLines {
         return file.substring(base.length + 1).takeIf { it.isNotEmpty() }
     }
 
-    /** 상한을 넘으면 상한 안에서 마지막 줄 경계까지만 남긴다. 줄 경계가 없으면 글자 단위로 자른다. */
+    /**
+     * [start, end) 구간의 스냅샷. 상한을 넘는 선택을 통째로 복사하지 않도록 상한 + 1글자까지만 읽어
+     * (EDT에서 불리므로) 상한 초과 여부를 판단할 만큼만 복사한다.
+     */
+    fun snapshotOf(text: CharSequence, start: Int, end: Int): String =
+        capSnapshot(text.subSequence(start, minOf(end, start + MAX_SNAPSHOT_CHARS + 1)).toString())
+
+    /**
+     * 상한을 넘으면 상한 안에서 마지막 줄 경계까지만 남긴다. 줄 경계가 없으면 글자 단위로 자르되
+     * 서로게이트 쌍을 가르지 않도록 끝에 남은 앞 절반은 버린다.
+     */
     fun capSnapshot(text: String): String {
         if (text.length <= MAX_SNAPSHOT_CHARS) return text
         val cut = text.substring(0, MAX_SNAPSHOT_CHARS)
         val lineEnd = cut.lastIndexOf('\n')
-        return if (lineEnd > 0) cut.substring(0, lineEnd) else cut
+        if (lineEnd > 0) return cut.substring(0, lineEnd)
+        return if (cut.last().isHighSurrogate()) cut.dropLast(1) else cut
     }
 }
