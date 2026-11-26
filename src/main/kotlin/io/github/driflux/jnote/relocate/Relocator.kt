@@ -1,6 +1,6 @@
 package io.github.driflux.jnote.relocate
 
-/** @property isCancelled 구간 사이에 확인한다. true가 되면 검색을 멈추고 None을 돌려준다. */
+/** @property isCancelled 구간마다, 유사도 구간 안에서는 16줄마다 확인한다. true가 되면 검색을 멈추고 None을 돌려준다. */
 data class RelocationOptions(
     val similarityThreshold: Double = 0.8,
     val isCancelled: () -> Boolean = { false },
