@@ -18,6 +18,10 @@
                            displayType="BALLOON"
                            bundle="messages.JNoteBundle"
                            key="notification.group.name"/>
+        <notificationGroup id="JNote.PositionSave"
+                           displayType="BALLOON"
+                           bundle="messages.JNoteBundle"
+                           key="notification.group.positionSave.name"/>
 
         <toolWindow id="JNote"
                     anchor="right"
