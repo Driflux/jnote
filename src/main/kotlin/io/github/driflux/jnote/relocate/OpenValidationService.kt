@@ -109,11 +109,11 @@ internal class OpenValidationService(private val project: Project) : Disposable 
         disposed = true
     }
 
-    private companion object {
+    internal companion object {
         /** 이 줄 수 이하의 파일만 유사도까지 찾는다. 넘으면 정확 일치만 찾고 못 찾으면 NEEDS_RELOCATE다(intent.md 6절). */
         private const val SIMILARITY_MAX_LINES = 5_000
 
         /** 이 문서가 이번에 열린 동안 이미 검증했다는 에디터 표시. */
-        private val VALIDATED = Key.create<Boolean>("jnote.openValidated")
+        internal val VALIDATED = Key.create<Boolean>("jnote.openValidated")
     }
 }
