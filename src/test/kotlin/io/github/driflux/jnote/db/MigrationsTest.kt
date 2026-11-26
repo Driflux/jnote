@@ -212,4 +212,17 @@ class MigrationsTest {
             assertTrue(e.toString(), generateSequence<Throwable>(e) { it.cause }.any { it is IllegalStateException })
         }
     }
+
+    @Test
+    fun projectPathIndexExistsAfterMigration() {
+        val db = newDatabase()
+        val columns = db.submitAndWait { c ->
+            c.createStatement().use { s ->
+                s.executeQuery("PRAGMA index_info('idx_note_project_path')").use { rs ->
+                    generateSequence { if (rs.next()) rs.getString("name") else null }.toList()
+                }
+            }
+        }
+        assertEquals(listOf("project", "rel_path"), columns)
+    }
 }
