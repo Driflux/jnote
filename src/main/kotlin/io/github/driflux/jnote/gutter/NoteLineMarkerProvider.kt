@@ -15,6 +15,7 @@ import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.anchor.AnchorLines
+import io.github.driflux.jnote.relocate.OpenValidationService
 import io.github.driflux.jnote.ui.NoteSelection
 import javax.swing.Icon
 
@@ -42,6 +43,7 @@ class NoteLineMarkerProvider : LineMarkerProviderDescriptor(), DumbAware {
         val notes = project.service<GutterNoteService>().notesFor(virtualFile, relPath)
         if (notes.isNullOrEmpty()) return
         val document = PsiDocumentManager.getInstance(project).getCachedDocument(file) ?: return
+        project.service<OpenValidationService>().validateOncePerOpen(document, relPath)
         val targets = GutterLines.group(notes).mapNotNull { target(it, document) }
         if (targets.isEmpty()) return
 

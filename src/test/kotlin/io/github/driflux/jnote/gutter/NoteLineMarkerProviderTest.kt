@@ -37,6 +37,7 @@ import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.NoteStatus
 import io.github.driflux.jnote.project.ProjectKeyService
+import io.github.driflux.jnote.relocate.OpenValidationService
 import io.github.driflux.jnote.ui.PendingNoteSelection
 import java.awt.event.MouseEvent
 import java.nio.file.Files
@@ -50,6 +51,7 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
     private val dbService get() = DatabaseService.getInstance()
     private val repo get() = NoteRepository(dbService.database)
     private val gutter get() = project.service<GutterNoteService>()
+    private val validation get() = project.service<OpenValidationService>()
 
     override fun setUp() {
         super.setUp()
@@ -106,8 +108,8 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         // EDT에서 처리한 일이 새 읽기를 시작할 수 있으므로, 이벤트를 비운 뒤에도 읽기가 없을 때까지 되풀이한다
         while (true) {
             PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
-            if ((services + gutter).all { it.isIdle }) return
-            awaitUntil("gutter loads drained") { (services + gutter).all { it.isIdle } }
+            if ((services + gutter).all { it.isIdle } && validation.isIdle) return
+            awaitUntil("gutter loads drained") { (services + gutter).all { it.isIdle } && validation.isIdle }
         }
     }
 
@@ -132,6 +134,9 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
 
     private fun loadedMarkers(): List<LineMarkerInfo<*>> {
         assertTrue(directPass().isEmpty())
+        settle()
+        // 노트를 본 첫 패스는 열린 파일의 검증을 예약한다. 그 결과로 오는 데몬 재시작이 하이라이팅 도중에 오지 않게 먼저 끝낸다
+        directPass()
         settle()
         return markers()
     }
