@@ -31,7 +31,7 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
         selectionMode = ListSelectionModel.SINGLE_SELECTION
     }
 
-    internal val detail = NoteDetailPanel { CodeNavigator.goTo(project, it) }
+    internal val detail = NoteDetailPanel(onGoToCode = { CodeNavigator.goTo(project, it) }, onDelete = { delete(it) })
 
     // 늦게 끝난 옛 읽기가 새 결과를 덮지 않도록 번호를 매긴다
     private val generation = AtomicInteger()
@@ -55,11 +55,40 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
     fun reload() {
         val ticket = generation.incrementAndGet()
         load(allProjects = false).whenComplete { loaded, error ->
-            ApplicationManager.getApplication().invokeLater {
-                if (disposed || project.isDisposed || ticket != generation.get()) return@invokeLater
+            onEdt {
+                if (disposed || ticket != generation.get()) return@onEdt
                 if (loaded != null) show(loaded) else ToolWindowNotifier.loadFailed(project, error.cause ?: error)
             }
         }
+    }
+
+    /** 확인 없이 바로 지우고, 되돌리기 알림을 띄운다. 끝나면 완료되는 future를 돌려준다. */
+    internal fun delete(note: Note): CompletableFuture<*> =
+        NoteDeletion.onCurrentDatabase().delete(note.id).whenComplete { deleted, error ->
+            onEdt {
+                when {
+                    error != null -> ToolWindowNotifier.deleteFailed(project, error.cause ?: error)
+                    deleted != null -> {
+                        publishChanged()
+                        ToolWindowNotifier.deleted(project) { undo(deleted) }
+                    }
+                    // 이미 지워진 노트라면 목록만 새로 고친다
+                    else -> publishChanged()
+                }
+            }
+        }
+
+    private fun undo(deleted: DeletedNote) {
+        NoteDeletion.onCurrentDatabase().undo(deleted).whenComplete { _, error ->
+            onEdt { if (error == null) publishChanged() else ToolWindowNotifier.restoreFailed(project, error.cause ?: error) }
+        }
+    }
+
+    private fun publishChanged() =
+        ApplicationManager.getApplication().messageBus.syncPublisher(NotesChanged.TOPIC).notesChanged()
+
+    private fun onEdt(block: () -> Unit) {
+        ApplicationManager.getApplication().invokeLater({ block() }, project.disposed)
     }
 
     private fun load(allProjects: Boolean): CompletableFuture<Loaded> =
