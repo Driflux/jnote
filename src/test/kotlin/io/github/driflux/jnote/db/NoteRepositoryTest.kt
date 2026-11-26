@@ -264,4 +264,34 @@ class NoteRepositoryTest {
 
         assertEquals(listOf(created.id), SearchRepository(db).search("needle", null, true).get())
     }
+
+    @Test
+    fun listByPathReturnsOnlyThatFileOfThatProjectOrderedByStartLine() {
+        val late = repo.create(NewNote.code("p1", "src/A.kt", 20, 21, "late")).get()
+        val early = repo.create(NewNote.code("p1", "src/A.kt", 3, 4, "early")).get()
+        val sameLine = repo.create(NewNote.code("p1", "src/A.kt", 3, 9, "same line")).get()
+        repo.create(NewNote.code("p1", "src/B.kt", 3, 4, "other file")).get()
+        repo.create(NewNote.code("p2", "src/A.kt", 3, 4, "other project")).get()
+        repo.create(NewNote.free("free")).get()
+
+        assertEquals(listOf(early.id, sameLine.id, late.id), repo.listByPath("p1", "src/A.kt").get().map { it.id })
+    }
+
+    @Test
+    fun listByPathOfAFileWithoutNotesIsEmpty() {
+        repo.create(code()).get()
+        assertTrue(repo.listByPath("p1", "src/None.kt").get().isEmpty())
+    }
+
+    @Test
+    fun listByPathUsesTheProjectPathIndex() {
+        val plan = db.submitAndWait { c ->
+            c.createStatement().use { s ->
+                s.executeQuery("EXPLAIN QUERY PLAN SELECT id FROM note WHERE project = 'p1' AND rel_path = 'a' ORDER BY start_line, id").use { rs ->
+                    generateSequence { if (rs.next()) rs.getString("detail") else null }.toList()
+                }
+            }
+        }
+        assertTrue(plan.toString(), plan.any { it.contains("idx_note_project_path") })
+    }
 }

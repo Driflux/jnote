@@ -177,6 +177,18 @@ class NoteRepository(
         }
     }
 
+    /**
+     * 한 파일에 앵커된 노트를 시작 줄 순(같으면 id순)으로 돌려준다. (project, rel_path) 인덱스를 탄다.
+     * 거터가 파일을 처음 열 때 한 번 부른다.
+     */
+    fun listByPath(project: String, relPath: String): CompletableFuture<List<Note>> = database.submit { c ->
+        c.prepareStatement("SELECT $COLUMNS FROM note WHERE project = ? AND rel_path = ? ORDER BY start_line, id").use { s ->
+            s.setString(1, project)
+            s.setString(2, relPath)
+            s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.toNote() else null }.toList() }
+        }
+    }
+
     private companion object {
         const val INSERT = "INSERT INTO note (uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, " +
             "status, title, body, ai_source, source_url, prompt, created_at, updated_at) " +
@@ -198,7 +210,6 @@ internal fun findById(c: Connection, id: Long): Note? =
         s.executeQuery().use { if (it.next()) it.toNote() else null }
     }
 
-/** [COLUMNS] 순서의 현재 행을 노트로 읽는다. */
 internal fun ResultSet.toNote(): Note = Note(
     id = getLong(1),
     uid = getString(2),
