@@ -74,12 +74,13 @@ class MigrationsTest {
         assertEquals(0, backupValue("extra3"))
     }
 
-    /** 백업 파일을 열어 해당 테이블이 있으면 1, 없으면 0 */
+    /** 백업 파일을 열어 해당 테이블이 있으면 1, 없으면 0. 백업이 더 높은 버전일 수 있어 마이그레이션 없이 연다. */
     private fun backupValue(table: String): Int {
         val copy = tmp.newFile().toPath()
         Files.copy(bakPath, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        val backup = Database(copy).also { opened += it }
-        return backup.submitAndWait { count(it, "SELECT count(*) FROM sqlite_master WHERE name = '$table'") }
+        return checkNotNull(JDBC().connect("jdbc:sqlite:$copy", java.util.Properties())).use {
+            count(it, "SELECT count(*) FROM sqlite_master WHERE name = '$table'")
+        }
     }
 
     @Test
