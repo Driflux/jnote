@@ -14,5 +14,9 @@
                                  instance="io.github.driflux.jnote.settings.JNoteConfigurable"
                                  bundle="messages.JNoteBundle"
                                  key="settings.displayName"/>
+        <notificationGroup id="JNote"
+                           displayType="BALLOON"
+                           bundle="messages.JNoteBundle"
+                           key="notification.group.name"/>
     </extensions>
 </idea-plugin>

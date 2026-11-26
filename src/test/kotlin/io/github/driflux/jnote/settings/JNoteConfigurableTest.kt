@@ -4,7 +4,9 @@ import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.ui.UIUtil
+import com.intellij.testFramework.PlatformTestUtil
 import io.github.driflux.jnote.db.DatabasePaths
+import io.github.driflux.jnote.db.DatabaseService
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -21,6 +23,7 @@ class JNoteConfigurableTest : BasePlatformTestCase() {
     override fun tearDown() {
         try {
             DbPathSettings.getInstance().state.dbPath = storedBefore
+            DatabaseService.getInstance().switchTo(DatabasePaths.default())
             dir.toFile().deleteRecursively()
         } finally {
             super.tearDown()
@@ -66,7 +69,8 @@ class JNoteConfigurableTest : BasePlatformTestCase() {
 
     fun testShowsStoredPathAndAppliesNewOne() {
         val stored = dir.resolve("stored.db")
-        DbPathSettings.getInstance().state.dbPath = stored.toString()
+        DbPathSettings.getInstance().store(stored)
+        DatabaseService.getInstance().switchTo(stored)
         val configurable = JNoteConfigurable()
         val field = fieldOf(configurable)
         configurable.reset()
@@ -77,7 +81,13 @@ class JNoteConfigurableTest : BasePlatformTestCase() {
         field.text = next.toString()
         assertTrue(configurable.isModified)
         configurable.apply()
-        assertEquals(next.toString(), DbPathSettings.getInstance().state.dbPath)
+        // 복사와 전환은 백그라운드 작업이라 끝날 때까지 이벤트를 처리하며 기다린다
+        PlatformTestUtil.waitWithEventsDispatching(
+            "DB path was not switched",
+            { DbPathSettings.getInstance().state.dbPath == next.toString() },
+            20,
+        )
+        assertEquals(next, DatabaseService.getInstance().currentPath())
         assertFalse(configurable.isModified)
         configurable.disposeUIResources()
     }
