@@ -20,6 +20,8 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
+import io.github.driflux.jnote.NoteSelectRequested
+import io.github.driflux.jnote.NoteSelectRequestedListener
 import io.github.driflux.jnote.NotesChangedListener
 import io.github.driflux.jnote.action.NoteSaver
 import io.github.driflux.jnote.db.DatabaseService
@@ -112,6 +114,8 @@ class JNotePanel internal constructor(
         // 구독을 먼저 걸어 첫 읽기 사이에 오는 알림을 놓치지 않는다
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(NotesChanged.TOPIC, NotesChangedListener { reload() })
+        ApplicationManager.getApplication().messageBus.connect(this)
+            .subscribe(NoteSelectRequested.TOPIC, NoteSelectRequestedListener { requested, noteId -> onSelectRequested(requested, noteId) })
         reload()
     }
 
@@ -192,6 +196,24 @@ class JNotePanel internal constructor(
         // 다시 읽어도 보던 노트를 유지하고, 그 사이 지워졌다면 상세를 비운다
         val index = model.items.indexOfFirst { it.note.id == selectedId }
         if (index >= 0) list.selectedIndex = index else detail.show(null)
+        project.service<PendingNoteSelection>().peek()?.let { selectAndClear(it) }
+    }
+
+    private fun onSelectRequested(requested: Project, noteId: Long) {
+        if (requested !== project) return
+        onEdt {
+            // 첫 읽기 전이면 요청을 남겨 두고, 읽기가 끝나는 show()가 처리한다
+            if (state.notes != null) selectAndClear(noteId)
+        }
+    }
+
+    /** 목록에 없는 노트(다른 프로젝트 등)는 선택을 바꾸지 않고, 요청도 지우지 않는다. */
+    private fun selectAndClear(noteId: Long) {
+        val index = model.items.indexOfFirst { it.note.id == noteId }
+        if (index < 0) return
+        list.selectedIndex = index
+        list.ensureIndexIsVisible(index)
+        project.service<PendingNoteSelection>().clear(noteId)
     }
 
     private fun showEmptyText() {
