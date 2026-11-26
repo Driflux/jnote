@@ -51,6 +51,28 @@ object Migrations {
                  WHERE nt.note_id = n.id) AS tags
           FROM note n
         """.trimIndent(),
+        // v3: 검색용 FTS5 trigram 외부 콘텐츠 테이블. note가 원본이라 트리거로 동기화하고 기존 행은 rebuild로 채운다
+        """
+        CREATE VIRTUAL TABLE note_fts USING fts5(
+            title, body, snapshot, class_name, prompt,
+            content='note', content_rowid='id', tokenize='trigram'
+        );
+        CREATE TRIGGER note_fts_ai AFTER INSERT ON note BEGIN
+            INSERT INTO note_fts(rowid, title, body, snapshot, class_name, prompt)
+            VALUES (new.id, new.title, new.body, new.snapshot, new.class_name, new.prompt);
+        END;
+        CREATE TRIGGER note_fts_ad AFTER DELETE ON note BEGIN
+            INSERT INTO note_fts(note_fts, rowid, title, body, snapshot, class_name, prompt)
+            VALUES ('delete', old.id, old.title, old.body, old.snapshot, old.class_name, old.prompt);
+        END;
+        CREATE TRIGGER note_fts_au AFTER UPDATE OF title, body, snapshot, class_name, prompt ON note BEGIN
+            INSERT INTO note_fts(note_fts, rowid, title, body, snapshot, class_name, prompt)
+            VALUES ('delete', old.id, old.title, old.body, old.snapshot, old.class_name, old.prompt);
+            INSERT INTO note_fts(rowid, title, body, snapshot, class_name, prompt)
+            VALUES (new.id, new.title, new.body, new.snapshot, new.class_name, new.prompt);
+        END;
+        INSERT INTO note_fts(note_fts) VALUES ('rebuild');
+        """.trimIndent(),
     )
 
     fun run(connection: Connection, migrations: List<String> = ALL) {
