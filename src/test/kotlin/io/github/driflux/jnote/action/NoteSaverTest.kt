@@ -159,6 +159,20 @@ class NoteSaverTest : BasePlatformTestCase() {
         assertEquals(1, published.get())
     }
 
+    fun testSaveFreeResolvesRepositoryOnBackgroundExecutor() {
+        var repoThread: String? = null
+        val repo = NoteRepository(db)
+        val saver = NoteSaver(
+            repository = {
+                repoThread = Thread.currentThread().name
+                repo
+            },
+            background = { task -> Thread(task, "fake-background").start() },
+        )
+        await(saver.saveFree(NoteDraft("q")))
+        assertEquals("fake-background", repoThread)
+    }
+
     fun testSaveFreeFailureSurfacesAndDoesNotPublish() {
         val repo = NoteRepository(db)
         val saver = NoteSaver(repository = { repo })

@@ -11,10 +11,7 @@ import io.github.driflux.jnote.ui.AddNoteDialog
 import io.github.driflux.jnote.ui.NoteDraft
 import java.util.concurrent.CompletionException
 
-/**
- * Tool Window 툴바의 "새 노트" 버튼. 앵커 없는 자유 노트를 만든다.
- * 인자는 테스트에서 다이얼로그와 저장소를 바꿔 끼우기 위한 것이다.
- */
+/** 인자는 테스트에서 다이얼로그와 저장소를 바꿔 끼우기 위한 것이다. */
 class NewFreeNoteAction(
     private val askUser: (Project) -> NoteDraft? = AddNoteDialog::askFree,
     private val saver: NoteSaver = NoteSaver(),

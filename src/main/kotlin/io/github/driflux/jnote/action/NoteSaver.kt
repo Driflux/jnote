@@ -34,11 +34,9 @@ class NoteSaver(
             // DB 스레드에서 알리면 구독자가 DB를 기다리다 막힐 수 있어 UI 스레드로 옮긴다
             .thenApplyAsync({ note -> publish(); note }, ui)
 
-    /** 자유 노트를 저장한다. 프로젝트와 무관하므로 프로젝트 키를 구하지 않는다. */
     fun saveFree(draft: NoteDraft): CompletableFuture<Note> =
-        // 검증 오류도 future로 드러나도록 체인 안에서 노트를 만든다
-        CompletableFuture.completedFuture(draft)
-            .thenApply { it.toFreeNote() }
+        // 검증 오류도 future로 드러나고, 검증과 repository() 평가가 EDT 밖에서 일어나도록 background에서 시작한다
+        CompletableFuture.supplyAsync({ draft.toFreeNote() }, background)
             .thenCompose { repository().create(it) }
             .thenApplyAsync({ note -> publish(); note }, ui)
 

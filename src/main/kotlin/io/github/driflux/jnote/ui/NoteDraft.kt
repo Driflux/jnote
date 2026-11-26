@@ -29,7 +29,6 @@ data class NoteDraft(
         )
     }
 
-    /** 앵커와 프로젝트가 없는 자유 노트. 다듬는 규칙은 [toNewNote]와 같다. */
     fun toFreeNote(): NewNote {
         require(title.isNotBlank()) { "title is blank" }
         return NewNote.free(
@@ -72,7 +71,6 @@ data class NoteDraft(
     }
 }
 
-/** 편집 다이얼로그에 보여줄 앵커 요약. FREE 노트는 앵커가 없어 null. */
 internal fun Note.anchorOrNull(): CodeAnchor? {
     if (kind != NoteKind.CODE) return null
     return CodeAnchor(relPath!!, startLine!!, endLine!!, snapshot.orEmpty(), className)
