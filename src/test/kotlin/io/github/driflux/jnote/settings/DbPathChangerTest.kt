@@ -44,6 +44,21 @@ class DbPathChangerTest : BasePlatformTestCase() {
         }
     }
 
+    fun testPlanIsMadeInTheBackgroundNotOnTheCallingThread() {
+        // 테스트에서는 백그라운드 작업이 기본으로 동기 실행되므로, 실제 IDE처럼 비동기로 돌게 한다
+        val key = "intellij.progress.task.ignoreHeadless"
+        val before = System.getProperty(key)
+        System.setProperty(key, "true")
+        try {
+            DbPathChanger.request(dir) // 폴더라는 사실은 파일 시스템을 봐야 안다
+            assertTrue(notifications.isEmpty())
+            PlatformTestUtil.waitWithEventsDispatching("plan was not made", { notifications.isNotEmpty() }, 20)
+        } finally {
+            if (before == null) System.clearProperty(key) else System.setProperty(key, before)
+        }
+        assertEquals(JNoteBundle.message("settings.dbPath.invalid.isDirectory"), notifications.single().content)
+    }
+
     fun testNotificationGroupIsRegistered() {
         assertNotNull(NotificationGroupManager.getInstance().getNotificationGroup(DbPathNotifier.GROUP_ID))
     }
@@ -84,7 +99,11 @@ class DbPathChangerTest : BasePlatformTestCase() {
     fun testDecliningConfirmationKeepsCurrentDatabase() {
         val other = dir.resolve("other.db").also { Files.writeString(it, "x") }
         var asked: Path? = null
-        DbPathChanger.request(other) { asked = it; false }
+        DbPathChanger.request(other) {
+            assertTrue(ApplicationManager.getApplication().isDispatchThread)
+            asked = it
+            false
+        }
         assertEquals(other, asked)
         assertEquals(current, DatabaseService.getInstance().currentPath())
         assertEquals(current.toString(), DbPathSettings.getInstance().state.dbPath)
