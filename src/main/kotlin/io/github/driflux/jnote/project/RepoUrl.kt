@@ -1,6 +1,5 @@
 package io.github.driflux.jnote.project
 
-/** git remote URL을 `host/path` 형태로 통일한다. 규칙과 이유는 docs/adr/0004-project-key.md 참고. */
 object RepoUrl {
     private val schemeUrl = Regex("^[A-Za-z][A-Za-z0-9+.-]*://([^/]*)(/.*)?$")
 
@@ -8,7 +7,6 @@ object RepoUrl {
     // 호스트를 2자 이상으로 제한해 윈도우 드라이브 경로(C:\work)를 URL로 오인하지 않는다
     private val scpLike = Regex("^(?:[^@/:]+@)?([^@/:]{2,}):(.+)$")
 
-    /** 정규화할 수 없으면(호스트나 경로가 없음, 로컬 경로 등) null. */
     fun normalize(raw: String): String? {
         val input = raw.trim()
         val (authority, path) = split(input) ?: return null

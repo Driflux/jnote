@@ -7,7 +7,6 @@ import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
 
-/** git 설정 파일만 읽는다. 프로세스를 띄우지 않으며 모든 읽기 실패는 null로 돌려준다. */
 object GitConfigReader {
     private val sectionHeader = Regex("^\\[\\s*([^\\s\\]\"]+)(?:\\s+\"((?:[^\"\\\\]|\\\\.)*)\")?\\s*](.*)$")
     private val keyValue = Regex("^([A-Za-z][A-Za-z0-9-]*)\\s*=(.*)$")
@@ -22,7 +21,6 @@ object GitConfigReader {
     }
 
     /**
-     * start부터 위로 올라가며 첫 `.git`을 찾아 git 디렉터리를 돌려준다. 워크트리의 `.git` 파일이면 gitdir 대상이다.
      * home에 닿으면 멈추고 home의 `.git`은 받지 않는다. 홈 전체를 dotfiles 저장소로 쓰는 경우
      * 그 아래 비git 프로젝트가 저장소의 origin을 가져가기 때문이다.
      */
@@ -38,7 +36,6 @@ object GitConfigReader {
         return null
     }
 
-    /** 워크트리의 gitdir에는 `commondir` 파일이 있고 메인 `.git`을 가리킨다. 없으면 gitDir 자체가 공용 디렉터리다. */
     fun resolveCommonDir(gitDir: Path): Path {
         val commonDirFile = gitDir.resolve("commondir")
         val raw = readText(commonDirFile)?.trim()
@@ -51,7 +48,6 @@ object GitConfigReader {
         }
     }
 
-    /** commonDir/config의 `[remote "origin"]` 첫 url. 없거나 읽을 수 없으면 null. */
     fun readOriginUrl(commonDir: Path): String? {
         val text = readText(commonDir.resolve("config")) ?: return null
         var inOrigin = false
