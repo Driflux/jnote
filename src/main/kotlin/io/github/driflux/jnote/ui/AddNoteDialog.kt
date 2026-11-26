@@ -1,5 +1,7 @@
 package io.github.driflux.jnote.ui
 
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogWrapper
@@ -12,15 +14,28 @@ import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.panel
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.anchor.CodeAnchor
+import io.github.driflux.jnote.db.DatabaseService
+import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.Note
+import io.github.driflux.jnote.model.Tag
+import java.util.concurrent.CompletableFuture
 import javax.swing.JComponent
 
+/**
+ * 노트를 쓰는 다이얼로그. 추가와 편집이 함께 쓴다.
+ * 앵커는 읽기 전용 요약으로만 보여 주고, null이면(FREE 노트) 요약을 그리지 않는다.
+ * [initial]은 편집할 때 채워 둘 값이다. [knownTags]는 태그 사전으로, 늦게 도착해도 칩으로 더한다.
+ */
 class AddNoteDialog(
     project: Project,
     private val anchor: CodeAnchor?,
     private val initial: NoteDraft = NoteDraft(""),
     dialogTitle: String = JNoteBundle.message("dialog.addNote.title"),
+    knownTags: CompletableFuture<List<String>> = CompletableFuture.completedFuture(emptyList()),
 ) : DialogWrapper(project) {
+    private val tagSelection = TagSelection(initial.tags)
+    internal val tagChips = TagChipsPanel(tagSelection)
+
     private val titleField = JBTextField(initial.title)
     private val bodyArea = JBTextArea(8, 60).apply {
         lineWrap = true
@@ -44,6 +59,12 @@ class AddNoteDialog(
     init {
         title = dialogTitle
         init()
+        // 사전은 DB 스레드에서 읽혀 오므로 도착하면 UI 스레드에서 더한다. 못 읽어도 직접 입력은 된다
+        knownTags.whenComplete { names, error ->
+            if (error == null) {
+                ApplicationManager.getApplication().invokeLater({ tagChips.setKnown(names) }, ModalityState.any()) { isDisposed }
+            }
+        }
     }
 
     override fun createCenterPanel(): JComponent = content
@@ -58,6 +79,9 @@ class AddNoteDialog(
         }
         row(JNoteBundle.message("dialog.addNote.noteTitle.label")) {
             cell(titleField).align(AlignX.FILL)
+        }
+        row(JNoteBundle.message("dialog.addNote.tags.label")) {
+            cell(tagChips).align(AlignX.FILL)
         }
         row { label(JNoteBundle.message("dialog.addNote.body.label")) }
         row { cell(JBScrollPane(bodyArea)).align(Align.FILL) }.resizableRow()
@@ -74,13 +98,20 @@ class AddNoteDialog(
     public override fun doValidate(): ValidationInfo? =
         if (titleField.text.isBlank()) ValidationInfo(JNoteBundle.message("dialog.addNote.noteTitle.required"), titleField) else null
 
-    fun draft(): NoteDraft = NoteDraft(
+    fun draft(): NoteDraft {
+        // 입력란에 친 채로 확인을 눌러도 그 태그가 빠지지 않게 한다
+        tagChips.commitInput()
+        return readDraft()
+    }
+
+    private fun readDraft(): NoteDraft = NoteDraft(
         title = titleField.text,
         body = bodyArea.text,
         // 편집 가능한 콤보는 입력 중인 글자가 selectedItem에 반영되기 전이라 편집기 값을 읽는다
         aiSource = aiNameCombo.editor.item?.toString().orEmpty(),
         sourceUrl = linkField.text,
         prompt = promptArea.text,
+        tags = tagSelection.names,
     )
 
     companion object {
@@ -88,16 +119,27 @@ class AddNoteDialog(
         val AI_PRESETS = listOf("Claude", "ChatGPT", "Gemini")
 
         /** 확인으로 닫으면 입력값, 취소하면 null. UI 스레드에서 호출한다. */
-        fun ask(project: Project, anchor: CodeAnchor): NoteDraft? = show(AddNoteDialog(project, anchor))
+        fun ask(project: Project, anchor: CodeAnchor): NoteDraft? =
+            show(AddNoteDialog(project, anchor, knownTags = loadKnownTags()))
 
         /** UI 스레드에서 호출한다. */
         fun askFree(project: Project): NoteDraft? =
-            show(AddNoteDialog(project, null, dialogTitle = JNoteBundle.message("dialog.newNote.title")))
+            show(AddNoteDialog(project, null, dialogTitle = JNoteBundle.message("dialog.newNote.title"), knownTags = loadKnownTags()))
 
         /** 저장된 [note]의 값을 채워 편집한다. 앵커는 보여 주기만 하고 바꾸지 않는다. UI 스레드에서 호출한다. */
-        fun edit(project: Project, note: Note): NoteDraft? = show(
-            AddNoteDialog(project, note.anchorOrNull(), NoteDraft.of(note), JNoteBundle.message("dialog.editNote.title")),
+        fun edit(project: Project, note: Note, tags: List<String>): NoteDraft? = show(
+            AddNoteDialog(
+                project,
+                note.anchorOrNull(),
+                NoteDraft.of(note, tags),
+                JNoteBundle.message("dialog.editNote.title"),
+                loadKnownTags(),
+            ),
         )
+
+        // 열 때 한 번 읽는다. DB 스레드에서 돌고 EDT는 기다리지 않는다
+        private fun loadKnownTags(): CompletableFuture<List<String>> =
+            TagRepository(DatabaseService.getInstance().database).list().thenApply { tags: List<Tag> -> tags.map { it.name } }
 
         private fun show(dialog: AddNoteDialog): NoteDraft? = if (dialog.showAndGet()) dialog.draft() else null
     }

@@ -98,4 +98,17 @@ class NoteDraftTest {
         assertEquals("3-5", anchor.linesLabel())
         assertEquals("7", anchor.copy(startLine = 7, endLine = 7).linesLabel())
     }
+
+    @Test fun tagNamesTrimAndDropBlanksAndDuplicates() {
+        assertEquals(listOf("a", "b"), NoteDraft("t", tags = listOf(" a", "", "b", "a ")).tagNames())
+        assertEquals(emptyList<String>(), NoteDraft("t").tagNames())
+    }
+
+    @Test fun ofCarriesTheGivenTags() {
+        val note = NoteDraft("t").toFreeNote().let {
+            io.github.driflux.jnote.model.Note(1, "u", it.kind, null, null, null, null, null, null, it.status, "t", "", null, null, null, 1, 1)
+        }
+        assertEquals(listOf("x", "y"), NoteDraft.of(note, listOf("x", "y")).tags)
+        assertEquals(emptyList<String>(), NoteDraft.of(note).tags)
+    }
 }

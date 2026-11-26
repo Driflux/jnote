@@ -227,4 +227,46 @@ class TagRepositoryTest {
         assertEquals(mapOf(a.id to listOf(api, sql)), result)
         assertFalse(result.containsKey(untagged.id))
     }
+
+    @Test
+    fun replaceTagsCreatesMissingTagsAndMakesTheSetExact() {
+        val n = note()
+        val keep = tag("keep")
+        val gone = tag("gone")
+        tags.attach(n.id, keep.id).get()
+        tags.attach(n.id, gone.id).get()
+
+        val result = tags.replaceTags(n.id, listOf(" new ", "keep", "keep", "")).get()
+
+        assertEquals(listOf("keep", "new"), result.map { it.name })
+        assertEquals(result, tags.tagsOf(n.id).get())
+        assertEquals(keep, result.first { it.name == "keep" })
+        // 떼어 낸 태그는 사전에 남는다
+        assertEquals(listOf("gone", "keep", "new"), tags.list().get().map { it.name })
+    }
+
+    @Test
+    fun replaceTagsWithEmptyListDetachesEverything() {
+        val n = note()
+        tags.replaceTags(n.id, listOf("a", "b")).get()
+        assertTrue(tags.replaceTags(n.id, emptyList()).get().isEmpty())
+        assertTrue(tags.tagsOf(n.id).get().isEmpty())
+    }
+
+    @Test
+    fun replaceTagsOnAMissingNoteFailsAndRegistersNothing() {
+        val e = assertThrows(ExecutionException::class.java) { tags.replaceTags(999, listOf("ghost")).get() }
+        assertTrue(e.cause is SQLException)
+        assertTrue(tags.list().get().isEmpty())
+    }
+
+    @Test
+    fun replaceTagsRejectsCommaAndLeavesTheOldSet() {
+        val n = note()
+        tags.replaceTags(n.id, listOf("a")).get()
+        val e = assertThrows(ExecutionException::class.java) { tags.replaceTags(n.id, listOf("b", "c,d")).get() }
+        assertTrue(e.cause is IllegalArgumentException)
+        assertEquals(listOf("a"), tags.tagsOf(n.id).get().map { it.name })
+        assertEquals(listOf("a"), tags.list().get().map { it.name })
+    }
 }

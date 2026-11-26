@@ -13,6 +13,7 @@ import io.github.driflux.jnote.anchor.CodeAnchor
 import io.github.driflux.jnote.anchor.CodeAnchors
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
+import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteStatus
 import io.github.driflux.jnote.project.ProjectKeyService
@@ -28,6 +29,7 @@ import java.util.concurrent.Executor
  */
 class NoteSaver(
     private val repository: () -> NoteRepository = { NoteRepository(DatabaseService.getInstance().database) },
+    private val tags: () -> TagRepository = { TagRepository(DatabaseService.getInstance().database) },
     private val projectKey: (Project) -> String = { it.service<ProjectKeyService>().resolve().key },
     private val background: Executor = AppExecutorUtil.getAppExecutorService(),
     private val ui: Executor = Executor { ApplicationManager.getApplication().invokeLater(it, ModalityState.nonModal()) },
@@ -38,6 +40,7 @@ class NoteSaver(
     fun save(project: Project, anchor: CodeAnchor, draft: NoteDraft): CompletableFuture<Note> =
         CompletableFuture.supplyAsync({ projectKey(project) }, background)
             .thenComposeAsync({ key -> repository().create(draft.toNewNote(key, anchor)) }, background)
+            .thenCompose { note -> withTags(note, draft) }
             // DB 스레드에서 알리면 구독자가 DB를 기다리다 막힐 수 있어 UI 스레드로 옮긴다
             .thenApplyAsync({ note -> publish(); note }, ui)
 
@@ -46,10 +49,11 @@ class NoteSaver(
         // thenCompose는 앞 단계가 이미 끝났으면 호출 스레드에서 돌 수 있어 thenComposeAsync로 background를 강제한다
         CompletableFuture.supplyAsync({ draft.toFreeNote() }, background)
             .thenComposeAsync({ repository().create(it) }, background)
+            .thenCompose { note -> withTags(note, draft) }
             .thenApplyAsync({ note -> publish(); note }, ui)
 
     /**
-     * 편집한 값으로 노트를 갱신한다(앵커와 태그는 그대로). 그 사이 지워졌다면 null로 끝나며,
+     * 편집한 값으로 노트를 갱신한다(앵커는 그대로, 태그는 [draft]의 목록으로 맞춘다). 그 사이 지워졌다면 null로 끝나며,
      * 목록을 새로 고치도록 이때도 알린다. APPROX 노트는 편집이 곧 위치 확인이므로 [confirmLocation]처럼
      * OK와 지금 코드의 스냅샷으로 바꿔 함께 저장한다. 파일을 읽지 못하면 편집만 저장하고 APPROX로 남긴다.
      */
@@ -59,6 +63,8 @@ class NoteSaver(
             .thenApply { it.applyTo(note) }
             .thenApplyAsync({ edited -> if (edited.status == NoteStatus.APPROX) confirmed(project, edited) ?: edited else edited }, background)
             .thenCompose { repository().update(it) }
+            // 편집은 태그도 바꿀 수 있으므로 지워진 노트(null)가 아니면 목록을 맞춘다
+            .thenCompose { updated -> if (updated == null) CompletableFuture.completedFuture(null) else withTags(updated, draft, always = true) }
             .thenApplyAsync({ updated -> publish(); updated }, ui)
 
     /**
@@ -87,5 +93,12 @@ class NoteSaver(
             FileDocumentManager.getInstance().getDocument(file)?.let { CodeAnchors.fromLines(project, file, it, start, end)?.snapshot }
         } ?: return null
         return note.copy(status = NoteStatus.OK, snapshot = snapshot)
+    }
+
+    // 새 노트는 비어 있으니 태그가 없으면 건너뛰고, 있으면 사전 등록과 연결을 한 트랜잭션으로 한다
+    private fun withTags(note: Note, draft: NoteDraft, always: Boolean = false): CompletableFuture<Note> {
+        val names = draft.tagNames()
+        if (names.isEmpty() && !always) return CompletableFuture.completedFuture(note)
+        return tags().replaceTags(note.id, names).thenApply { note }
     }
 }

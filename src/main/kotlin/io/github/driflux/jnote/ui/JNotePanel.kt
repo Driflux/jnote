@@ -27,6 +27,7 @@ import io.github.driflux.jnote.action.NoteSaver
 import io.github.driflux.jnote.action.RelocateNotesTask
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
+import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.awt.BorderLayout
@@ -40,7 +41,7 @@ class JNotePanel internal constructor(
     private val project: Project,
     scheduler: DelayScheduler,
     private val saver: NoteSaver = NoteSaver(),
-    private val askEdit: (Project, Note) -> NoteDraft? = AddNoteDialog::edit,
+    private val askEdit: (Project, Note, List<String>) -> NoteDraft? = AddNoteDialog::edit,
 ) : JBPanel<JNotePanel>(BorderLayout()), Disposable {
     constructor(project: Project) : this(project, AppDelayScheduler)
 
@@ -165,12 +166,32 @@ class JNotePanel internal constructor(
             }
         }
 
+    /**
+     * 붙은 태그를 EDT 밖에서 읽은 뒤 다이얼로그를 띄워 편집하고, 확인하면 EDT 밖에서 저장한다.
+     * 취소하면 아무것도 저장하지 않는다. 모두 끝나면 완료되는 future를 돌려준다.
+     */
     internal fun edit(note: Note): CompletableFuture<*> {
-        val draft = askEdit(project, note) ?: return CompletableFuture.completedFuture(null)
-        // 저장소가 알림을 UI 스레드로 옮겨 보내므로 여기서는 실패만 알린다
-        return saver.update(project, note, draft).whenComplete { _, error ->
-            if (error != null) onEdt { ToolWindowNotifier.editFailed(project, (error as? CompletionException)?.cause ?: error) }
+        val done = CompletableFuture<Unit>()
+        TagRepository(DatabaseService.getInstance().database).tagsOf(note.id).whenComplete { tags, readError ->
+            onEdt {
+                if (readError != null) {
+                    ToolWindowNotifier.editFailed(project, (readError as? CompletionException)?.cause ?: readError)
+                    done.complete(Unit)
+                    return@onEdt
+                }
+                val draft = askEdit(project, note, tags.map { it.name })
+                if (draft == null) {
+                    done.complete(Unit)
+                    return@onEdt
+                }
+                // 저장소가 알림을 UI 스레드로 옮겨 보내므로 여기서는 실패만 알린다
+                saver.update(project, note, draft).whenComplete { _, error ->
+                    if (error != null) onEdt { ToolWindowNotifier.editFailed(project, (error as? CompletionException)?.cause ?: error) }
+                    done.complete(Unit)
+                }
+            }
         }
+        return done
     }
 
     /** 근사 위치를 지금 줄 범위로 확인한다. 성공하면 저장소의 알림으로 목록과 거터가 다시 읽힌다. */

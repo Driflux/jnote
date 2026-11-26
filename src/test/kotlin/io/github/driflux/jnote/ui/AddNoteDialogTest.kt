@@ -94,4 +94,50 @@ class AddNoteDialogTest : BasePlatformTestCase() {
         assertEquals("A title", dialog.draft().title)
         assertEquals("", dialog.draft().aiSource)
     }
+
+    fun testEditDialogShowsTheNotesTagsAsSelectedChipsAndReturnsThem() =
+        withDialog(AddNoteDialog(project, null, NoteDraft("t", tags = listOf("b", "a")))) { dialog ->
+            assertEquals(listOf("a", "b"), dialog.tagChips.chips.map { it.text })
+            assertTrue(dialog.tagChips.chips.all { it.isSelected })
+            assertEquals(listOf("b", "a"), dialog.draft().tags)
+        }
+
+    fun testKnownTagsArriveLaterAsUnselectedChipsWithoutDroppingTheSelection() {
+        val known = java.util.concurrent.CompletableFuture<List<String>>()
+        withDialog(AddNoteDialog(project, null, NoteDraft("t", tags = listOf("mine")), knownTags = known)) { dialog ->
+            known.complete(listOf("zed", "mine", "alpha"))
+            com.intellij.testFramework.PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+            assertEquals(listOf("alpha", "mine", "zed"), dialog.tagChips.chips.map { it.text })
+            assertEquals(listOf("mine"), dialog.tagChips.chips.filter { it.isSelected }.map { it.text })
+        }
+    }
+
+    fun testClickingAChipTogglesItAndTypingANewTagAddsASelectedChip() = withDialog { dialog ->
+        dialog.tagChips.setKnown(listOf("sql"))
+        dialog.tagChips.chips.single().doClick()
+        assertEquals(listOf("sql"), dialog.draft().tags)
+
+        dialog.tagChips.input.text = "fresh, other"
+        dialog.tagChips.input.postActionEvent()
+        assertEquals(listOf("fresh", "other", "sql"), dialog.tagChips.chips.map { it.text })
+        assertEquals(listOf("sql", "fresh", "other"), dialog.draft().tags)
+        assertEquals("", dialog.tagChips.input.text)
+
+        dialog.tagChips.chips.first { it.text == "sql" }.doClick()
+        assertEquals(listOf("fresh", "other"), dialog.draft().tags)
+    }
+
+    fun testUntoggledNewTagChipDisappearsButDictionaryChipStays() = withDialog { dialog ->
+        dialog.tagChips.setKnown(listOf("sql"))
+        dialog.tagChips.input.text = "fresh"
+        dialog.tagChips.commitInput()
+        dialog.tagChips.chips.first { it.text == "fresh" }.doClick()
+        assertEquals(listOf("sql"), dialog.tagChips.chips.map { it.text })
+    }
+
+    fun testTextLeftInTheTagFieldIsKeptWhenThePanelIsConfirmed() = withDialog { dialog ->
+        dialog.tagChips.input.text = "pending"
+        assertEquals(listOf("pending"), dialog.draft().tags)
+    }
 }

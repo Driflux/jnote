@@ -97,7 +97,7 @@ class NoteSaverTest : BasePlatformTestCase() {
         assertEquals(0, published.get())
     }
 
-    fun testUpdateChangesTextBumpsUpdatedAtKeepsAnchorAndTagsAndPublishesOnce() {
+    fun testUpdateChangesTextBumpsUpdatedAtKeepsAnchorAndPublishesOnce() {
         var now = 1_000L
         val repo = NoteRepository(db) { now }
         val tags = TagRepository(db)
@@ -106,7 +106,8 @@ class NoteSaverTest : BasePlatformTestCase() {
         tags.attach(created.id, tag.id).get()
         now = 2_000L
 
-        val future = NoteSaver(repository = { repo }, projectKey = { "k" }).update(project, created, NoteDraft(" New ", "nb", "Gemini"))
+        val future = NoteSaver(repository = { repo }, tags = { tags }, projectKey = { "k" })
+            .update(project, created, NoteDraft(" New ", "nb", "Gemini", tags = listOf("x")))
         await(future)
 
         val updated = future.get()!!
@@ -118,6 +119,52 @@ class NoteSaverTest : BasePlatformTestCase() {
         assertEquals(created.copy(title = "New", body = "nb", aiSource = "Gemini", updatedAt = 2_000L), updated)
         assertEquals(listOf(tag.id), tags.tagsOf(created.id).get().map { it.id })
         assertEquals(1, published.get())
+    }
+
+    fun testSaveRegistersNewTagsAndAttachesThem() {
+        val repo = NoteRepository(db)
+        val tags = TagRepository(db)
+        val existing = tags.getOrCreate("old").get()
+        val saver = NoteSaver(repository = { repo }, tags = { tags }, projectKey = { "k" })
+
+        val future = saver.save(project, anchor, NoteDraft("T", tags = listOf("old", " fresh ", "old", "")))
+        await(future)
+
+        val note = future.get()
+        assertEquals(listOf("fresh", "old"), tags.tagsOf(note.id).get().map { it.name })
+        assertEquals(existing, tags.list().get().single { it.name == "old" })
+        assertEquals(2, tags.list().get().size)
+        assertEquals(1, published.get())
+    }
+
+    fun testSaveFreeAttachesTags() {
+        val repo = NoteRepository(db)
+        val tags = TagRepository(db)
+        val future = NoteSaver(repository = { repo }, tags = { tags }).saveFree(NoteDraft("q", tags = listOf("sql")))
+        await(future)
+        assertEquals(listOf("sql"), tags.tagsOf(future.get().id).get().map { it.name })
+    }
+
+    fun testUpdateReplacesTheTagSetAndKeepsRemovedTagsInTheDictionary() {
+        val repo = NoteRepository(db)
+        val tags = TagRepository(db)
+        val created = repo.create(NewNote.free("q")).get()
+        tags.replaceTags(created.id, listOf("a", "b")).get()
+
+        val future = NoteSaver(repository = { repo }, tags = { tags }).update(project, created, NoteDraft("q", tags = listOf("b", "c")))
+        await(future)
+
+        assertEquals(listOf("b", "c"), tags.tagsOf(created.id).get().map { it.name })
+        assertEquals(listOf("a", "b", "c"), tags.list().get().map { it.name })
+    }
+
+    fun testUpdateWithNoTagsClearsThem() {
+        val repo = NoteRepository(db)
+        val tags = TagRepository(db)
+        val created = repo.create(NewNote.free("q")).get()
+        tags.replaceTags(created.id, listOf("a")).get()
+        await(NoteSaver(repository = { repo }, tags = { tags }).update(project, created, NoteDraft("q")))
+        assertTrue(tags.tagsOf(created.id).get().isEmpty())
     }
 
     fun testUpdateOfDeletedNoteEndsWithNullAndStillPublishes() {
