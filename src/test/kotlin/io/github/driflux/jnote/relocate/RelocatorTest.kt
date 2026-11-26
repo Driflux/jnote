@@ -1,6 +1,7 @@
 package io.github.driflux.jnote.relocate
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -171,12 +172,24 @@ class RelocatorTest {
     }
 
     @Test
-    fun largeDocumentSmokeCompletes() {
+    fun largeTemplatedDocumentStaysWithinDpBudget() {
         val doc = (0 until 5000).map { "    val value$it = compute($it, ${it * 7}) // generated line" }
-        val snap = (0 until 10).map { "    val valueX$it = compute($it, ${it * 5}) // generated lines" }
-        val started = System.nanoTime()
-        locate(doc, snap, 2500)
-        val seconds = (System.nanoTime() - started) / 1e9
-        assertTrue("took ${seconds}s", seconds < 10)
+        val snap = (0 until 200).map { "    val valueX$it = compute($it, ${it * 5}) // generated lines" }
+        val result = locate(doc, snap, 2500) as RelocationResult.Approx
+        assertEquals(1, result.startLine)
+        assertEquals(200, result.endLine)
+        // 모든 줄이 서로 비슷한 템플릿 코드라도 DP는 문서 줄 수 이내다 (작업량 제한 전에는 417,304번)
+        val matcher = SimilarityMatcher(RelocationOptions().similarityThreshold)
+        matcher.find(Normalizer.normalize(doc), Normalizer.normalize(snap), 2500)
+        assertTrue("dpCalls=${matcher.dpCalls}", matcher.dpCalls <= doc.size)
+    }
+
+    @Test
+    fun similarityThresholdOutsideZeroToOneIsRejected() {
+        for (threshold in listOf(-0.01, 1.01, Double.NaN)) {
+            assertThrows(IllegalArgumentException::class.java) { RelocationOptions(similarityThreshold = threshold) }
+        }
+        RelocationOptions(similarityThreshold = 0.0)
+        RelocationOptions(similarityThreshold = 1.0)
     }
 }

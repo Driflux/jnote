@@ -12,6 +12,10 @@ internal class SimilarityMatcher(
     private val threshold: Double,
     private val isCancelled: () -> Boolean = { false },
 ) {
+    /** 지금까지 실행한 DP 횟수. 작업량 예산을 확인하는 테스트용 */
+    internal var dpCalls = 0L
+        private set
+
     private var prev = IntArray(0)
     private var cur = IntArray(0)
 
@@ -141,6 +145,7 @@ internal class SimilarityMatcher(
 
     /** 대각선 폭 k로 제한한 Levenshtein 거리. k를 넘으면 k + 1을 돌려준다. */
     private fun boundedDistance(a: String, b: String, k: Int): Int {
+        dpCalls++
         val la = a.length
         val lb = b.length
         val over = k + 1

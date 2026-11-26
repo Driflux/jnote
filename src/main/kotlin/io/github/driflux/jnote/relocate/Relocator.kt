@@ -4,7 +4,11 @@ package io.github.driflux.jnote.relocate
 data class RelocationOptions(
     val similarityThreshold: Double = 0.8,
     val isCancelled: () -> Boolean = { false },
-)
+) {
+    init {
+        require(similarityThreshold in 0.0..1.0) { "similarityThreshold must be in 0.0..1.0: $similarityThreshold" }
+    }
+}
 
 /** 스냅샷이 문서에서 어디로 옮겨졌는지 찾는다. 순수 로직이며 스레드와 I/O를 쓰지 않는다. */
 object Relocator {
