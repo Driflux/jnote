@@ -24,7 +24,7 @@
 - `./gradlew test` must pass before opening a PR.
 
 ## ADR rules
-- Location: `docs/adr/`. File name `NNNN-title.md` (4-digit number, lowercase with hyphens). Copy [0000-template.md](docs/adr/0000-template.md) as the format.
+- Location: `docs/adr/`. File name `NNNN-title.md`, where `NNNN` is the 4-digit number of the issue (lowercase title with hyphens). One ADR per issue, shared by all of its PRs. Copy [0000-template.md](docs/adr/0000-template.md) as the format.
 - Write an ADR for every feature implementation. Include the ADR in the issue's first PR; later PRs of the same issue link to it.
 - Content: context, decision, alternatives considered and why they were rejected, consequences (pros, cons, follow-ups). The goal is to record "why we did it this way".
 - Do not edit ADRs; accumulate them. When a decision changes, write a new ADR and set the old one's status to `Superseded (NNNN)`.

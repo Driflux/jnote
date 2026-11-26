@@ -44,7 +44,7 @@ Stay with Kotlin/JVM. A plugin must run in the IDE's own JVM, and a separate nat
   INDEX note(project, rel_path)
   ```
 - Migrations: `PRAGMA user_version` plus sequential SQL. Right before bumping the version, create one `jnote.db.bak` and overwrite the previous backup.
-- Project key: the normalized git `origin` URL. For worktrees, follow `commondir` and read config files only (no process is spawned). If there is no `origin`, fall back to the project path. The UI shows the repository name. The key is computed once when the project opens and cached.
+- Project key: the normalized git `origin` URL. For worktrees, follow `commondir` and read config files only (no process is spawned). If there is no `origin`, fall back to the project path. The UI shows the repository name. The key is computed lazily on first use (never at project open, to keep startup work at zero) and cached.
 - Free notes (queries, etc.) are global notes with `project = NULL`. Anchor columns are NULL when `kind = FREE`.
 - The settings page (Settings > Tools > JNote) has a single item: the DB path.
   - If no file exists at the new path, copy the current DB there and switch; the old file is left in place.

@@ -30,7 +30,7 @@
 - [ ] The DB opens only on first use (no startup work)
 - [ ] WAL, `busy_timeout` 5 s, single-thread executor
 - [ ] Sequential `user_version` migrations; create `jnote.db.bak` right before a version bump
-- [ ] Apply schema v1 (`note`, `tag`, `note_tag`, indexes) including `uid` (unique), `ai_source`, `source_url`, `prompt`; FTS is added as v2 in the search issue
+- [ ] Apply schema v1 (`note`, `tag`, `note_tag`, indexes) including `uid` (unique), `ai_source`, `source_url`, `prompt`; the `v_notes_export` view is migration v2, and FTS is added as v3 in the search issue
 - [ ] Migration tests using a SQLite file in a temp directory
 - [ ] Read-only SQL view `v_notes_export` (notes with tags flattened, fixed column names) that every later migration keeps working, with a contract test
 
@@ -70,7 +70,7 @@
 - [ ] Tests for URL normalization rules (https/ssh, `.git` suffix, case)
 - [ ] Follow `commondir` from a worktree `.git` file and read config files (no process spawned)
 - [ ] Fall back to the project path when there is no `origin` or no git
-- [ ] Compute once in the background when the project opens and cache it
+- [ ] Compute lazily on first use, off the EDT, and cache it
 
 **PR split**
 1. Normalization and config parsing (pure logic)
@@ -196,13 +196,13 @@
 **Goal**: Find note text, snippets, class names, and tags from one search box.
 
 **Done criteria**
-- [ ] Schema v2: `note_fts` (trigram) over title, body, snapshot, class name, and prompt + sync-trigger migration
+- [ ] Schema v3: `note_fts` (trigram) over title, body, snapshot, class name, and prompt + sync-trigger migration
 - [ ] Single `LIKE '%q%'` path, minimum 2 characters, tests for Korean particle cases
 - [ ] Keep most-recent-first order while searching; no-result guidance
 - [ ] Check response time with thousands of rows
 
 **PR split**
-1. Schema v2 + search query
+1. Schema v3 + search query
 2. Search box UI integration
 
 **ADR topic**: Trigram search and unifying on LIKE
