@@ -1,39 +1,38 @@
 package io.github.driflux.jnote.gutter
 
-import com.intellij.openapi.util.IconLoader
-import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import java.awt.image.BufferedImage
-import javax.swing.Icon
-import javax.swing.JPanel
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
-class GutterIconsTest : BasePlatformTestCase() {
-    private fun pixels(icon: Icon): IntArray {
-        assertEquals(16, icon.iconWidth)
-        assertEquals(16, icon.iconHeight)
-        val image = BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB)
-        val graphics = image.createGraphics()
-        try {
-            icon.paintIcon(JPanel(), graphics, 0, 0)
-        } finally {
-            graphics.dispose()
-        }
-        return image.getRGB(0, 0, 16, 16, null, 0, 16)
+/**
+ * 아이콘 파일이 있고 서로 달라야 한다. 아이콘을 그려 보는 방식은 쓰지 않는다:
+ * 헤드리스 Linux 테스트 JVM에서는 SVG가 1x1로 로드되어 그린 결과가 환경마다 다르다.
+ */
+class GutterIconsTest {
+    private fun svg(path: String): String {
+        val stream = GutterIcons::class.java.getResourceAsStream(path)
+        assertNotNull("missing icon resource $path", stream)
+        return stream!!.use { it.readBytes().toString(Charsets.UTF_8) }
     }
 
-    private fun paintsSomething(pixels: IntArray) = pixels.any { it ushr 24 != 0 }
-
-    fun testEachIconPaintsAndHasItsOwnDarkVariant() {
-        for (icon in listOf(GutterIcons.NOTE, GutterIcons.APPROX)) {
-            val light = pixels(icon)
-            val dark = pixels(IconLoader.getDarkIcon(icon, true))
-
-            assertTrue(paintsSomething(light))
-            assertTrue(paintsSomething(dark))
-            assertFalse("dark variant should differ from the light one", light.contentEquals(dark))
+    @Test
+    fun everyIconFileIsA16PixelSvg() {
+        for (name in listOf("gutterNote", "gutterNote_dark", "gutterNoteApprox", "gutterNoteApprox_dark")) {
+            val text = svg("/icons/$name.svg")
+            assertTrue("$name is not an svg", text.contains("<svg"))
+            assertTrue("$name must be 16x16", text.contains("width=\"16\"") && text.contains("height=\"16\""))
         }
     }
 
-    fun testNormalAndApproximateIconsLookDifferent() {
-        assertFalse(pixels(GutterIcons.NOTE).contentEquals(pixels(GutterIcons.APPROX)))
+    @Test
+    fun darkVariantsDifferFromLightOnes() {
+        assertNotEquals(svg("/icons/gutterNote.svg"), svg("/icons/gutterNote_dark.svg"))
+        assertNotEquals(svg("/icons/gutterNoteApprox.svg"), svg("/icons/gutterNoteApprox_dark.svg"))
+    }
+
+    @Test
+    fun normalAndApproximateIconsDiffer() {
+        assertNotEquals(svg("/icons/gutterNote.svg"), svg("/icons/gutterNoteApprox.svg"))
     }
 }
