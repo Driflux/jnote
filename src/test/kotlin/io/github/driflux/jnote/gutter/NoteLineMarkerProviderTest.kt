@@ -14,6 +14,9 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.ui.popup.ListPopup
+import com.intellij.openapi.ui.popup.ListPopupStep
+import com.intellij.openapi.ui.popup.PopupStep
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiDocumentManager
@@ -22,6 +25,7 @@ import com.intellij.psi.SyntaxTraverser
 import com.intellij.testFramework.PsiTestUtil
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.intellij.ui.UiInterceptors
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NoteSelectRequested
 import io.github.driflux.jnote.NoteSelectRequestedListener
@@ -98,7 +102,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         }
     }
 
-    /** 진행 중인 읽기가 끝나고, 그 끝에 EDT로 넘긴 데몬 재시작과 알림까지 처리된 상태로 만든다. */
     private fun settle() {
         // EDT에서 처리한 일이 새 읽기를 시작할 수 있으므로, 이벤트를 비운 뒤에도 읽기가 없을 때까지 되풀이한다
         while (true) {
@@ -115,7 +118,7 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
     }
 
     /**
-     * 데몬 없이 제공자를 직접 불러 한 번의 패스를 흉내 낸다. 테스트 픽스처의 하이라이팅은 기다리는 동안 EDT 이벤트를
+     * 테스트 픽스처의 하이라이팅은 기다리는 동안 EDT 이벤트를
      * 처리하므로, 그 안에서 읽기가 끝나면 데몬 재시작이 하이라이팅 도중에 실행되어 픽스처가 막는다.
      */
     private fun directPass(): List<LineMarkerInfo<*>> {
@@ -191,7 +194,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         }
 
         assertEquals(listOf(4), found.map { lineOf(it) })
-        // 마커는 줄의 첫 글자 위치에 놓인다
         assertEquals("fun", myFixture.editor.document.text.substring(found.single().startOffset, found.single().startOffset + 3))
     }
 
@@ -294,7 +296,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         dbService.switchTo(other)
         note("GutterA.txt", 5, 5, "new database")
 
-        // 바뀐 뒤 첫 패스는 옛 DB의 노트를 그리지 않는다
         assertEquals(listOf(5), loadedMarkers().map { lineOf(it) })
         assertEquals(listOf("new database"), gutter.notesFor(file, "src/GutterA.txt")!!.map { it.title })
     }
@@ -341,6 +342,40 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
 
         assertEquals(listOf(4), found.map { lineOf(it) })
         assertEquals("first<br>second", found.single().lineMarkerTooltip)
+    }
+
+    private fun interceptPopups(): List<ListPopup> {
+        val shown = mutableListOf<ListPopup>()
+        UiInterceptors.register(
+            object : UiInterceptors.UiInterceptor<ListPopup>(ListPopup::class.java) {
+                override fun doIntercept(component: ListPopup) {
+                    shown += component
+                }
+            },
+        )
+        return shown
+    }
+
+    fun testClickingAMarkerWithSeveralNotesOpensAChooserThatSelectsTheChosenNote() {
+        openFile("GutterA.txt", lines(10))
+        note("GutterA.txt", 4, 4, "first")
+        val second = note("GutterA.txt", 4, 6, "second", NoteStatus.APPROX)
+        val requested = recordSelectionRequests()
+        val popups = interceptPopups()
+
+        click(loadedMarkers().single())
+
+        @Suppress("UNCHECKED_CAST")
+        val step = popups.single().listStep as ListPopupStep<CachedNote>
+        assertEquals(listOf("first", "second"), step.values.map { step.getTextFor(it) })
+        assertSame(GutterIcons.APPROX, step.getIconFor(step.values[1]))
+        // 팝업만 열리고, 고르기 전에는 아무것도 선택하지 않는다
+        assertEquals(emptyList<Long>(), requested)
+
+        assertSame(PopupStep.FINAL_CHOICE, step.onChosen(step.values[1], true))
+        step.finalRunnable!!.run()
+
+        assertEquals(listOf(second.id), requested)
     }
 
     fun testNotesWithTagsAreCachedWithWhatThePreviewNeeds() {
