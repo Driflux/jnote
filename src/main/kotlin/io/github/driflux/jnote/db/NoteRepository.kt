@@ -82,6 +82,52 @@ class NoteRepository(
         if (changed == 0) null else findById(c, note.id)
     }
 
+    /**
+     * 지웠던 노트를 id, uid, 두 타임스탬프까지 그대로 되살리고 [tagIds] 중 아직 있는 태그를 다시 붙인다.
+     * 한 트랜잭션이라 중간에 실패하면 아무것도 남지 않는다. 같은 id나 uid가 이미 있으면 SQLException으로 끝난다.
+     */
+    fun restore(note: Note, tagIds: List<Long>): CompletableFuture<Note> = database.submit { c ->
+        c.autoCommit = false
+        try {
+            c.prepareStatement(RESTORE).use { s ->
+                var i = 1
+                s.setLong(i++, note.id)
+                s.setString(i++, note.uid)
+                s.setString(i++, note.kind.name)
+                s.setString(i++, note.project)
+                s.setString(i++, note.relPath)
+                s.setString(i++, note.className)
+                s.setObject(i++, note.startLine)
+                s.setObject(i++, note.endLine)
+                s.setString(i++, note.snapshot)
+                s.setString(i++, note.status.name)
+                s.setString(i++, note.title)
+                s.setString(i++, note.body)
+                s.setString(i++, note.aiSource)
+                s.setString(i++, note.sourceUrl)
+                s.setString(i++, note.prompt)
+                s.setLong(i++, note.createdAt)
+                s.setLong(i, note.updatedAt)
+                s.executeUpdate()
+            }
+            // 그 사이 지워진 태그는 건너뛴다. 외래 키 오류로 복원 전체가 실패하면 안 된다
+            c.prepareStatement("INSERT OR IGNORE INTO note_tag (note_id, tag_id) SELECT ?, id FROM tag WHERE id = ?").use { s ->
+                for (tagId in tagIds) {
+                    s.setLong(1, note.id)
+                    s.setLong(2, tagId)
+                    s.executeUpdate()
+                }
+            }
+            c.commit()
+        } catch (e: Throwable) {
+            c.rollback()
+            throw e
+        } finally {
+            c.autoCommit = true
+        }
+        requireNotNull(findById(c, note.id))
+    }
+
     /** 노트와 (cascade로) 태그 연결을 지운다. 지운 행이 있으면 true. */
     fun delete(id: Long): CompletableFuture<Boolean> = database.submit { c ->
         c.prepareStatement("DELETE FROM note WHERE id = ?").use { s ->
@@ -106,6 +152,9 @@ class NoteRepository(
         const val INSERT = "INSERT INTO note (uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, " +
             "status, title, body, ai_source, source_url, prompt, created_at, updated_at) " +
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        const val RESTORE = "INSERT INTO note (id, uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, " +
+            "status, title, body, ai_source, source_url, prompt, created_at, updated_at) " +
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         const val UPDATE = "UPDATE note SET kind=?, project=?, rel_path=?, class_name=?, start_line=?, end_line=?, " +
             "snapshot=?, status=?, title=?, body=?, ai_source=?, source_url=?, prompt=?, updated_at=? WHERE id=?"
     }
