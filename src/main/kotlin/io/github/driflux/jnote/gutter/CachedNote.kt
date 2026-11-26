@@ -10,6 +10,7 @@ import io.github.driflux.jnote.model.Tag
  */
 data class CachedNote(
     val id: Long,
+    val uid: String,
     val title: String,
     val body: String,
     val tags: List<String>,
@@ -31,6 +32,7 @@ data class CachedNote(
             val end = note.endLine ?: return null
             return CachedNote(
                 id = note.id,
+                uid = note.uid,
                 title = note.title,
                 body = note.body,
                 tags = tags.map { it.name },
@@ -53,7 +55,6 @@ data class LineGroup(val line: Int, val notes: List<CachedNote>) {
 }
 
 object GutterLines {
-    /** OK, APPROX 노트만 시작 줄별로 묶어 줄 번호순으로 돌려준다. ORPHAN과 NEEDS_RELOCATE는 아이콘을 그리지 않는다. */
     fun group(notes: List<CachedNote>): List<LineGroup> =
         notes.filter { it.status == NoteStatus.OK || it.status == NoteStatus.APPROX }
             .groupBy { it.startLine }

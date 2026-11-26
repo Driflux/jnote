@@ -3,9 +3,14 @@ package io.github.driflux.jnote.gutter
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import com.intellij.openapi.editor.Document
+import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.FileDocumentManagerListener
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiManager
@@ -25,12 +30,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 프로젝트별 거터 노트 캐시. plugin.xml에 등록하지 않는 라이트 서비스라 마커 제공자가 처음 부를 때
- * 만들어지며, 그때 [NotesChanged]를 구독한다. 서비스가 프로젝트마다 하나이고 프로젝트 키는 바뀌지 않으므로
+ * 만들어지며, 그때 [NotesChanged]와 문서 저장, 파일 닫기를 구독한다. 서비스가 프로젝트마다 하나이고 프로젝트 키는 바뀌지 않으므로
  * 캐시 항목은 상대 경로만으로 (프로젝트 키, 상대 경로)를 가리킨다.
  */
 @Service(Service.Level.PROJECT)
 internal class GutterNoteService(private val project: Project) : Disposable {
     private val cache = FileNoteCache(::load)
+    private val positions = NotePositions()
 
     // 캐시를 채운 DB. 다른 DB의 노트를 보여 주지 않도록 바뀌면 캐시를 통째로 버린다
     private var seenDatabase: DatabaseService.Current? = null
@@ -40,11 +46,31 @@ internal class GutterNoteService(private val project: Project) : Disposable {
     private var disposed = false
 
     init {
-        ApplicationManager.getApplication().messageBus.connect(this)
-            .subscribe(NotesChanged.TOPIC, NotesChangedListener { onNotesChanged() })
+        val appBus = ApplicationManager.getApplication().messageBus.connect(this)
+        appBus.subscribe(NotesChanged.TOPIC, NotesChangedListener { onNotesChanged() })
+        appBus.subscribe(
+            FileDocumentManagerListener.TOPIC,
+            object : FileDocumentManagerListener {
+                override fun beforeDocumentSaving(document: Document) = writeBack(document)
+            },
+        )
+        project.messageBus.connect(this).subscribe(
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+                    // 다른 분할 창에 아직 열려 있으면 마커가 계속 따라가야 한다
+                    if (source.isFileOpen(file)) return
+                    val document = FileDocumentManager.getInstance().getCachedDocument(file) ?: return
+                    writeBack(document)
+                    positions.forget(document)
+                }
+            },
+        )
     }
 
     internal val isIdle: Boolean get() = cache.isIdle
+
+    internal fun isTracking(document: Document): Boolean = positions.isTracking(document)
 
     /**
      * 파일의 노트. 아직 못 읽었으면 null을 돌려주고 EDT 밖에서 읽기를 시작하며, 읽은 값이 그릴 것을 바꾸면
@@ -56,6 +82,38 @@ internal class GutterNoteService(private val project: Project) : Disposable {
         return cache.lookup(relPath, onChanged = { restart(file) }, onFailed = { failed(file, relPath, it) })
     }
 
+    fun track(document: Document, relPath: String, notes: List<CachedNote>): List<CachedNote> {
+        val database = synchronized(this) { seenDatabase?.database } ?: return notes
+        return positions.sync(document, relPath, database, notes)
+    }
+
+    /**
+     * 편집이 옮긴 위치를 DB에 쓴다. 저장은 EDT의 쓰기 액션 안이므로 여기서는 마커만 읽고, 쓰기는 DB 스레드에서 한다.
+     * 실패하면 stored가 그대로라 다음 저장이 다시 쓴다.
+     */
+    private fun writeBack(document: Document) {
+        val writeBack = positions.writeBackFor(document) ?: return
+        NoteRepository(writeBack.database).updateAnchors(writeBack.updates).whenComplete { changed, error ->
+            val cause = if (error is CompletionException) error.cause ?: error else error
+            when {
+                cause == null -> {
+                    positions.confirm(document, writeBack)
+                    // DB 스레드에서 알리면 구독자가 DB를 기다리다 막힐 수 있어 UI 스레드로 옮긴다
+                    if (changed > 0) {
+                        ApplicationManager.getApplication().invokeLater({
+                            if (!disposed) ApplicationManager.getApplication().messageBus.syncPublisher(NotesChanged.TOPIC).notesChanged()
+                        }, ModalityState.nonModal())
+                    }
+                }
+                // DB 경로가 바뀌어 옛 DB가 닫혔다. 이 위치는 옛 DB의 노트 것이므로 버린다
+                cause is DatabaseClosedException -> {}
+                else -> ApplicationManager.getApplication().invokeLater({
+                    if (!disposed) GutterNotifier.saveFailed(project, writeBack.relPath, cause)
+                }, project.disposed)
+            }
+        }
+    }
+
     private fun discardIfDatabaseChanged() {
         val now = DatabaseService.getInstance().current()
         synchronized(this) {
@@ -65,6 +123,7 @@ internal class GutterNoteService(private val project: Project) : Disposable {
             seenDatabase = now
             if (same) return
             cache.clear()
+            positions.clear()
             failureReported.set(false)
         }
     }
@@ -122,5 +181,6 @@ internal class GutterNoteService(private val project: Project) : Disposable {
     override fun dispose() {
         disposed = true
         cache.clear()
+        positions.clear()
     }
 }

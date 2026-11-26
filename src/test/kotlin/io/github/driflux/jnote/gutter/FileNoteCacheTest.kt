@@ -17,7 +17,7 @@ class FileNoteCacheTest {
     private val direct = Executor { it.run() }
     private val cache = FileNoteCache({ path -> CompletableFuture<List<CachedNote>>().also { loads += path to it } }, direct)
 
-    private fun note(id: Long, title: String = "t$id") = CachedNote(id, title, "", emptyList(), null, NoteStatus.OK, 1, 1, "")
+    private fun note(id: Long, title: String = "t$id") = CachedNote(id, "u$id", title, "", emptyList(), null, NoteStatus.OK, 1, 1, "")
 
     private fun lookup(path: String) = cache.lookup(path, onChanged = { changed += path }, onFailed = { failed += it })
 
