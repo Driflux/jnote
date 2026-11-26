@@ -9,6 +9,7 @@ import com.intellij.openapi.util.text.StringUtil
 import com.intellij.util.concurrency.AppExecutorUtil
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.settings.DbPathNotifier
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 internal object ToolWindowNotifier {
@@ -49,15 +50,26 @@ internal object ToolWindowNotifier {
         ).notify(project)
     }
 
-    /** "노트를 삭제했습니다" 알림. [onUndo]는 되돌리기를 누를 때, [expireAfterMs] 뒤에는 알림이 사라진다. */
-    fun deleted(project: Project, expireAfterMs: Long = NoteDeletion.UNDO_TIMEOUT_MS, onUndo: () -> Unit): Notification {
+    /**
+     * "노트를 삭제했습니다" 알림. [onUndo]는 되돌리기를 누를 때, [expireAfterMs] 뒤에는 알림이 사라진다.
+     * 만료 작업은 알림이 먼저 사라지면(되돌리기, 닫기) 취소한다. [schedule]은 테스트에서 바꿔 끼운다.
+     */
+    fun deleted(
+        project: Project,
+        expireAfterMs: Long = NoteDeletion.UNDO_TIMEOUT_MS,
+        schedule: (Runnable, Long) -> ScheduledFuture<*> = { task, delayMs ->
+            AppExecutorUtil.getAppScheduledExecutorService().schedule(task, delayMs, TimeUnit.MILLISECONDS)
+        },
+        onUndo: () -> Unit,
+    ): Notification {
         val notification = group().createNotification(
             JNoteBundle.message("toolWindow.notification.deleted"),
             NotificationType.INFORMATION,
         )
         notification.addAction(NotificationAction.createSimpleExpiring(JNoteBundle.message("toolWindow.notification.undo")) { onUndo() })
         notification.notify(project)
-        AppExecutorUtil.getAppScheduledExecutorService().schedule({ notification.expire() }, expireAfterMs, TimeUnit.MILLISECONDS)
+        val expiry = schedule({ notification.expire() }, expireAfterMs)
+        notification.whenExpired { expiry.cancel(false) }
         return notification
     }
 

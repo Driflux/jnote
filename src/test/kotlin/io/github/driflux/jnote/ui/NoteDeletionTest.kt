@@ -8,10 +8,12 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.util.concurrent.ExecutionException
 
 class NoteDeletionTest {
     @get:Rule
@@ -21,7 +23,7 @@ class NoteDeletionTest {
     private var now = 1_000L
     private val notes by lazy { NoteRepository(db) { now } }
     private val tags by lazy { TagRepository(db) }
-    private val deletion by lazy { NoteDeletion(notes, tags) }
+    private val deletion by lazy { NoteDeletion(db) }
 
     @After
     fun close() = db.close()
@@ -70,7 +72,41 @@ class NoteDeletionTest {
     }
 
     @Test
-    fun undoWindowIsAboutEightSeconds() {
-        assertEquals(8_000L, NoteDeletion.UNDO_TIMEOUT_MS)
+    fun undoRestoresIntoTheDatabaseTheNoteWasDeletedFrom() {
+        val note = notes.create(NewNote.free("t")).get()
+        val deleted = deletion.delete(note.id).get()!!
+        // 지운 뒤 다른 DB로 바뀌어도 되돌리기는 원래 DB로 간다
+        val other = Database(tmp.root.toPath().resolve("other.db"))
+        try {
+            deletion.undo(deleted).get()
+            assertEquals(note, notes.get(note.id).get())
+            assertNull(NoteRepository(other).get(note.id).get())
+        } finally {
+            other.close()
+        }
+    }
+
+    @Test
+    fun undoAfterTheDatabaseWasClosedFailsInsteadOfRestoringElsewhere() {
+        val note = notes.create(NewNote.free("t")).get()
+        val deleted = deletion.delete(note.id).get()!!
+        db.close()
+
+        val error = assertThrows(ExecutionException::class.java) { deletion.undo(deleted).get() }
+
+        assertTrue(error.cause is IllegalStateException)
+    }
+
+    @Test
+    fun deleteReadsAndDeletesInOneTransaction() {
+        val note = notes.create(NewNote.code("p", "src/A.kt", 1, 2, "t")).get()
+        val tag = tags.getOrCreate("x").get()
+        tags.attach(note.id, tag.id).get()
+        // 같은 DB 스레드에서 지우므로, 읽은 노트와 태그가 지워진 것과 같다
+        val (read, tagIds) = notes.deleteReturningTagIds(note.id).get()!!
+        assertEquals(note, read)
+        assertEquals(listOf(tag.id), tagIds)
+        assertNull(notes.get(note.id).get())
+        assertNull(notes.deleteReturningTagIds(note.id).get())
     }
 }

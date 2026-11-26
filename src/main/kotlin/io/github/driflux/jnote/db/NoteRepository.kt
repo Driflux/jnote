@@ -137,6 +137,36 @@ class NoteRepository(
     }
 
     /**
+     * 노트와 붙어 있던 태그 id를 읽고 같은 트랜잭션에서 지운다. 읽은 것과 지운 것이 어긋나지 않아
+     * 되돌리기가 정확히 지운 것을 되살린다. 이미 없으면 null.
+     * 읽기 뒤에 쓰기로 올리다 다른 프로세스에 밀리지 않도록 처음부터 쓰기 잠금을 잡는다(BEGIN IMMEDIATE).
+     */
+    internal fun deleteReturningTagIds(id: Long): CompletableFuture<Pair<Note, List<Long>>?> = database.submit { c ->
+        c.createStatement().use { it.execute("BEGIN IMMEDIATE") }
+        try {
+            val note = findById(c, id)
+            val result = if (note == null) {
+                null
+            } else {
+                val tagIds = c.prepareStatement("SELECT tag_id FROM note_tag WHERE note_id = ? ORDER BY tag_id").use { s ->
+                    s.setLong(1, id)
+                    s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getLong(1) else null }.toList() }
+                }
+                c.prepareStatement("DELETE FROM note WHERE id = ?").use { s ->
+                    s.setLong(1, id)
+                    s.executeUpdate()
+                }
+                note to tagIds
+            }
+            c.createStatement().use { it.execute("COMMIT") }
+            result
+        } catch (e: Throwable) {
+            c.createStatement().use { it.execute("ROLLBACK") }
+            throw e
+        }
+    }
+
+    /**
      * 최근 수정 순(같으면 id가 큰 순). allProjects면 전부, 아니면 해당 프로젝트의 노트와
      * 모든 프로젝트에서 보이는 전역 FREE 노트. project가 null이면 전역 FREE 노트만 돌려준다.
      */

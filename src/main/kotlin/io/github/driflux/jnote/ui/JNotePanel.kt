@@ -19,6 +19,7 @@ import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.awt.BorderLayout
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.ListSelectionModel
 
@@ -64,13 +65,17 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
 
     /** 확인 없이 바로 지우고, 되돌리기 알림을 띄운다. 끝나면 완료되는 future를 돌려준다. */
     internal fun delete(note: Note): CompletableFuture<*> =
-        NoteDeletion.onCurrentDatabase().delete(note.id).whenComplete { deleted, error ->
+        deleteOn(NoteDeletion.onCurrentDatabase(), note)
+
+    // 되돌리기는 지운 그 DB로 가야 하므로 같은 NoteDeletion을 알림 동작까지 들고 간다
+    private fun deleteOn(deletion: NoteDeletion, note: Note): CompletableFuture<*> =
+        deletion.delete(note.id).whenComplete { deleted, error ->
             onEdt {
                 when {
                     error != null -> ToolWindowNotifier.deleteFailed(project, error.cause ?: error)
                     deleted != null -> {
                         publishChanged()
-                        ToolWindowNotifier.deleted(project) { undo(deleted) }
+                        ToolWindowNotifier.deleted(project) { undo(deletion, deleted) }
                     }
                     // 이미 지워진 노트라면 목록만 새로 고친다
                     else -> publishChanged()
@@ -78,9 +83,9 @@ class JNotePanel(private val project: Project) : JBPanel<JNotePanel>(BorderLayou
             }
         }
 
-    private fun undo(deleted: DeletedNote) {
-        NoteDeletion.onCurrentDatabase().undo(deleted).whenComplete { _, error ->
-            onEdt { if (error == null) publishChanged() else ToolWindowNotifier.restoreFailed(project, error.cause ?: error) }
+    private fun undo(deletion: NoteDeletion, deleted: DeletedNote) {
+        deletion.undo(deleted).whenComplete { _, error ->
+            onEdt { if (error == null) publishChanged() else ToolWindowNotifier.restoreFailed(project, (error as? CompletionException)?.cause ?: error) }
         }
     }
 
