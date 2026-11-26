@@ -54,7 +54,7 @@ class ProjectKeyServiceTest : BasePlatformTestCase() {
 
     fun testServiceReturnsSameInstanceValueOnRepeatedCalls() {
         val service = project.service<ProjectKeyService>()
-        assertEquals(offEdt { service.resolve() }, offEdt { service.resolve() })
+        assertSame(offEdt { service.resolve() }, offEdt { service.resolve() })
     }
 
     fun testCallOnEdtFailsFast() {
