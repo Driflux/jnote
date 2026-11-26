@@ -7,7 +7,6 @@ import com.intellij.openapi.util.text.StringUtil
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.model.Note
 
-/** 노트 추가 결과 알림. 오류는 삼키지 않고 이유와 해결 방법을 보여 준다. */
 object AddNoteNotifier {
     private const val GROUP_ID = "JNote"
 

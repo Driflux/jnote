@@ -14,7 +14,6 @@ import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.anchor.CodeAnchor
 import javax.swing.JComponent
 
-/** 코드 노트를 쓰는 다이얼로그. 앵커는 읽기 전용 요약으로만 보여 준다. */
 class AddNoteDialog(project: Project, private val anchor: CodeAnchor) : DialogWrapper(project) {
     private val titleField = JBTextField()
     private val bodyArea = JBTextArea(8, 60).apply {

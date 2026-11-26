@@ -24,7 +24,6 @@ import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletionException
 
 /**
- * 에디터 선택(없으면 캐럿 줄)으로 코드 노트를 만든다.
  * EDT에서는 문서만 읽어 초안을 만들고, 클래스 이름은 non-blocking 읽기 액션에서 구한 뒤
  * UI 스레드에서 다이얼로그를 띄운다. 저장은 [NoteSaver]가 EDT 밖에서 한다.
  * 인자는 테스트에서 다이얼로그와 저장소를 바꿔 끼우기 위한 것이다.
