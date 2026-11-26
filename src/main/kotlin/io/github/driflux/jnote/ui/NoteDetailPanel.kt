@@ -1,5 +1,6 @@
 package io.github.driflux.jnote.ui
 
+import com.intellij.icons.AllIcons
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.colors.EditorFontType
 import com.intellij.ui.components.JBLabel
@@ -24,12 +25,14 @@ internal class NoteDetailPanel(
     private val onEdit: (Note) -> Unit,
     private val onRelocate: (Note) -> Unit,
     private val canRelocate: (Note) -> Boolean,
+    private val onConfirm: (Note) -> Unit,
 ) : JBPanel<NoteDetailPanel>(BorderLayout()) {
     private var note: Note? = null
 
     internal val titleLabel = JBLabel().apply { font = JBFont.label().asBold() }
     internal val classLabel = JBLabel()
     internal val locationLabel = JBLabel().apply { foreground = UIUtil.getContextHelpForeground() }
+    internal val approxLabel = JBLabel(JNoteBundle.message("toolWindow.detail.approx"), AllIcons.General.BalloonWarning, JBLabel.LEFT)
     internal val snippetArea = readOnlyArea(wrap = false)
     internal val bodyArea = readOnlyArea(wrap = true)
     internal val aiSourceLabel = JBLabel()
@@ -44,12 +47,16 @@ internal class NoteDetailPanel(
     internal val editButton = JButton(JNoteBundle.message("toolWindow.detail.edit")).apply {
         addActionListener { note?.let(onEdit) }
     }
+    internal val confirmButton = JButton(JNoteBundle.message("toolWindow.detail.confirmLocation")).apply {
+        addActionListener { note?.let(onConfirm) }
+    }
     internal val deleteButton = JButton(JNoteBundle.message("toolWindow.detail.delete")).apply {
         addActionListener { note?.let(onDelete) }
     }
     internal val buttons = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
         add(goToCodeButton)
         add(relocateButton)
+        add(confirmButton)
         add(editButton)
         add(deleteButton)
     }
@@ -65,6 +72,7 @@ internal class NoteDetailPanel(
             add(titleLabel)
             add(classLabel)
             add(locationLabel)
+            add(approxLabel)
             add(snippetSection)
             add(bodySection)
             add(aiSection)
@@ -96,6 +104,8 @@ internal class NoteDetailPanel(
         aiSection.isVisible = detail.ai != null
         goToCodeButton.isVisible = detail.canGoToCode
         relocateButton.isVisible = detail.canGoToCode && canRelocate(note)
+        approxLabel.isVisible = detail.approximate
+        confirmButton.isVisible = detail.approximate
     }
 
     private fun readOnlyArea(wrap: Boolean) = JBTextArea().apply {

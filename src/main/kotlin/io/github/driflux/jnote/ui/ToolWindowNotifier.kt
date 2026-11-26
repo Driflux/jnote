@@ -21,6 +21,16 @@ internal object ToolWindowNotifier {
 
     fun restoreFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.restore", cause)
 
+    fun confirmFailed(project: Project, cause: Throwable) {
+        // 이유에 노트의 파일 경로가 들어가고 알림 내용은 HTML이므로 이스케이프한다
+        val reason = StringUtil.escapeXmlEntities(cause.message ?: cause.javaClass.simpleName)
+        group().createNotification(
+            JNoteBundle.message("toolWindow.error.confirm.title"),
+            JNoteBundle.message("toolWindow.error.confirm.content", reason),
+            NotificationType.ERROR,
+        ).notify(project)
+    }
+
     fun goToFailed(project: Project, cause: Throwable) {
         // 알림 내용은 HTML이므로 예외 메시지를 이스케이프한다
         val reason = StringUtil.escapeXmlEntities(cause.message ?: cause.javaClass.simpleName)

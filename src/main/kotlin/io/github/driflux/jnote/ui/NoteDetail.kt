@@ -2,6 +2,7 @@ package io.github.driflux.jnote.ui
 
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
+import io.github.driflux.jnote.model.NoteStatus
 
 data class AiSourceDetail(val source: String, val sourceUrl: String?, val prompt: String?)
 
@@ -15,8 +16,8 @@ data class NoteDetail(
     /** FREE 노트의 본문만 고정폭으로 보여준다(쿼리 등을 붙여 넣는 용도). */
     val monospaceBody: Boolean,
     val ai: AiSourceDetail?,
-    /** FREE 노트는 이동할 곳이 없으므로 버튼을 숨긴다. */
     val canGoToCode: Boolean,
+    val approximate: Boolean,
 )
 
 object NoteDetails {
@@ -33,6 +34,7 @@ object NoteDetails {
                 AiSourceDetail(it, note.sourceUrl?.takeIf(String::isNotBlank), note.prompt?.takeIf(String::isNotBlank))
             },
             canGoToCode = isCode,
+            approximate = note.status == NoteStatus.APPROX,
         )
     }
 

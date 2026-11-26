@@ -24,6 +24,7 @@ import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.NoteKind
+import io.github.driflux.jnote.model.NoteStatus
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.nio.file.Files
 import java.nio.file.Path
@@ -487,6 +488,62 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         panel.edit(note)
 
         awaitUntil("error notification") { shownNotifications().any { it.content.contains("disk full") } }
+        assertEquals(note, repo.get(note.id).get())
+    }
+
+    // 람다는 JUnit3 러너가 테스트로 오인하지 않도록 도우미 함수에서 만든다
+    private fun detailPanel(confirmed: MutableList<Note>) =
+        NoteDetailPanel(onGoToCode = {}, onDelete = {}, onEdit = {}, onRelocate = {}, canRelocate = { false }, onConfirm = { confirmed += it })
+
+    fun testConfirmLocationAndApproxHintShowOnlyForApproxNotes() {
+        val key = projectKey()
+        val approx = repo.create(NewNote.code(key, "src/A.kt", 1, 1, "approx", status = NoteStatus.APPROX)).get()
+        val ok = repo.create(NewNote.code(key, "src/A.kt", 2, 2, "ok")).get()
+        val confirmed = mutableListOf<Note>()
+        val detail = detailPanel(confirmed)
+
+        detail.show(approx)
+        assertTrue(detail.approxLabel.isVisible)
+        assertTrue(detail.confirmButton.isVisible)
+        detail.confirmButton.doClick()
+        assertEquals(listOf(approx), confirmed)
+
+        detail.show(ok)
+        assertFalse(detail.approxLabel.isVisible)
+        assertFalse(detail.confirmButton.isVisible)
+    }
+
+    fun testConfirmLocationButtonSavesTheCurrentLinesAndHidesItself() {
+        val key = projectKey()
+        val real = Path.of(project.basePath!!, "src", "Approx.kt")
+        Files.createDirectories(real.parent)
+        Files.writeString(real, "a\nb\nc\n")
+        Disposer.register(testRootDisposable) { real.toFile().delete() }
+        val note = repo.create(NewNote.code(key, "src/Approx.kt", 2, 3, "n", snapshot = "old", status = NoteStatus.APPROX)).get()
+        val panel = newPanel(1)
+        panel.list.selectedIndex = 0
+        assertTrue(panel.detail.confirmButton.isVisible)
+
+        panel.detail.confirmButton.doClick()
+
+        awaitUntil("confirm button hidden after reload") { !panel.detail.confirmButton.isVisible }
+        val stored = repo.get(note.id).get()!!
+        assertEquals(NoteStatus.OK, stored.status)
+        assertEquals("b\nc", stored.snapshot)
+        assertEquals("b\nc", panel.detail.snippetArea.text)
+    }
+
+    fun testConfirmFailureShowsAnErrorNotificationNamingTheFile() {
+        captureNotifications()
+        val key = projectKey()
+        val note = repo.create(NewNote.code(key, "src/Gone.kt", 1, 1, "n", status = NoteStatus.APPROX)).get()
+        val panel = newPanel(1)
+
+        panel.confirmLocation(note)
+
+        val title = JNoteBundle.message("toolWindow.error.confirm.title")
+        awaitUntil("confirm error shown") { shownNotifications().any { it.title == title } }
+        assertTrue(shownNotifications().single { it.title == title }.content.contains("src/Gone.kt"))
         assertEquals(note, repo.get(note.id).get())
     }
 }
