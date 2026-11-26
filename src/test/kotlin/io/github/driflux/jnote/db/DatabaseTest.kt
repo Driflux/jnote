@@ -109,7 +109,6 @@ class DatabaseTest {
         val release = CountDownLatch(1)
         db.submit { release.await() }
         val closer = Thread { db.close() }.apply { start() }
-        // closer가 닫기 작업을 큐에 넣고 그 완료를 기다리기 시작한 뒤에 다음 작업을 넣어야 순서가 보장된다
         while (closer.state != Thread.State.TIMED_WAITING) Thread.onSpinWait()
         val queued = db.submit { c -> c.createStatement().use { it.execute("SELECT 1") } }
         release.countDown()
@@ -126,7 +125,6 @@ class DatabaseTest {
             db.close()
             fail("expected close to time out while a job is running")
         } catch (e: TimeoutException) {
-            // 대기 시간 초과는 호출자에게 알린다
         }
         assertFalse(db.isOpen)
         assertFailsAsClosed(db.submit { 1 })

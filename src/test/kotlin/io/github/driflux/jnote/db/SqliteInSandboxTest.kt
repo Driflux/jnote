@@ -3,7 +3,6 @@ package io.github.driflux.jnote.db
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.nio.file.Files
 
-/** IDE 클래스로더 아래에서 sqlite-jdbc와 네이티브 라이브러리가 실제로 로드되는지 확인한다. */
 class SqliteInSandboxTest : BasePlatformTestCase() {
     fun testSqliteJdbcWorksUnderIdeClassLoader() {
         val dir = Files.createTempDirectory("jnote-sandbox")
