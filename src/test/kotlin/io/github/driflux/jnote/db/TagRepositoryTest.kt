@@ -210,4 +210,21 @@ class TagRepositoryTest {
         notes.update(n.copy(title = "changed")).get()
         assertEquals(listOf(t), tags.tagsOf(n.id).get())
     }
+
+    @Test
+    fun tagsByPathGroupsTagsByNoteAndSkipsOtherFilesAndUntaggedNotes() {
+        val a = notes.create(NewNote.code("p", "a.kt", 1, 2, "a")).get()
+        val untagged = notes.create(NewNote.code("p", "a.kt", 5, 6, "untagged")).get()
+        val elsewhere = notes.create(NewNote.code("p", "b.kt", 1, 2, "b")).get()
+        val sql = tag("sql")
+        val api = tag("api")
+        tags.attach(a.id, sql.id).get()
+        tags.attach(a.id, api.id).get()
+        tags.attach(elsewhere.id, sql.id).get()
+
+        val result = tags.tagsByPath("p", "a.kt").get()
+
+        assertEquals(mapOf(a.id to listOf(api, sql)), result)
+        assertFalse(result.containsKey(untagged.id))
+    }
 }
