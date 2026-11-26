@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #14
-- PR: (to be filled)
+- PR: #52
 
 ## Context
 intent.md section 6 fixes when relocation is automatic. An exact match is always applied in the background. Similarity runs automatically only for files of 5,000 lines or fewer, and notes in larger files become NEEDS_RELOCATE. Manual relocation has no size limit and shows progress. Section 7 says manual relocation runs as a cancellable Background Task. Section 2 says a feature is measured on a 5,000-line file and reduced or made manual if it misses the target.

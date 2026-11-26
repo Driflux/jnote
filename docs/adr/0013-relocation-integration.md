@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #13
-- PR: (to be filled; one PR each for validation on open, path recovery, and APPROX confirmation)
+- PR: #53 (validation on open, path recovery, and APPROX confirmation in one PR)
 
 ## Context
 A note stores its path, line range, and code snapshot. Branch switches, other worktrees, and edits made outside the editor move the code, so the stored lines drift (intent.md section 6). Issue #12 built the pure matching core (ADR 0012). Issue #14 added the shared code that turns relocation results into anchors and writes them (`FileRelocation`, `AnchorUpdate`, `NoteRepository.updateAnchors`). This issue wires that core into the IDE: when it runs, what it changes automatically, how a broken path is recovered, and how an approximate location is cleared.

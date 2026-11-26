@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-26
 - Issue: #10
-- PR: (to be filled)
+- PR: #55
 
 ## Context
 Tags are a registered dictionary (intent.md section 5). The repository from #3 already stores them (`tag`, `note_tag`, `TagRepository`). #10 adds the UI: pick and type tags in the note dialog, filter the Tool Window by tag, and rename or delete tags. intent.md section 2 applies in full: no startup work, no DB access on the EDT, no new dependency.
