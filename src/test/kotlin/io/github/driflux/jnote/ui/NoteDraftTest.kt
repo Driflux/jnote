@@ -1,6 +1,7 @@
 package io.github.driflux.jnote.ui
 
 import io.github.driflux.jnote.anchor.CodeAnchor
+import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
 import org.junit.Assert.assertEquals
@@ -43,6 +44,36 @@ class NoteDraftTest {
 
     @Test fun blankTitleIsRejected() {
         assertThrows(IllegalArgumentException::class.java) { NoteDraft("   ").toNewNote("p", anchor) }
+    }
+
+    private val saved = Note(
+        7, "uid-1", NoteKind.CODE, "proj", "src/A.kt", "A.b", 3, 5, "snap", NoteStatus.APPROX,
+        "Old", "old body", "Claude", "http://old", "old prompt", 10, 20,
+    )
+
+    @Test fun editPrefillsFromTheNote() {
+        assertEquals(NoteDraft("Old", "old body", "Claude", "http://old", "old prompt"), NoteDraft.of(saved))
+        assertEquals(NoteDraft("T"), NoteDraft.of(saved.copy(title = "T", body = "", aiSource = null, sourceUrl = null, prompt = null)))
+    }
+
+    @Test fun applyToChangesOnlyTextFieldsAndKeepsTheAnchor() {
+        val edited = NoteDraft(" New ", " new body ", "Gemini", "", " ").applyTo(saved)
+        assertEquals(saved.copy(title = "New", body = "new body", aiSource = "Gemini", sourceUrl = null, prompt = null), edited)
+        // 앵커, 상태, 식별자, 타임스탬프는 그대로다(updatedAt은 저장소가 올린다)
+        assertEquals(20, edited.updatedAt)
+        assertEquals(NoteStatus.APPROX, edited.status)
+        assertEquals("uid-1", edited.uid)
+    }
+
+    @Test fun applyToRejectsBlankTitle() {
+        assertThrows(IllegalArgumentException::class.java) { NoteDraft(" ").applyTo(saved) }
+    }
+
+    @Test fun anchorOrNullFollowsTheKind() {
+        assertEquals(CodeAnchor("src/A.kt", 3, 5, "snap", "A.b"), saved.anchorOrNull())
+        assertEquals("", saved.copy(snapshot = null).anchorOrNull()?.snapshot)
+        val free = Note(8, "u", NoteKind.FREE, null, null, null, null, null, null, NoteStatus.OK, "q", "", null, null, null, 1, 1)
+        assertNull(free.anchorOrNull())
     }
 
     @Test fun linesLabel() {
