@@ -122,7 +122,6 @@ internal class OpenValidationService(private val project: Project) : Disposable 
             return count <= SIMILARITY_MAX_LINES
         }
 
-        /** 이 문서가 이번에 열린 동안 이미 검증했다는 에디터 표시. */
         internal val VALIDATED = Key.create<Boolean>("jnote.openValidated")
     }
 }

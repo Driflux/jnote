@@ -92,7 +92,6 @@ class OpenValidationCostTest : BasePlatformTestCase() {
         return sink.size
     }
 
-    /** 라운드마다 [repeats]번 돌린 평균(ms)을 모아 중앙값, 최소, 최대를 돌려준다. */
     private fun measure(rounds: Int, repeats: Int, block: () -> Unit): String {
         repeat(repeats) { block() }
         val perRound = (1..rounds).map {
@@ -163,7 +162,6 @@ class OpenValidationCostTest : BasePlatformTestCase() {
         val write = mutableListOf<Double>()
     }
 
-    /** 검증 한 번 전체(DB 읽기, 계산, 쓰기): 정확히 옮겨진 경우와 조금 바뀌어 유사도가 도는 경우. */
     private fun measureValidation(repo: NoteRepository, key: String, starts: List<Int>, text: String) {
         val scenarios = listOf("exact" to "x", "similar" to "y").map { (label, variable) ->
             val relPath = "src/CostValidate_$label.kt"

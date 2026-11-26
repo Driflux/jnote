@@ -14,7 +14,6 @@ import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
 
-/** 경로 복구 결과. */
 internal sealed interface Recovery {
     /** [file]에서 노트를 찾았다. [update]의 relPath는 그 파일의 상대 경로다. */
     data class Found(val file: VirtualFile, val update: AnchorUpdate) : Recovery

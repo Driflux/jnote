@@ -16,9 +16,7 @@ data class NoteDetail(
     /** FREE 노트의 본문만 고정폭으로 보여준다(쿼리 등을 붙여 넣는 용도). */
     val monospaceBody: Boolean,
     val ai: AiSourceDetail?,
-    /** FREE 노트는 이동할 곳이 없으므로 버튼을 숨긴다. */
     val canGoToCode: Boolean,
-    /** 재배치가 유사도로 찾은 근사 위치(APPROX)면 안내와 위치 확인 버튼을 보인다. */
     val approximate: Boolean,
 )
 
