@@ -31,6 +31,19 @@ internal object ToolWindowNotifier {
         ).notify(project)
     }
 
+    fun renameTagFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.tagRename", cause)
+
+    fun deleteTagFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.tagDelete", cause)
+
+    /** 입력 검사 뒤에 다른 곳에서 같은 이름이 생긴 경우처럼, 이름이 겹쳐 바꾸지 못했을 때. */
+    fun tagExists(project: Project, name: String) {
+        group().createNotification(
+            JNoteBundle.message("toolWindow.error.tagExists.title"),
+            JNoteBundle.message("toolWindow.error.tagExists.content", StringUtil.escapeXmlEntities(name)),
+            NotificationType.WARNING,
+        ).notify(project)
+    }
+
     fun goToFailed(project: Project, cause: Throwable) {
         // 알림 내용은 HTML이므로 예외 메시지를 이스케이프한다
         val reason = StringUtil.escapeXmlEntities(cause.message ?: cause.javaClass.simpleName)

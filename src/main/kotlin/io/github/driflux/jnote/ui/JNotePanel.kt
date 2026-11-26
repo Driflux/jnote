@@ -7,6 +7,7 @@ import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.CollectionListModel
+import com.intellij.openapi.ui.JBPopupMenu
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.SimpleListCellRenderer
@@ -28,12 +29,17 @@ import io.github.driflux.jnote.action.NoteSaver
 import io.github.driflux.jnote.action.RelocateNotesTask
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
+import io.github.driflux.jnote.db.TagRenameResult
 import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.Tag
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.awt.BorderLayout
 import java.awt.FlowLayout
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import javax.swing.JMenuItem
+import javax.swing.JPopupMenu
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 import java.util.concurrent.atomic.AtomicInteger
@@ -44,6 +50,8 @@ class JNotePanel internal constructor(
     scheduler: DelayScheduler,
     private val saver: NoteSaver = NoteSaver(),
     private val askEdit: (Project, Note, List<String>) -> NoteDraft? = AddNoteDialog::edit,
+    private val askTagName: (Project, Tag, List<Tag>) -> String? = TagDialogs::askNewName,
+    private val confirmTagDelete: (Project, Tag) -> Boolean = TagDialogs::confirmDelete,
 ) : JBPanel<JNotePanel>(BorderLayout()), Disposable {
     constructor(project: Project) : this(project, AppDelayScheduler)
 
@@ -242,13 +250,51 @@ class JNotePanel internal constructor(
         render()
     }
 
+    internal fun tagMenu(tag: Tag): JPopupMenu = JBPopupMenu().apply {
+        add(JMenuItem(JNoteBundle.message("toolWindow.tag.rename")).apply { addActionListener { renameTag(tag) } })
+        add(JMenuItem(JNoteBundle.message("toolWindow.tag.delete")).apply { addActionListener { deleteTag(tag) } })
+    }
+
+    /** 새 이름을 물어 모든 노트에 적용한다. 취소하면 바로 끝나는 future를 돌려준다. */
+    internal fun renameTag(tag: Tag): CompletableFuture<*> {
+        val name = askTagName(project, tag, state.tags) ?: return CompletableFuture.completedFuture(null)
+        return TagRepository(DatabaseService.getInstance().database).rename(tag.id, name).whenComplete { result, error ->
+            onEdt {
+                when {
+                    error != null -> ToolWindowNotifier.renameTagFailed(project, error.cause ?: error)
+                    result is TagRenameResult.Conflict -> ToolWindowNotifier.tagExists(project, name.trim())
+                    // 입력 검사를 지났다면 일어나지 않지만, 다른 프로세스가 사이에 바꿨을 수 있다. 어느 쪽이든 목록은 새로 읽는다
+                    else -> publishChanged()
+                }
+            }
+        }
+    }
+
+    /** 확인을 받으면 태그와 노트 연결만 지운다(노트는 그대로). 취소하면 바로 끝나는 future를 돌려준다. */
+    internal fun deleteTag(tag: Tag): CompletableFuture<*> {
+        if (!confirmTagDelete(project, tag)) return CompletableFuture.completedFuture(null)
+        return TagRepository(DatabaseService.getInstance().database).delete(tag.id).whenComplete { _, error ->
+            onEdt { if (error == null) publishChanged() else ToolWindowNotifier.deleteTagFailed(project, error.cause ?: error) }
+        }
+    }
+
     private fun rebuildTagBar() {
         tagBar.removeAll()
         state.tags.forEach { tag ->
-            tagBar.add(tagChip(tag.name, tag.id in state.selectedTagIds) {
+            val chip = tagChip(tag.name, tag.id in state.selectedTagIds) {
                 state = state.toggleTag(tag.id)
                 render()
+            }
+            // 오른쪽 클릭은 켜고 끄는 동작이 아니라 이름 바꾸기와 삭제 메뉴를 연다
+            chip.addMouseListener(object : MouseAdapter() {
+                override fun mousePressed(e: MouseEvent) = showMenu(e)
+                override fun mouseReleased(e: MouseEvent) = showMenu(e)
+
+                private fun showMenu(e: MouseEvent) {
+                    if (e.isPopupTrigger) tagMenu(tag).show(e.component, e.x, e.y)
+                }
             })
+            tagBar.add(chip)
         }
         tagBar.isVisible = state.tags.isNotEmpty()
         tagBar.revalidate()

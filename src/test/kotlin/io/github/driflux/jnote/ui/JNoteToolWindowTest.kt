@@ -17,6 +17,7 @@ import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.model.NewNote
+import io.github.driflux.jnote.model.Tag
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.nio.file.Files
 import java.nio.file.Path
@@ -422,5 +423,109 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
             listOf(JNoteBundle.message("toolWindow.empty.tags.title"), JNoteBundle.message("toolWindow.empty.tags.hint")),
             emptyTextLines(panel),
         )
+    }
+
+    private fun answeringName(name: String?, seen: MutableList<Pair<Tag, List<Tag>>>): (com.intellij.openapi.project.Project, Tag, List<Tag>) -> String? =
+        { _, tag, all ->
+            seen += tag to all
+            name
+        }
+
+    private fun confirming(answer: Boolean, seen: MutableList<Tag>): (com.intellij.openapi.project.Project, Tag) -> Boolean = { _, tag ->
+        seen += tag
+        answer
+    }
+
+    private fun tagPanel(
+        askName: (com.intellij.openapi.project.Project, Tag, List<Tag>) -> String? = { _, _, _ -> null },
+        confirm: (com.intellij.openapi.project.Project, Tag) -> Boolean = { _, _ -> false },
+    ): JNotePanel = track(JNotePanel(project, AppDelayScheduler, askTagName = askName, confirmTagDelete = confirm))
+
+    fun testRightClickMenuOffersRenameAndDelete() {
+        taggedNotes()
+        val panel = newPanel()
+        awaitUntil("chips") { chipTexts(panel).size == 3 }
+        val tag = panel.state.tags.first { it.name == "sql" }
+
+        val items = panel.tagMenu(tag).components.filterIsInstance<javax.swing.JMenuItem>().map { it.text }
+
+        assertEquals(listOf(JNoteBundle.message("toolWindow.tag.rename"), JNoteBundle.message("toolWindow.tag.delete")), items)
+    }
+
+    fun testRenameAppliesToEveryNoteAndKeepsTheChipOn() {
+        taggedNotes()
+        val seen = mutableListOf<Pair<Tag, List<Tag>>>()
+        val panel = tagPanel(askName = answeringName(" query ", seen))
+        awaitUntil("chips") { chipTexts(panel).size == 3 }
+        chip(panel, "sql").doClick()
+        val tag = panel.state.tags.first { it.name == "sql" }
+
+        panel.renameTag(tag).get()
+
+        awaitUntil("renamed chip") { chipTexts(panel) == listOf("query", "todo", "unused") }
+        assertEquals(listOf("sql", "todo", "unused"), seen.single().second.map { it.name })
+        assertTrue(chip(panel, "query").isSelected)
+        assertEquals(setOf("a", "b"), titles(panel).toSet())
+        val all = repo.list(null, true).get().associateBy { it.title }
+        assertEquals(listOf("query", "todo"), tagRepo.tagsOf(all.getValue("a").id).get().map { it.name })
+        assertEquals(listOf("query"), tagRepo.tagsOf(all.getValue("b").id).get().map { it.name })
+    }
+
+    fun testCancelledRenameChangesNothing() {
+        taggedNotes()
+        val panel = tagPanel(askName = answeringName(null, mutableListOf()))
+        awaitUntil("chips") { chipTexts(panel).size == 3 }
+
+        panel.renameTag(panel.state.tags.first { it.name == "sql" }).get()
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertEquals(listOf("sql", "todo", "unused"), tagRepo.list().get().map { it.name })
+    }
+
+    fun testRenameToAnExistingNameIsReportedAndChangesNothing() {
+        taggedNotes()
+        val panel = tagPanel(askName = answeringName("todo", mutableListOf()))
+        awaitUntil("chips") { chipTexts(panel).size == 3 }
+        val shown = mutableListOf<com.intellij.notification.Notification>()
+        val listener = object : com.intellij.notification.Notifications {
+            override fun notify(notification: com.intellij.notification.Notification) { shown += notification }
+        }
+        project.messageBus.connect(testRootDisposable).subscribe(com.intellij.notification.Notifications.TOPIC, listener)
+        ApplicationManager.getApplication().messageBus.connect(testRootDisposable)
+            .subscribe(com.intellij.notification.Notifications.TOPIC, listener)
+
+        panel.renameTag(panel.state.tags.first { it.name == "sql" }).get()
+
+        awaitUntil("conflict reported") { shown.any { it.title == JNoteBundle.message("toolWindow.error.tagExists.title") } }
+        assertEquals(listOf("sql", "todo", "unused"), tagRepo.list().get().map { it.name })
+    }
+
+    fun testDeleteAsksFirstThenOnlyDetachesTheTagFromNotes() {
+        taggedNotes()
+        val asked = mutableListOf<Tag>()
+        val panel = tagPanel(confirm = confirming(true, asked))
+        awaitUntil("chips") { chipTexts(panel).size == 3 && titles(panel).size == 3 }
+        val tag = panel.state.tags.first { it.name == "sql" }
+
+        panel.deleteTag(tag).get()
+
+        awaitUntil("chip gone") { chipTexts(panel) == listOf("todo", "unused") }
+        assertEquals(listOf(tag), asked)
+        assertEquals(3, repo.list(null, true).get().size)
+        assertEquals(3, titles(panel).size)
+        assertEquals(listOf("todo"), tagRepo.tagsOf(repo.list(null, true).get().single { it.title == "a" }.id).get().map { it.name })
+    }
+
+    fun testDeclinedDeleteKeepsTheTag() {
+        taggedNotes()
+        val asked = mutableListOf<Tag>()
+        val panel = tagPanel(confirm = confirming(false, asked))
+        awaitUntil("chips") { chipTexts(panel).size == 3 }
+
+        panel.deleteTag(panel.state.tags.first { it.name == "sql" }).get()
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertEquals(1, asked.size)
+        assertEquals(listOf("sql", "todo", "unused"), tagRepo.list().get().map { it.name })
     }
 }

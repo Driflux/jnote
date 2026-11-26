@@ -28,6 +28,14 @@ Tags are a registered dictionary (intent.md section 5). The repository from #3 a
 - **Empty list.** When the tag filter hides everything, the empty text says that no note has the selected tags and tells the user to turn a chip off, instead of the "no notes yet" guidance.
 - **Cost.** `assignments()` reads all links, not only those of listed notes. For a personal note count this is one small query; scoping it to the project is not worth a second query shape.
 
+### Rename and delete (PR 3)
+- **Entry point.** Right-clicking a tag chip in the Tool Window opens a menu with "Rename Tag..." and "Delete Tag...". The click does not toggle the chip. This follows intent.md section 5.
+- **Rename.** A text input dialog asks for the new name. `TagNameRules.check` is the pure rule set, the same as the repository's (trimmed, no comma, unique and case-sensitive), and the dialog blocks a bad name with an error under the field. Keeping the current name is allowed. The write is `TagRepository.rename` off the EDT. A `Conflict` result that still comes back (another process created the name in between) is shown as a warning notification, and nothing changes. Because notes link to tags by id, one row update renames the tag on every note.
+- **Delete.** A confirmation dialog states that the tag is removed from every note and the notes are kept. Confirming calls `TagRepository.delete`, which removes the tag and its links through the foreign-key cascade, never a note. There is no undo, unlike deleting a note, because the confirmation already covers it and a tag carries no content.
+- **Refresh.** Both operations publish `NotesChanged` on success, so every open panel and the gutter cache re-read the new names. A chosen filter chip keeps following a renamed tag, because the filter is held by id. A deleted tag's chip is dropped by the rule from PR 2.
+- **Testability.** The two dialogs are constructor parameters of `JNotePanel` with real dialogs as defaults, so tests answer them without a UI. The menu is built by `tagMenu(tag)`, which the tests use directly.
+- **Rejected.** A delete notification with undo: it would need to snapshot every link of the tag, and the confirmation makes it redundant.
+
 ## Consequences
 - Pros
   - Auto registration is atomic and idempotent; two IDE processes saving the same new tag do not fail.
