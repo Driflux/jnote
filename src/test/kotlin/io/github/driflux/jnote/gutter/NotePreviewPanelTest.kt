@@ -46,6 +46,13 @@ class NotePreviewPanelTest : BasePlatformTestCase() {
         assertNull(find<JBLabel>(NotePreviewPanel.build(listOf(note(3, ai = "  ")), actions), "aiBadge"))
     }
 
+    fun testImportedHtmlIsNeverParsedIntoAnHtmlView() {
+        val label = NotePreviewPanel.plainLabel("<html><img src=\"file:///x.png\"><b>x</b>")
+
+        assertNull(label.getClientProperty(javax.swing.plaf.basic.BasicHTML.propertyKey))
+        assertEquals("<html><img src=\"file:///x.png\"><b>x</b>", label.text)
+    }
+
     fun testEmptyPartsAreLeftOut() {
         val panel = NotePreviewPanel.build(listOf(note(1, body = "", tags = emptyList(), snippet = "")), actions)
 
@@ -82,7 +89,7 @@ class NotePreviewPanelTest : BasePlatformTestCase() {
         myFixture.configureByText("PreviewPopup.txt", "a\nb\nc")
         val editor = myFixture.editor as com.intellij.openapi.editor.ex.EditorEx
         var entered = 0
-        val handle = NotePreviewPopup(editor, actions).show(listOf(note(1)), 10, { entered++ }, {})
+        val handle = NotePreviewPopup(editor) { actions }.show(listOf(note(1)), 10, { entered++ }, {})
 
         assertNotNull(handle)
         assertTrue(handle!!.isOpen)

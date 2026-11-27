@@ -9,6 +9,21 @@ internal interface PreviewHandle {
     fun close()
 }
 
+/** 호버 미리보기가 읽는 곳. 메모리만 읽는다. */
+internal interface PreviewSource {
+    /** [line](0-based)을 범위 안에 두는 노트. */
+    fun notesAt(document: com.intellij.openapi.editor.Document, line: Int): List<CachedNote>
+
+    /** 그 노트들을 읽어 온 DB. 아직 없으면 null. */
+    fun database(): io.github.driflux.jnote.db.Database?
+
+    object None : PreviewSource {
+        override fun notesAt(document: com.intellij.openapi.editor.Document, line: Int): List<CachedNote> = emptyList()
+
+        override fun database(): io.github.driflux.jnote.db.Database? = null
+    }
+}
+
 internal fun interface PreviewPresenter {
     /** 미리보기를 띄운다. 마우스가 미리보기에 들어가면 [onEntered], 나가면 [onExited]를 불러야 한다. 띄울 수 없으면 null. */
     fun show(notes: List<CachedNote>, anchorY: Int, onEntered: () -> Unit, onExited: () -> Unit): PreviewHandle?
@@ -74,8 +89,14 @@ internal class GutterPreviewController(
         if (notes.isEmpty()) return
         cancelClose()
         closeNow()
-        handle = presenter.show(notes, anchorY, onEntered = ::cancelClose, onExited = ::scheduleClose)
+        handle = presenter.show(notes, anchorY, onEntered = ::entered, onExited = ::scheduleClose)
         shownLine = target
+    }
+
+    // 카드로 들어왔다면 거터를 지나며 예약된 다른 줄의 표시가 이 카드를 닫아 버리면 안 된다
+    private fun entered() {
+        cancelShow()
+        cancelClose()
     }
 
     private fun scheduleClose() {

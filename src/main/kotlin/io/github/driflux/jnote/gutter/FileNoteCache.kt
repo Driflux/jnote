@@ -57,6 +57,9 @@ internal class FileNoteCache(
         return notes
     }
 
+    /** 읽기를 시작하지 않고 지금 들고 있는 값만 돌려준다. 아직 못 읽었으면 null. */
+    fun peek(relPath: String): List<CachedNote>? = synchronized(lock) { entries[relPath]?.notes }
+
     fun contains(relPath: String): Boolean = synchronized(lock) { relPath in entries }
 
     fun invalidate() {

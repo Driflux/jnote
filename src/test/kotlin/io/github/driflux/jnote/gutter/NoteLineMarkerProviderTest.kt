@@ -224,8 +224,22 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         note("GutterCoveringCold.txt", 2, 4, "range")
 
         assertEquals(emptyList<String>(), gutter.notesCovering(myFixture.editor.document, 2).map { it.title })
-        settle()
+        assertTrue("hovering must not start a load", gutter.isIdle)
+        loadedMarkers()
         assertEquals(listOf("range"), gutter.notesCovering(myFixture.editor.document, 2).map { it.title })
+    }
+
+    fun testNotesCoveringIsEmptyOnceTheDatabaseWasSwitchedUntilThePassRefillsTheCache() {
+        openFile("GutterCoveringSwitch.txt", lines(10))
+        note("GutterCoveringSwitch.txt", 2, 4, "range")
+        loadedMarkers()
+        val document = myFixture.editor.document
+        assertEquals(1, gutter.notesCovering(document, 2).size)
+
+        dbService.switchTo(dir.resolve("switched.db"))
+
+        assertEquals(emptyList<String>(), gutter.notesCovering(document, 2).map { it.title })
+        assertTrue(gutter.isIdle)
     }
 
     fun testAMultiLineNoteDrawsABarOverItsRangeAndASingleLineNoteDoesNot() {

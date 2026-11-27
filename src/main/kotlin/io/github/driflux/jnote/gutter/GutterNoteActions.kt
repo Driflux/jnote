@@ -1,9 +1,12 @@
 package io.github.driflux.jnote.gutter
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.util.Condition
 import com.intellij.openapi.project.Project
 import io.github.driflux.jnote.NotesChanged
 import io.github.driflux.jnote.action.NoteSaver
+import io.github.driflux.jnote.db.Database
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.db.TagRepository
@@ -18,8 +21,12 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 
 /** 미리보기 버튼을 [GutterNoteActions]에 잇는다. 결과 future는 알림이 처리하므로 기다리지 않는다. */
-internal class GutterNotePreviewActions(project: Project) : PreviewActions {
-    private val actions = GutterNoteActions(project)
+internal class GutterNotePreviewActions(project: Project, database: Database) : PreviewActions {
+    private val actions = GutterNoteActions(
+        project,
+        database,
+        NoteSaver(repository = { NoteRepository(database) }, tags = { TagRepository(database) }),
+    )
 
     override fun edit(noteId: Long) {
         actions.edit(noteId)
@@ -38,32 +45,39 @@ internal class GutterNotePreviewActions(project: Project) : PreviewActions {
  */
 internal class GutterNoteActions(
     private val project: Project,
+    private val database: Database,
     private val saver: NoteSaver = NoteSaver(),
     private val askEdit: (Project, Note, List<String>) -> NoteDraft? = AddNoteDialog::edit,
 ) {
-    /** EDT에서 부른다. */
-    fun open(noteId: Long) = NoteSelection.request(project, noteId)
+    /** EDT에서 부른다. 그 사이 DB가 바뀌었다면 번호가 다른 노트를 가리킬 수 있으므로 열지 않는다. */
+    fun open(noteId: Long) {
+        if (DatabaseService.getInstance().current().database === database) NoteSelection.request(project, noteId)
+    }
 
     fun edit(noteId: Long): CompletableFuture<*> {
         val done = CompletableFuture<Unit>()
-        val database = DatabaseService.getInstance().database
         NoteRepository(database).get(noteId)
             .thenCompose { note ->
                 if (note == null) CompletableFuture.completedFuture(null) else TagRepository(database).tagsOf(noteId).thenApply { note to it }
             }
             .whenComplete { loaded, readError ->
-                onEdt {
-                    when {
-                        readError != null -> {
-                            ToolWindowNotifier.editFailed(project, unwrap(readError))
-                            done.complete(Unit)
+                onEdt(done) {
+                    try {
+                        when {
+                            readError != null -> {
+                                ToolWindowNotifier.editFailed(project, unwrap(readError))
+                                done.complete(Unit)
+                            }
+                            // 그 사이 지워진 노트라면 목록만 새로 고친다
+                            loaded == null -> {
+                                publishChanged()
+                                done.complete(Unit)
+                            }
+                            else -> askAndSave(loaded.first, loaded.second.map { it.name }, done)
                         }
-                        // 그 사이 지워진 노트라면 목록만 새로 고친다
-                        loaded == null -> {
-                            publishChanged()
-                            done.complete(Unit)
-                        }
-                        else -> askAndSave(loaded.first, loaded.second.map { it.name }, done)
+                    } catch (e: Throwable) {
+                        done.completeExceptionally(e)
+                        throw e
                     }
                 }
             }
@@ -71,7 +85,8 @@ internal class GutterNoteActions(
     }
 
     fun delete(noteId: Long): CompletableFuture<*> {
-        val deletion = NoteDeletion.onCurrentDatabase()
+        // 노트를 읽어 온 DB에 묶는다. 그 사이 바뀌어 닫혔다면 다른 DB의 같은 번호 노트를 지우지 않고 실패한다
+        val deletion = NoteDeletion(database)
         return deletion.delete(noteId).whenComplete { deleted, error ->
             onEdt {
                 when {
@@ -109,5 +124,10 @@ internal class GutterNoteActions(
 
     private fun unwrap(error: Throwable) = (error as? CompletionException)?.cause ?: error
 
-    private fun onEdt(block: () -> Unit) = ApplicationManager.getApplication().invokeLater({ block() }, project.disposed)
+    // 프로젝트가 닫혀 콜백이 버려지면 기다리는 future도 취소로 끝낸다
+    private fun onEdt(done: CompletableFuture<*>? = null, block: () -> Unit) = ApplicationManager.getApplication().invokeLater(
+        { block() },
+        ModalityState.defaultModalityState(),
+        Condition<Any?> { project.isDisposed.also { if (it) done?.cancel(false) } },
+    )
 }

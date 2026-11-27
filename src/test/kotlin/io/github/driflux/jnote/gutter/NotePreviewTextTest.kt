@@ -32,6 +32,22 @@ class NotePreviewTextTest {
     }
 
     @Test
+    fun aHugeBodyIsCutWithoutReadingItAll() {
+        val body = "first\n" + "y".repeat(50_000_000)
+
+        val shown = NotePreviewText.body(body)
+
+        assertEquals("first\n" + "y".repeat(NotePreviewText.BODY_MAX_CHARS - 6) + "…", shown)
+    }
+
+    @Test
+    fun blankBodiesAndSurroundingWhitespaceGiveCleanText() {
+        assertEquals("", NotePreviewText.body(" \n\t "))
+        assertEquals("a\n\nb", NotePreviewText.body("\n\n a\n\nb \n\n"))
+        assertEquals("1\n2\n3\n4\n5\n6\n7\n8", NotePreviewText.body((1..8).joinToString("\n")))
+    }
+
+    @Test
     fun tagsAreJoinedWithAHash() {
         assertEquals("#a #b", NotePreviewText.tags(listOf("a", "b")))
         assertEquals("", NotePreviewText.tags(emptyList()))

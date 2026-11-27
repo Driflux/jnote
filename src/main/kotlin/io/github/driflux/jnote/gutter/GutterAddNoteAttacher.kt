@@ -21,20 +21,21 @@ internal object GutterAddNoteAttacher {
         document: Document,
         parent: Disposable,
         isParentDisposed: () -> Boolean = { false },
-        notesAt: (Document, Int) -> List<CachedNote> = { _, _ -> emptyList() },
+        source: PreviewSource = PreviewSource.None,
     ) {
         EditorFactory.getInstance().editors(document, project).forEach { editor ->
             if (editor !is EditorEx || (editor.editorKind != EditorKind.MAIN_EDITOR && editor.editorKind != EditorKind.UNTYPED)) return@forEach
             val token = Any()
             if ((editor as UserDataHolderEx).putUserDataIfAbsent(ATTACHED, token) !== token) return@forEach
-            ApplicationManager.getApplication().invokeLater({ install(editor, project, parent, isParentDisposed, notesAt) }, project.disposed)
+            ApplicationManager.getApplication().invokeLater({ install(editor, project, parent, isParentDisposed, source) }, project.disposed)
         }
     }
 
-    private fun install(editor: EditorEx, project: Project, parent: Disposable, isParentDisposed: () -> Boolean, notesAt: (Document, Int) -> List<CachedNote>) {
+    private fun install(editor: EditorEx, project: Project, parent: Disposable, isParentDisposed: () -> Boolean, source: PreviewSource) {
         if (editor.isDisposed || isParentDisposed()) return
         val gutter = editor.gutterComponentEx
-        val preview = GutterPreviewController(AppDelayScheduler, { line -> notesAt(editor.document, line) }, NotePreviewPopup(editor, GutterNotePreviewActions(project)))
+        val popup = NotePreviewPopup(editor) { source.database()?.let { GutterNotePreviewActions(project, it) } }
+        val preview = GutterPreviewController(AppDelayScheduler, { line -> source.notesAt(editor.document, line) }, popup)
         val listener = GutterAddNoteListener(editor, project, GutterGeometry.of(editor), preview = preview)
         val installed = Disposer.newDisposable("jnote.gutter.addNote")
         gutter.addMouseListener(listener)

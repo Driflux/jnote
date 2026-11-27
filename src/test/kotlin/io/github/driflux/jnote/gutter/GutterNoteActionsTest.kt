@@ -46,12 +46,17 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
         }
     }
 
-    private val actions by lazy {
-        GutterNoteActions(project, NoteSaver(), { _, note, tags ->
+    private val actions by lazy { actionsOn(db) }
+
+    private fun actionsOn(database: io.github.driflux.jnote.db.Database) = GutterNoteActions(
+        project,
+        database,
+        NoteSaver(repository = { NoteRepository(database) }, tags = { TagRepository(database) }),
+        { _, note, tags ->
             asked += note to tags
             answer
-        })
-    }
+        },
+    )
 
     private fun await(future: CompletableFuture<*>) {
         val deadline = System.currentTimeMillis() + 10_000
@@ -137,6 +142,83 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
             Thread.sleep(10)
         }
         assertEquals(note, notes.get(note.id).get())
+    }
+
+    fun testDeletingThroughAStaleCardDoesNotDeleteTheSameIdInTheNewDatabase() {
+        val old = db
+        val oldNote = create("in old")
+        val staleActions = actionsOn(old)
+        DatabaseService.getInstance().switchTo(dir.resolve("other.db"))
+        val newNote = create("in new")
+        assertEquals(oldNote.id, newNote.id)
+        val shown = captureNotifications()
+
+        await(staleActions.delete(oldNote.id))
+
+        assertEquals("in new", notes.get(newNote.id).get()!!.title)
+        assertEquals(1, shown.size)
+    }
+
+    fun testEditingThroughAStaleCardNeverReadsOrWritesTheNewDatabase() {
+        val old = db
+        val oldNote = create("in old")
+        val staleActions = actionsOn(old)
+        DatabaseService.getInstance().switchTo(dir.resolve("other2.db"))
+        val newNote = create("in new")
+        answer = NoteDraft(title = "hijacked")
+        val shown = captureNotifications()
+
+        await(staleActions.edit(oldNote.id))
+
+        assertTrue(asked.isEmpty())
+        assertEquals("in new", notes.get(newNote.id).get()!!.title)
+        assertEquals(1, shown.size)
+    }
+
+    fun testSwitchingTheDatabaseWhileTheEditDialogIsOpenDoesNotWriteIntoTheNewOne() {
+        val note = create("in old")
+        val old = db
+        val switching = GutterNoteActions(project, old, NoteSaver(repository = { NoteRepository(old) }, tags = { TagRepository(old) }), { _, _, _ ->
+            DatabaseService.getInstance().switchTo(dir.resolve("other3.db"))
+            NoteDraft(title = "hijacked")
+        })
+        val shown = captureNotifications()
+
+        await(switching.edit(note.id))
+
+        val newNote = create("in new")
+        assertEquals(note.id, newNote.id)
+        assertEquals("in new", notes.get(newNote.id).get()!!.title)
+        assertEquals(1, shown.size)
+    }
+
+    fun testOpenIgnoresACardFromAnotherDatabase() {
+        val staleActions = actionsOn(db)
+        DatabaseService.getInstance().switchTo(dir.resolve("other4.db"))
+        db
+
+        staleActions.open(5)
+
+        assertNull(project.service<PendingNoteSelection>().peek())
+    }
+
+    fun testADialogThatThrowsCompletesTheEditExceptionally() {
+        val note = create()
+        val throwing = GutterNoteActions(project, db, NoteSaver(), { _, _, _ -> error("dialog broke") })
+
+        val future = throwing.edit(note.id)
+        val deadline = System.currentTimeMillis() + 10_000
+        while (!future.isDone) {
+            check(System.currentTimeMillis() < deadline) { "timed out" }
+            try {
+                PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            } catch (expected: Throwable) {
+                // 콜백의 예외는 이벤트 큐에서도 보고되므로 여기서는 future만 본다
+            }
+            Thread.sleep(10)
+        }
+
+        assertTrue(future.isCompletedExceptionally)
     }
 
     fun testOpenRequestsTheNoteInTheToolWindow() {

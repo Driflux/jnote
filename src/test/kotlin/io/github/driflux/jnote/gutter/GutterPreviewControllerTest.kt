@@ -167,6 +167,22 @@ class GutterPreviewControllerTest {
     }
 
     @Test
+    fun enteringTheOpenPreviewCancelsAShowScheduledForAnotherLine() {
+        notesByLine[3] = listOf(note(1))
+        notesByLine[8] = listOf(note(2))
+        controller.hover(3, 40)
+        scheduler.advance(GutterPreviewController.SHOW_DELAY_MS)
+
+        controller.hover(8, 120)
+        scheduler.advance(100)
+        enter()
+        scheduler.advance(5_000)
+
+        assertEquals(listOf(listOf(1L)), shown.map { it.first })
+        assertEquals(1, open().size)
+    }
+
+    @Test
     fun movingFromANoteLineToALineWithoutNotesClosesTheOldPreview() {
         notesByLine[3] = listOf(note(1))
         controller.hover(3, 40)

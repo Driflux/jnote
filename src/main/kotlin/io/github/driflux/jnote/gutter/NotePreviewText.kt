@@ -11,14 +11,27 @@ internal object NotePreviewText {
 
     /** 본문 앞부분. 줄 수와 글자 수 상한을 넘으면 줄임표를 붙인다. */
     fun body(body: String): String {
-        val trimmed = body.trim()
-        val lines = trimmed.lines()
-        var cut = lines.take(BODY_MAX_LINES).joinToString("\n")
-        var truncated = lines.size > BODY_MAX_LINES
-        if (cut.length > BODY_MAX_CHARS) {
-            cut = cut.take(BODY_MAX_CHARS)
-            truncated = true
+        // 큰 본문도 보일 만큼만 읽고 멈춘다. 앞뒤 공백은 처음과 끝에서 안쪽으로 찾는다
+        val first = body.indexOfFirst { !it.isWhitespace() }
+        if (first < 0) return ""
+        var end = body.indexOfLast { !it.isWhitespace() } + 1
+        var truncated = false
+        var lines = 1
+        var i = first
+        while (i < end) {
+            if (i - first >= BODY_MAX_CHARS) {
+                end = i
+                truncated = true
+                break
+            }
+            if (body[i] == '\n' && ++lines > BODY_MAX_LINES) {
+                end = i
+                truncated = true
+                break
+            }
+            i++
         }
+        val cut = body.substring(first, end)
         return if (truncated) cut.trimEnd() + "…" else cut
     }
 

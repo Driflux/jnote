@@ -56,11 +56,9 @@ internal object NotePreviewPanel {
     private fun card(note: CachedNote, actions: PreviewActions): JComponent {
         val card = JBPanel<JBPanel<*>>(BorderLayout(0, JBUI.scale(4)))
         val header = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0)).apply {
-            add(JBLabel(note.title).apply {
+            add(plainLabel(note.title).apply {
                 name = "title"
                 font = JBFont.label().asBold()
-                // 가져온 노트의 제목이 <html>로 시작해도 HTML로 그려지지 않게 한다
-                putClientProperty("html.disable", true)
             })
             if (!note.aiSource.isNullOrBlank()) {
                 add(JBLabel(JNoteBundle.message("toolWindow.badge.ai")).apply {
@@ -72,9 +70,8 @@ internal object NotePreviewPanel {
         }
         val details = JBPanel<JBPanel<*>>().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
         if (note.tags.isNotEmpty()) {
-            details.add(JBLabel(NotePreviewText.tags(note.tags)).apply {
+            details.add(plainLabel(NotePreviewText.tags(note.tags)).apply {
                 name = "tags"
-                putClientProperty("html.disable", true)
                 font = JBFont.small()
                 foreground = UIUtil.getContextHelpForeground()
             })
@@ -93,6 +90,12 @@ internal object NotePreviewPanel {
         return card
     }
 
+    /** 가져온 노트의 글이 <html>로 시작해도 HTML로 그려지지 않는다. 글을 넣기 전에 끄므로 HTML 뷰가 만들어지지 않는다. */
+    internal fun plainLabel(text: String): JBLabel = JBLabel().apply {
+        putClientProperty("html.disable", true)
+        this.text = text
+    }
+
     private fun textArea(name: String, text: String, monospaced: Boolean) = JBTextArea(text).apply {
         this.name = name
         isEditable = false
@@ -106,9 +109,11 @@ internal object NotePreviewPanel {
 }
 
 /** 팝업으로 미리보기를 띄운다. 편집기 포커스를 가져가지 않고, 거터 오른쪽 호버한 줄 높이에 놓는다. */
-internal class NotePreviewPopup(private val editor: EditorEx, private val actions: PreviewActions) : PreviewPresenter {
+internal class NotePreviewPopup(private val editor: EditorEx, private val actionsFor: () -> PreviewActions?) : PreviewPresenter {
     override fun show(notes: List<CachedNote>, anchorY: Int, onEntered: () -> Unit, onExited: () -> Unit): PreviewHandle? {
         if (editor.isDisposed) return null
+        // 카드는 노트 번호만 알므로, 노트를 읽어 온 DB에 묶인 동작을 이 팝업을 띄울 때 만든다
+        val actions = actionsFor() ?: return null
         lateinit var popup: JBPopup
         val closing = object : PreviewActions {
             override fun edit(noteId: Long) = run { popup.cancel(); actions.edit(noteId) }
