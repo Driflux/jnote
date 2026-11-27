@@ -48,6 +48,8 @@
 
     <depends>com.intellij.modules.platform</depends>
 
+    <resource-bundle>messages.JNoteBundle</resource-bundle>
+
     <extensions defaultExtensionNs="com.intellij">
         <applicationConfigurable parentId="tools"
                                  id="io.github.driflux.jnote.settings"
@@ -85,5 +87,11 @@
         </action>
 
         <action id="JNote.NewFreeNote" class="io.github.driflux.jnote.action.NewFreeNoteAction"/>
+
+        <group id="JNote.ToolsMenu" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="JNote.ExportAllNotes" class="io.github.driflux.jnote.ai.ExportAllNotesAction"/>
+            <action id="JNote.ExportSelectedNotes" class="io.github.driflux.jnote.ai.ExportSelectedNotesAction"/>
+        </group>
     </actions>
 </idea-plugin>
