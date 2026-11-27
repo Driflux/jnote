@@ -63,7 +63,6 @@ class TagRepositoryTest {
         val other = Database(tmp.root.toPath().resolve("jnote.db"))
         try {
             val otherTags = TagRepository(other)
-            // 첫 열기 때 마이그레이션이 겹치는 경합과 getOrCreate 경합을 섞지 않도록, 두 연결을 먼저 순서대로 연다
             tags.list().get()
             otherTags.list().get()
             repeat(20) { i ->
@@ -106,6 +105,19 @@ class TagRepositoryTest {
         tag("b")
         assertEquals(TagRenameResult.Conflict, tags.rename(a.id, "b").get())
         assertEquals(listOf("a", "b"), tags.list().get().map { it.name })
+    }
+
+    @Test
+    fun renameIsAConflictWhenAnotherWriterTakesTheNameAfterTheCheck() {
+        val a = tag("a")
+        db.submit { c ->
+            c.createStatement().use {
+                it.execute("CREATE TEMP TRIGGER race BEFORE UPDATE OF name ON tag BEGIN INSERT INTO tag (name) VALUES (NEW.name); END")
+            }
+        }.get()
+
+        assertEquals(TagRenameResult.Conflict, tags.rename(a.id, "b").get())
+        assertEquals("a", tags.list().get().single { it.id == a.id }.name)
     }
 
     @Test
