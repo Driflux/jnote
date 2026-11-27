@@ -20,7 +20,7 @@ JNote never calls an AI. It only reads files and the clipboard that you or your 
 
 A document that is not valid JSON, is not an object, or lacks either field is rejected as a whole and nothing is imported.
 
-The parser is strict JSON: no comments, no trailing commas, no single quotes, no unquoted keys, and nothing after the closing `}`. Output exactly one JSON object.
+Write standard JSON and output exactly one object. The parser rejects comments, trailing commas, single quotes, unquoted keys or strings, and anything after the closing `}`. It happens to tolerate a few other deviations (a raw line break inside a string, `TRUE` in upper case), but do not rely on them.
 
 ## Note
 
@@ -40,8 +40,8 @@ The parser is strict JSON: no comments, no trailing commas, no single quotes, no
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `repo_url` | string | one of `repo_url` / `project_path` | The git origin URL as git prints it (`git remote get-url origin`). Any form works: `git@github.com:org/repo.git`, `https://github.com/org/repo`, `ssh://git@host:2222/org/repo.git`. JNote normalizes it into its project key, so every clone and worktree of the repository sees the note. |
-| `project_path` | string | one of `repo_url` / `project_path` | Only for projects without a git origin; JNote exports such projects this way. The value is used as the project key verbatim. Agents should use `repo_url`. |
+| `repo_url` | string | one of `repo_url` / `project_path` | The git origin URL as git prints it (`git remote get-url origin`). Any remote URL with a host and a path works: `git@github.com:org/repo.git`, `https://github.com/org/repo`, `ssh://git@host:2222/org/repo.git`. JNote normalizes it into its project key, so every clone and worktree of the repository sees the note. A local path origin (`/srv/repos/shop.git`, `file://...`) is not a remote URL and makes the item invalid; use `project_path` then. |
+| `project_path` | string | one of `repo_url` / `project_path` | The project key itself, used verbatim. Use it in two cases: when you copy a note from `v_notes_export` (put its `project` column here), and when the project has no remote origin (put the absolute path of the folder opened in the IDE here). For a new note in a repository with a remote origin, use `repo_url`. |
 | `path` | string | yes | File path relative to the project root, with `/` separators, such as `src/main/kotlin/App.kt`. Absolute paths and `..` segments are invalid. |
 | `start_line` | integer | yes | First line, 1-based. |
 | `end_line` | integer | yes | Last line, inclusive, at least `start_line`. |
@@ -61,7 +61,7 @@ Export also writes these for people reading the file. Import ignores them.
 | `status` | `OK`, `APPROX` (approximate location), `ORPHAN` (code not found), or `NEEDS_RELOCATE`. A new code note always starts as `OK`. |
 | `created_at`, `updated_at` | ISO-8601 UTC times. JNote sets them itself. |
 
-Export writes `repo_url` as `https://` plus the project key, such as `https://github.com/org/repo`. JNote keeps only the normalized key, so this is an equivalent spelling of the repository, not necessarily the origin URL you cloned with.
+Export writes `repo_url` as `https://` plus the project key, such as `https://github.com/org/repo`. JNote keeps only the normalized key, so this is an equivalent spelling of the repository, not necessarily the origin URL you cloned with. When that spelling would not read back as the same key (a project without a remote origin, or an unusual key), export writes `project_path` instead.
 
 ## Null and unknown fields
 
@@ -72,7 +72,7 @@ Export writes `repo_url` as `https://` plus the project key, such as `https://gi
 
 - **Create or update by `uid`.** An item whose `uid` matches an existing note updates that note. An item with an unknown `uid` creates a note with that `uid`. An item without `uid` creates a note with a new `uid`.
 - **Always send the whole note. Fields you leave out are cleared.** An update replaces every field with the item's values: a missing `body` becomes empty, missing `tags` remove all tags, missing `ai_source`, `source_url`, or `prompt` become empty. To change one field, start from the full note (an export or a row of `v_notes_export`) and send all of it back.
-- An update that keeps the same anchor keeps the note's location status. An update that changes the anchor marks the location `OK`.
+- An update that keeps the same project, `path`, `start_line`, and `end_line` keeps the note's location status. An update that changes any of them marks the location `OK`. Changing only `class_name` or `snapshot` keeps the status.
 - **Import never deletes notes.** Leaving a note out of a document does nothing to it.
 - **Invalid items are skipped, valid ones are imported.** JNote reports each skipped item's position, `uid`, field, and problem (missing, wrong type, or invalid value) in one notification.
 - Two items with the same `uid` in one document are both skipped.
@@ -87,6 +87,20 @@ Export writes `repo_url` as `https://` plus the project key, such as `https://gi
 ## Reading notes
 
 Agents read notes through the read-only SQLite view `v_notes_export` in `~/.jnote/jnote.db` (or the path set in Settings > Tools > JNote), for example `sqlite3 -readonly ~/.jnote/jnote.db "SELECT uid, title, tags FROM v_notes_export"`. Its columns are `uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, status, title, body, ai_source, source_url, prompt, created_at, updated_at, tags` (`tags` comma-separated, `project` is the normalized key, times in epoch milliseconds). The view keeps these names across versions. Never write to the database.
+
+### Turning a view row into a note
+
+A row is flat, a note is not. To send a row back as an update:
+
+| Note field | From the row |
+|---|---|
+| `uid`, `kind`, `title`, `body`, `ai_source`, `source_url`, `prompt` | the column of the same name (`NULL` may be left out) |
+| `tags` | `tags` split at commas; `NULL` means `[]` |
+| `anchor.project_path` | `project` (CODE only) |
+| `anchor.path` | `rel_path` |
+| `anchor.start_line`, `anchor.end_line`, `anchor.class_name`, `anchor.snapshot` | `start_line`, `end_line`, `class_name`, `snapshot` |
+
+A FREE row has `NULL` anchor columns and gets no `anchor`. `status`, `created_at`, and `updated_at` are not needed.
 
 ## Examples
 
@@ -122,7 +136,7 @@ Agents read notes through the read-only SQLite view `v_notes_export` in `~/.jnot
         "repo_url": "git@github.com:acme/shop.git",
         "path": "src/main/kotlin/shop/payment/Retry.kt",
         "start_line": 42,
-        "end_line": 47,
+        "end_line": 45,
         "class_name": "Retry",
         "snapshot": "fun delayFor(attempt: Int): Duration {\n    val base = 200.milliseconds\n    return base * 2.0.pow(attempt).toInt()\n}"
       },
@@ -151,7 +165,7 @@ Start from the exported note, change what you need, and send the whole note back
         "repo_url": "https://github.com/acme/shop",
         "path": "src/main/kotlin/shop/payment/Retry.kt",
         "start_line": 42,
-        "end_line": 47,
+        "end_line": 45,
         "class_name": "Retry",
         "snapshot": "fun delayFor(attempt: Int): Duration {\n    val base = 200.milliseconds\n    return base * 2.0.pow(attempt).toInt()\n}"
       },
@@ -165,16 +179,45 @@ Start from the exported note, change what you need, and send the whole note back
 }
 ```
 
+### Retagging a note read from `v_notes_export`
+
+The row `uid = 0b6f7f0e-...`, `kind = CODE`, `project = github.com/acme/shop`, `tags = payments,retry` (other columns as in the example above) becomes the note below, with `"incident"` added. Every column is carried over, because fields left out are cleared.
+
+```json
+{
+  "format_version": 1,
+  "notes": [
+    {
+      "uid": "0b6f7f0e-8a43-4d7e-9a39-2f0c5d1f6a10",
+      "kind": "CODE",
+      "title": "Why retry backs off exponentially",
+      "body": "The payment gateway rate-limits bursts; linear retries got the account throttled in the 2026-10 incident.",
+      "tags": ["incident", "payments", "retry"],
+      "anchor": {
+        "project_path": "github.com/acme/shop",
+        "path": "src/main/kotlin/shop/payment/Retry.kt",
+        "start_line": 42,
+        "end_line": 45,
+        "class_name": "Retry",
+        "snapshot": "fun delayFor(attempt: Int): Duration {\n    val base = 200.milliseconds\n    return base * 2.0.pow(attempt).toInt()\n}"
+      },
+      "ai_source": "Claude",
+      "prompt": "Why does Retry use exponential backoff?"
+    }
+  ]
+}
+```
+
 ## Prompt examples
 
 ### For a web AI (ChatGPT, Gemini)
 
 > Summarize what we found as JNote notes. Output only one JSON object in JNote JSON format v1, with no text before or after it:
-> `{"format_version": 1, "notes": [...]}`. Each note has `kind` ("FREE" for notes not tied to code, "CODE" for notes about specific lines), `title`, `body` (plain text), `tags` (array of short names without commas), and `ai_source` set to your name. A CODE note also has `anchor` with `repo_url` (the git origin URL I give you), `path` relative to the repository root, `start_line`, `end_line` (1-based integers), and `snapshot` (the exact text of those lines). To change an existing note, include its `uid` and always send the whole note; fields you leave out are cleared. Use strict JSON: double quotes, no comments, no trailing commas.
+> `{"format_version": 1, "notes": [...]}`. Each note has `kind` ("FREE" for notes not tied to code, "CODE" for notes about specific lines), `title`, `body` (plain text), `tags` (array of short names without commas), and `ai_source` set to your name. A CODE note also has `anchor` with `repo_url` (the git origin URL I give you), `path` relative to the project root I give you (the folder I open in my IDE), `start_line`, `end_line` (1-based integers), and `snapshot` (the exact text of those lines). To change an existing note, include its `uid` and always send the whole note; fields you leave out are cleared. Use strict JSON: double quotes, no comments, no trailing commas.
 
 ### For a coding agent with a shell
 
-> Save the following as a JNote note. Run `git remote get-url origin` for `repo_url`, use the file path relative to the repository root, and copy the exact text of the lines into `snapshot`. Write one JNote JSON format v1 document (see docs/ai-format.md) to `~/.jnote/inbox/<date>-<topic>.json` and do not touch `~/.jnote/jnote.db`. When updating an existing note, read it from `v_notes_export` first and always send the whole note; fields you leave out are cleared.
+> Save the following as a JNote note. Run `git remote get-url origin` for `repo_url`, use the file path relative to the folder opened in the IDE (usually the repository root), and copy the exact text of the lines into `snapshot`. Write one JNote JSON format v1 document (see docs/ai-format.md) to `~/.jnote/inbox/<date>-<topic>.json` and do not touch `~/.jnote/jnote.db`. When updating an existing note, read it from `v_notes_export` first and always send the whole note; fields you leave out are cleared.
 
 ## Validation reference
 
