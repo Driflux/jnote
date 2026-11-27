@@ -31,6 +31,8 @@ internal object ToolWindowNotifier {
         ).notify(project)
     }
 
+    fun copyFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.copy", cause)
+
     fun renameTagFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.tagRename", cause)
 
     fun deleteTagFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.tagDelete", cause)

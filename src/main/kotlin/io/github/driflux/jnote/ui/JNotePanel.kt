@@ -11,6 +11,7 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
@@ -38,6 +39,8 @@ import io.github.driflux.jnote.NotesChangedListener
 import io.github.driflux.jnote.action.NoteSaver
 import io.github.driflux.jnote.action.RelocateNotesTask
 import io.github.driflux.jnote.anchor.AnchorLines
+import io.github.driflux.jnote.ai.ExportedNote
+import io.github.driflux.jnote.ai.NoteCopy
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.db.SearchRepository
@@ -54,6 +57,7 @@ import java.beans.PropertyChangeListener
 import java.awt.FlowLayout
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
+import java.awt.datatransfer.StringSelection
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.AbstractAction
@@ -90,7 +94,7 @@ class JNotePanel internal constructor(
     private val model = CollectionListModel<NoteRow>()
     internal val list = JBList(model).apply {
         cellRenderer = NoteRowRenderer()
-        selectionMode = ListSelectionModel.SINGLE_SELECTION
+        selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
     }
 
     internal val detail = NoteDetailPanel(
@@ -174,6 +178,19 @@ class JNotePanel internal constructor(
         bindListKey(KeyEvent.VK_ENTER, "jnote.goToCode") { detail.goToCodeButton }
         bindListKey(KeyEvent.VK_DELETE, "jnote.delete") { detail.deleteButton }
         list.addListSelectionListener { if (!it.valueIsAdjusting && !renderingSelection) showDetailOf(list.selectedValue?.summary) }
+        list.addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent) = showMenu(e)
+            override fun mouseReleased(e: MouseEvent) = showMenu(e)
+
+            private fun showMenu(e: MouseEvent) {
+                if (!e.isPopupTrigger) return
+                // 선택 밖의 행을 오른쪽 클릭하면 그 행만 고른다. 선택 안의 행이면 여러 줄 선택을 그대로 둔다
+                val index = list.locationToIndex(e.point)
+                val onRow = index >= 0 && list.getCellBounds(index, index)?.contains(e.point) == true
+                if (onRow && !list.isSelectedIndex(index)) list.selectedIndex = index
+                listMenu().show(e.component, e.x, e.y)
+            }
+        })
         val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(2, 8)
             add(JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 0)).apply {
@@ -380,6 +397,35 @@ class JNotePanel internal constructor(
         render()
     }
 
+    internal fun listMenu(): JPopupMenu = JBPopupMenu().apply {
+        val hasSelection = !list.isSelectionEmpty
+        add(JMenuItem(JNoteBundle.message("toolWindow.copy.markdown")).apply {
+            isEnabled = hasSelection
+            addActionListener { copySelected { notes -> NoteCopy.markdown(notes.map { it.note }) } }
+        })
+        add(JMenuItem(JNoteBundle.message("toolWindow.copy.json")).apply {
+            isEnabled = hasSelection
+            addActionListener { copySelected(NoteCopy::json) }
+        })
+    }
+
+    /** 고른 순간의 uid로 DB에서 최신 내용을 읽고, 글로 바꾸는 것까지 EDT 밖에서 한 뒤 클립보드에는 한 번만 쓴다. */
+    internal fun copySelected(format: (List<ExportedNote>) -> String): CompletableFuture<*> {
+        val uids = list.selectedValuesList.map { it.summary.uid }
+        if (uids.isEmpty()) return CompletableFuture.completedFuture(null)
+        return NoteCopy.read(DatabaseService.getInstance().database, uids)
+            .thenApplyAsync({ notes -> notes.takeIf { it.isNotEmpty() }?.let(format) }, AppExecutorUtil.getAppExecutorService())
+            .whenComplete { text, error ->
+                onEdt {
+                    when {
+                        error != null -> ToolWindowNotifier.copyFailed(project, (error as? CompletionException)?.cause ?: error)
+                        // 그 사이 모두 지워졌다면 클립보드를 건드리지 않는다
+                        text != null -> CopyPasteManager.getInstance().setContents(StringSelection(text))
+                    }
+                }
+            }
+    }
+
     internal fun tagMenu(tag: Tag): JPopupMenu = JBPopupMenu().apply {
         add(JMenuItem(JNoteBundle.message("toolWindow.tag.rename")).apply { addActionListener { renameTag(tag) } })
         add(JMenuItem(JNoteBundle.message("toolWindow.tag.delete")).apply { addActionListener { deleteTag(tag) } })
@@ -428,13 +474,13 @@ class JNotePanel internal constructor(
     }
 
     private fun render() {
-        val selectedUid = list.selectedValue?.summary?.uid
+        val selectedUids = list.selectedValuesList.mapTo(HashSet()) { it.summary.uid }
         renderingSelection = true
         try {
             model.replaceAll(state.visibleNotes)
             showEmptyText()
-            val index = model.items.indexOfFirst { it.summary.uid == selectedUid }
-            if (index >= 0) list.selectedIndex = index
+            val indices = model.items.indices.filter { model.items[it].summary.uid in selectedUids }.toIntArray()
+            if (indices.isNotEmpty()) list.selectedIndices = indices
         } finally {
             renderingSelection = false
         }
