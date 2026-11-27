@@ -10,7 +10,7 @@
 
 ## Decision
 - Each `JNotePanel` counts clipboard changes with `CopyPasteManager.addContentChangedListener`, registered with the panel as its disposable.
-- `copyToClipboard` remembers the count when the copy is requested and writes only if it is unchanged when the result arrives on the EDT. A failed copy still reports its error.
+- `copyToClipboard` remembers the count when the copy is requested and writes only if it is unchanged when the result arrives on the EDT. A failed copy still reports its error while its panel is open and no newer JNote copy started.
 - A copy that finishes after its panel was closed does not write, because the panel no longer watches the clipboard.
 - The `copyGeneration` ticket stays. Without it, an older copy that finishes first would write, and the newer copy would then see a changed count and skip, leaving the older text.
 
