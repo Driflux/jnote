@@ -20,7 +20,7 @@ The Tool Window rereads the notes when focus enters JNote from outside (ADR 0020
   - An in-panel focus move reported through a null owner no longer reloads.
 - Cons and what we accept
   - The panel keeps one boolean of focus state. It starts as "outside", so the first entry after the panel opens still reloads.
-  - A real loss of focus inside the panel (the focused component is removed, or focus is cleared) followed by a click back into the panel looks the same as an in-panel move through null, so it does not reload. Notes written meanwhile by another IDE process show up on the next entry from outside or the next activation.
+  - A real loss of focus inside the panel (the focused component is removed, or focus is cleared) followed by a click back into the panel looks the same as an in-panel move through null, so it does not reload. Notes written meanwhile by another IDE process show up on the next entry from outside, or on the next activation of the IDE that finds focus in the panel.
 - Tests
   - `FocusEntryTest`: an inside move through a null owner is not an entry; coming in from outside through a null owner is an entry; a first report from inside or outside to null is remembered; the existing cases are unchanged.
   - `FocusRefreshTest.testAnInPanelMoveReportedThroughNoOwnerDoesNotReload`: `list -> null -> searchField` starts no reload.
