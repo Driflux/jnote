@@ -14,9 +14,10 @@ import io.github.driflux.jnote.ui.CodeTargets
 import java.io.IOException
 import java.io.StringReader
 import java.io.Writer
+import java.nio.file.InvalidPathException
+import java.nio.file.Path
 import java.time.Instant
 
-/** JSON 형식 v1 읽기와 쓰기. 명세는 docs/ai-format.md. Gson은 IntelliJ 플랫폼이 제공하는 것을 쓴다. */
 object NoteFormatCodec {
     const val FORMAT_VERSION = 1
 
@@ -34,7 +35,6 @@ object NoteFormatCodec {
         json.flush()
     }
 
-    /** 문서 전체가 잘못되면 [DecodeResult.Rejected], 아니면 잘못된 항목만 건너뛴다. 알 수 없는 필드는 무시하고, 값이 null인 필드는 없는 것으로 본다. */
     fun decode(text: String): DecodeResult {
         val root = parseStrict(text) ?: return DecodeResult.Rejected(DocumentError.MALFORMED_JSON)
         if (!root.isJsonObject) return DecodeResult.Rejected(DocumentError.NOT_AN_OBJECT)
@@ -72,7 +72,6 @@ object NoteFormatCodec {
         json.endArray()
         note.anchor?.let { anchor ->
             json.name("anchor").beginObject()
-            // 키만 남아 원래 origin은 되살릴 수 없다. https 형태는 같은 키로 정규화되는 동등한 표현이다
             val asUrl = "https://" + anchor.project
             if (RepoUrl.normalize(asUrl) == anchor.project) json.name("repo_url").value(asUrl)
             else json.name("project_path").value(anchor.project)
@@ -135,7 +134,7 @@ object NoteFormatCodec {
             else -> throw ItemProblem("anchor.repo_url", FieldProblem.MISSING)
         }
         val relPath = requiredString(obj, "path", "anchor.")
-        if (!CodeTargets.isSafeRelPath(relPath)) throw ItemProblem("anchor.path", FieldProblem.INVALID)
+        if (!CodeTargets.isSafeRelPath(relPath) || !isParsablePath(relPath)) throw ItemProblem("anchor.path", FieldProblem.INVALID)
         val startLine = requiredLine(obj, "start_line")
         val endLine = requiredLine(obj, "end_line")
         if (endLine < startLine) throw ItemProblem("anchor.end_line", FieldProblem.INVALID)
@@ -155,7 +154,6 @@ object NoteFormatCodec {
         return (element as JsonArray).map { tag ->
             if (!tag.isJsonPrimitive || !tag.asJsonPrimitive.isString) throw ItemProblem("tags", FieldProblem.WRONG_TYPE)
             val name = tag.asString.trim()
-            // 쉼표는 v_notes_export의 tags 열 구분자와 겹친다
             if (name.isEmpty() || ',' in name) throw ItemProblem("tags", FieldProblem.INVALID)
             name
         }.distinct()
@@ -177,12 +175,17 @@ object NoteFormatCodec {
         return element.asString
     }
 
-    /** 1.0이나 1e0처럼 정수가 아닌 표기는 받지 않는다. */
     private fun intOrNull(element: JsonElement): Int? =
         if (element.isJsonPrimitive && element.asJsonPrimitive.isNumber) element.asString.toIntOrNull() else null
 
+    private fun isParsablePath(relPath: String): Boolean = try {
+        Path.of(relPath)
+        true
+    } catch (e: InvalidPathException) {
+        false
+    }
+
     private fun parseStrict(text: String): JsonElement? = try {
-        // JsonParser.parseString은 주석과 따옴표 없는 키를 받는 lenient 모드를 켜므로 엄격한 리더를 직접 쓴다
         val reader = JsonReader(StringReader(text)).apply { isLenient = false }
         Gson().getAdapter(JsonElement::class.java).read(reader).takeIf { reader.peek() == JsonToken.END_DOCUMENT }
     } catch (e: IOException) {
@@ -190,6 +193,8 @@ object NoteFormatCodec {
     } catch (e: JsonParseException) {
         null
     } catch (e: IllegalStateException) {
+        null
+    } catch (e: NumberFormatException) {
         null
     }
 

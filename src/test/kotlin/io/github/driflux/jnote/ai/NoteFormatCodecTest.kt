@@ -159,6 +159,8 @@ class NoteFormatCodecTest {
                 to SkippedItem(0, null, "anchor.path", FieldProblem.INVALID),
             """{"kind":"CODE","title":"t","anchor":{"repo_url":"https://h/o/r","path":"/tmp/a.kt","start_line":1,"end_line":1}}"""
                 to SkippedItem(0, null, "anchor.path", FieldProblem.INVALID),
+            """{"kind":"CODE","title":"t","anchor":{"repo_url":"https://h/o/r","path":"a\u0000b","start_line":1,"end_line":1}}"""
+                to SkippedItem(0, null, "anchor.path", FieldProblem.INVALID),
             """{"kind":"CODE","title":"t","anchor":{"repo_url":"https://h/o/r","path":"a","end_line":1}}"""
                 to SkippedItem(0, null, "anchor.start_line", FieldProblem.MISSING),
             """{"kind":"CODE","title":"t","anchor":{"repo_url":"https://h/o/r","path":"a","start_line":"1","end_line":1}}"""
@@ -179,6 +181,7 @@ class NoteFormatCodecTest {
         assertEquals(DocumentError.MALFORMED_JSON, rejected("{} {}"))
         assertEquals(DocumentError.MALFORMED_JSON, rejected("{format_version: 1, notes: []}"))
         assertEquals(DocumentError.MALFORMED_JSON, rejected("// comment\n{\"format_version\": 1, \"notes\": []}"))
+        assertEquals(DocumentError.MALFORMED_JSON, rejected("{\"format_version\": 1, \"notes\": [{\"title\": \"\\u00zz\"}]}"))
         assertEquals(DocumentError.NOT_AN_OBJECT, rejected("[]"))
         assertEquals(DocumentError.MISSING_FORMAT_VERSION, rejected("{\"notes\": []}"))
         assertEquals(DocumentError.UNSUPPORTED_FORMAT_VERSION, rejected("{\"format_version\": 2, \"notes\": []}"))
