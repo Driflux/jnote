@@ -34,6 +34,8 @@ tasks.test {
     inputs.file("docs/ai-format.md")
     inputs.dir("claude-plugin")
     inputs.dir(".claude-plugin")
+    inputs.file("src/main/resources/META-INF/plugin.xml")
+    inputs.file("LICENSE")
 }
 
 tasks.register("syncSkillSpec") {
