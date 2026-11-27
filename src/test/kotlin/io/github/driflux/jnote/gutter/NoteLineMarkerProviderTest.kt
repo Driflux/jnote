@@ -240,6 +240,83 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         assertEquals(1, barHighlighters().size)
     }
 
+    fun testAnEditBeforeTheBarIsAppliedDropsTheStaleRequestAndTheNextPassRedrawsIt() {
+        openFile("GutterBarsStale.txt", lines(20))
+        val document = myFixture.editor.document
+        val list = listOf(RangeBar(9_001, 5, 8))
+
+        gutter.rangeBars.update(document, list)
+        com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project) { document.insertString(0, "x\ny\n") }
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+        assertTrue(barHighlighters().isEmpty())
+
+        gutter.rangeBars.update(document, listOf(RangeBar(9_001, 7, 10)))
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+        assertEquals(listOf(7 to 10), barLines())
+    }
+
+    fun testABarRequestForADocumentWithNoEditorLeftIsNotApplied() {
+        openFile("GutterBarsClosed.txt", lines(20))
+        val document = myFixture.editor.document
+        val file = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(document)!!
+
+        gutter.rangeBars.update(document, listOf(RangeBar(9_002, 2, 4)))
+        com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).closeFile(file)
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertTrue(com.intellij.openapi.editor.impl.DocumentMarkupModel.forDocument(document, project, true).allHighlighters.none { it.lineMarkerRenderer === RangeBarRenderer })
+    }
+
+    fun testAMarkerPassOverAFileOutsideTheProjectRemovesItsBars() {
+        val outside = Files.createTempDirectory("jnote-bars-outside").toRealPath()
+        try {
+            com.intellij.openapi.vfs.newvfs.impl.VfsRootAccess.allowRootAccess(testRootDisposable, outside.toString())
+            val path = outside.resolve("Out.txt")
+            Files.writeString(path, lines(10))
+            val vFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path)!!
+            myFixture.openFileInEditor(vFile)
+            val document = myFixture.editor.document
+            gutter.rangeBars.update(document, listOf(RangeBar(9_003, 2, 5)))
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            assertEquals(1, barHighlighters().size)
+
+            directPass()
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+            assertTrue(barHighlighters().isEmpty())
+        } finally {
+            outside.toFile().deleteRecursively()
+        }
+    }
+
+    fun testTheRealGutterPaintsTheBarBetweenTheLineNumbersAndTheIcons() {
+        openFile("GutterBarsReal.txt", lines(12))
+        val editor = myFixture.editor as com.intellij.openapi.editor.ex.EditorEx
+        editor.settings.isLineNumbersShown = true
+        val gutterComponent = editor.gutterComponentEx
+        fun render(): java.awt.image.BufferedImage {
+            gutterComponent.setBounds(0, 0, gutterComponent.preferredSize.width, 12 * editor.lineHeight)
+            val image = java.awt.image.BufferedImage(gutterComponent.width, gutterComponent.height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            val g = image.createGraphics()
+            try {
+                gutterComponent.paint(g)
+            } finally {
+                g.dispose()
+            }
+            return image
+        }
+        val before = render()
+
+        gutter.rangeBars.update(editor.document, listOf(RangeBar(9_004, 3, 8)))
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+        val after = render()
+
+        val x = gutterComponent.lineNumberAreaOffset + gutterComponent.lineNumberAreaWidth + 1
+        val y = 5 * editor.lineHeight
+        assertTrue("the gutter did not call the bar renderer", before.getRGB(x, y) != after.getRGB(x, y))
+        assertTrue("the bar must sit left of the icon column", x + RangeBarRenderer.BAR_WIDTH <= gutterComponent.iconAreaOffset)
+    }
+
     fun testPaintingABarDrawsPixelsInsideTheGutter() {
         openFile("GutterBarsPaint.txt", lines(5))
         val editor = myFixture.editor as com.intellij.openapi.editor.ex.EditorEx

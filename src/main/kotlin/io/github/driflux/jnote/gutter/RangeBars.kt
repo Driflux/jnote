@@ -4,6 +4,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.impl.DocumentMarkupModel
 import com.intellij.openapi.editor.markup.HighlighterLayer
@@ -41,6 +42,9 @@ internal class RangeBars(private val project: Project) {
 
     private val requested = ConcurrentHashMap<Document, List<RangeBar>>()
 
+    @Volatile
+    private var disposed = false
+
     // EDT에서만 건드린다
     private val applied = HashMap<Document, MutableMap<Long, Applied>>()
 
@@ -48,7 +52,9 @@ internal class RangeBars(private val project: Project) {
         val before = requested[document].orEmpty()
         if (before == bars) return
         if (bars.isEmpty()) requested.remove(document) else requested[document] = bars
-        ApplicationManager.getApplication().invokeLater({ apply(document, bars) }, ModalityState.any(), project.disposed)
+        // 줄 번호는 이 시점의 문서 기준이므로, 적용 전에 문서가 바뀌었는지 알아보려고 수정 스탬프를 함께 넘긴다
+        val stamp = document.modificationStamp
+        ApplicationManager.getApplication().invokeLater({ apply(document, bars, stamp) }, ModalityState.any(), project.disposed)
     }
 
     /** 파일을 닫았을 때. 다시 열면 같은 막대라도 새로 그리도록 요청 기록도 지운다. */
@@ -57,14 +63,20 @@ internal class RangeBars(private val project: Project) {
         runOnEdt { removeAll(document) }
     }
 
-    fun clear() {
+    fun dispose() {
+        disposed = true
         requested.clear()
         runOnEdt { applied.keys.toList().forEach(::removeAll) }
     }
 
-    private fun apply(document: Document, bars: List<RangeBar>) {
+    private fun apply(document: Document, bars: List<RangeBar>, stamp: Long) {
         // 그 사이 더 새 요청이 왔다면 그 요청의 적용이 따로 예약되어 있다
-        if (requested[document].orEmpty() != bars) return
+        if (disposed || requested[document].orEmpty() != bars) return
+        // 편집이나 파일 닫기가 먼저 일어났다면 이 줄 번호는 낡았다. 요청 기록을 지워 다음 패스가 다시 요청하게 한다
+        if (document.modificationStamp != stamp || EditorFactory.getInstance().editors(document, project).findAny().isEmpty) {
+            requested.remove(document, bars)
+            return
+        }
         val markup = DocumentMarkupModel.forDocument(document, project, true)
         val current = applied.getOrPut(document) { HashMap() }
         val wanted = bars.associateBy { it.noteId }

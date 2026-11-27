@@ -114,7 +114,6 @@ internal class GutterNoteService(private val project: Project) : Disposable {
             if (same) return
             cache.clear()
             positions.clear()
-            bars.clear()
             failureReported.set(false)
         }
     }
@@ -167,6 +166,6 @@ internal class GutterNoteService(private val project: Project) : Disposable {
         disposed = true
         cache.clear()
         positions.clear()
-        bars.clear()
+        bars.dispose()
     }
 }

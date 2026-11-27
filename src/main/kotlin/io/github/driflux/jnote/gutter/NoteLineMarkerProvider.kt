@@ -34,7 +34,14 @@ class NoteLineMarkerProvider : LineMarkerProviderDescriptor(), DumbAware {
         val viewProvider = file.viewProvider
         if (viewProvider.getPsi(viewProvider.baseLanguage) != file) return
         val virtualFile = file.virtualFile ?: return
-        val relPath = AnchorLines.relativePath(project.basePath, virtualFile.path) ?: return
+        val relPath = AnchorLines.relativePath(project.basePath, virtualFile.path)
+        if (relPath == null) {
+            // 열린 채 프로젝트 밖으로 옮겨진 파일에는 막대가 남지 않게 한다. 서비스가 없으면 그릴 막대도 없다
+            project.getServiceIfCreated(GutterNoteService::class.java)?.let { service ->
+                FileDocumentManager.getInstance().getCachedDocument(virtualFile)?.let { service.rangeBars.update(it, emptyList()) }
+            }
+            return
+        }
         val gutterService = project.service<GutterNoteService>()
         FileDocumentManager.getInstance().getCachedDocument(virtualFile)?.let { gutterService.attachGutterInteraction(it) }
         val notes = gutterService.notesFor(virtualFile, relPath)
