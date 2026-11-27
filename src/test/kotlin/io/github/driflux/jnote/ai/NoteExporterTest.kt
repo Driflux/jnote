@@ -111,6 +111,42 @@ class NoteExporterTest {
         assertEquals(listOf("out.json"), otherFiles())
     }
 
+    @Test fun cancelWhileTheDbExecutorIsBusyReturnsWithoutReadingNotes() {
+        notes.create(NewNote.free("note")).get()
+        val target = dir.resolve("out.json")
+        val release = java.util.concurrent.CountDownLatch(1)
+        val busy = db.submit { release.await(30, java.util.concurrent.TimeUnit.SECONDS) }
+        val canceled = java.util.concurrent.atomic.AtomicBoolean(false)
+        val started = java.util.concurrent.CountDownLatch(1)
+        val outcome = java.util.concurrent.CompletableFuture.supplyAsync {
+            try {
+                exporter.export(target, null) {
+                    started.countDown()
+                    if (canceled.get()) throw CancellationException()
+                }
+                "finished"
+            } catch (_: CancellationException) {
+                "canceled"
+            }
+        }
+
+        started.await(5, java.util.concurrent.TimeUnit.SECONDS)
+        Thread.sleep(300)
+        canceled.set(true)
+        val result = try {
+            outcome.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (_: java.util.concurrent.TimeoutException) {
+            "still waiting"
+        } finally {
+            release.countDown()
+        }
+        busy.get()
+
+        assertEquals("canceled", result)
+        assertFalse(Files.exists(target))
+        assertEquals(emptyList<String>(), otherFiles())
+    }
+
     @Test fun refusesToOverwriteTheActiveDatabase() {
         val note = notes.create(NewNote.free("keep me")).get()
         val target = dir.resolve("jnote.db")
@@ -123,6 +159,34 @@ class NoteExporterTest {
 
         assertEquals(note.uid, notes.getByUid(note.uid).get()?.uid)
         assertEquals(emptyList<String>(), otherFiles())
+    }
+
+    @Test fun checksTheActiveDatabaseOnTheDbThreadRightBeforeTheMove() {
+        notes.create(NewNote.free("note")).get()
+        val target = dir.resolve("out.json")
+        val threads = mutableListOf<String>()
+
+        NoteExporter(db) { threads += Thread.currentThread().name; null }.export(target, null) {}
+
+        assertEquals(listOf(Database.THREAD_NAME), threads)
+        assertEquals(listOf("out.json"), otherFiles())
+    }
+
+    @Test fun refusesWhenTheActiveDatabaseBecomesTheTargetAfterTheSnapshot() {
+        val note = notes.create(NewNote.free("keep me")).get()
+        val target = dir.resolve("switched.db")
+        Files.writeString(target, "new active database")
+        var active: Path = dir.resolve("jnote.db")
+
+        try {
+            NoteExporter(db) { active }.export(target, null) { if (otherFiles().any { it.endsWith(".tmp") }) active = target }
+            fail("expected refusal")
+        } catch (_: ExportTargetIsDatabaseException) {
+        }
+
+        assertEquals("new active database", Files.readString(target))
+        assertEquals(note.uid, notes.getByUid(note.uid).get()?.uid)
+        assertEquals(listOf("switched.db"), otherFiles())
     }
 
     @Test fun databaseFailureWritesNothing() {

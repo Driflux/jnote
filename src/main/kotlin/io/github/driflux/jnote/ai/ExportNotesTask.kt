@@ -16,7 +16,7 @@ class ExportNotesTask(
     project: Project,
     private val target: Path,
     private val selectedUids: Set<String>?,
-    private val exporter: () -> NoteExporter = { NoteExporter(DatabaseService.getInstance().database) },
+    private val exporter: () -> NoteExporter = { DatabaseService.getInstance().let { service -> NoteExporter(service.database) { service.currentPath() } } },
 ) : Task.Backgroundable(project, JNoteBundle.message("task.export.title"), true) {
     @Volatile
     private var written = 0
