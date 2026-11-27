@@ -49,6 +49,6 @@ sealed interface DecodeResult {
 /** [index]는 notes 배열 안의 0-based 위치, [field]는 형식 문서의 필드 이름이다. */
 data class SkippedItem(val index: Int, val uid: String?, val field: String, val problem: FieldProblem)
 
-enum class FieldProblem { MISSING, WRONG_TYPE, INVALID }
+enum class FieldProblem { MISSING, WRONG_TYPE, INVALID, DUPLICATE }
 
 enum class DocumentError { MALFORMED_JSON, NOT_AN_OBJECT, MISSING_FORMAT_VERSION, UNSUPPORTED_FORMAT_VERSION, MISSING_NOTES }

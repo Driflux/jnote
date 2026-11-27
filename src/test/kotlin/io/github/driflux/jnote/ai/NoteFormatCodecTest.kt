@@ -173,6 +173,37 @@ class NoteFormatCodecTest {
         for ((note, expected) in cases) assertEquals(note, expected, skippedOnly(note))
     }
 
+    @Test fun duplicateUidsAreAllSkippedInDocumentOrder() {
+        val result = decoded(
+            document(
+                """{"uid":"a","kind":"FREE","title":"first"}""",
+                """{"kind":"FREE","title":"bad"}""".replace("\"title\":\"bad\"", "\"title\":1"),
+                """{"uid":"b","kind":"FREE","title":"kept"}""",
+                """{"uid":"a","kind":"FREE","title":"second"}""",
+                """{"kind":"FREE","title":"no uid"}""",
+                """{"kind":"FREE","title":"no uid either"}""",
+            ),
+        )
+        assertEquals(listOf("kept", "no uid", "no uid either"), result.notes.map { it.title })
+        assertEquals(
+            listOf(
+                SkippedItem(0, "a", "uid", FieldProblem.DUPLICATE),
+                SkippedItem(1, null, "title", FieldProblem.WRONG_TYPE),
+                SkippedItem(3, "a", "uid", FieldProblem.DUPLICATE),
+            ),
+            result.skipped,
+        )
+    }
+
+    @Test fun duplicateUidCountsInvalidCopiesToo() {
+        val result = decoded(document("""{"uid":"x","kind":"FREE","title":"valid"}""", """{"uid":"x","kind":"FREE"}"""))
+        assertEquals(emptyList<FormatNote>(), result.notes)
+        assertEquals(
+            listOf(SkippedItem(0, "x", "uid", FieldProblem.DUPLICATE), SkippedItem(1, "x", "title", FieldProblem.MISSING)),
+            result.skipped,
+        )
+    }
+
     @Test fun documentProblems() {
         assertEquals(DocumentError.MALFORMED_JSON, rejected(""))
         assertEquals(DocumentError.MALFORMED_JSON, rejected("{\"format_version\": 1, \"notes\": ["))
