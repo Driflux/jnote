@@ -17,10 +17,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 class DatabaseClosedException : IllegalStateException("database is closed")
 
 class Database internal constructor(
-    private val path: Path,
+    private val resolvePath: () -> Path,
     private val closeTimeoutMillis: Long,
 ) : AutoCloseable {
-    constructor(path: Path) : this(path, CLOSE_TIMEOUT_MS)
+    constructor(path: Path) : this({ path }, CLOSE_TIMEOUT_MS)
+
+    internal constructor(path: Path, closeTimeoutMillis: Long) : this({ path }, closeTimeoutMillis)
+
+    internal constructor(resolvePath: () -> Path) : this(resolvePath, CLOSE_TIMEOUT_MS)
 
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, THREAD_NAME).apply { isDaemon = true }
@@ -52,6 +56,7 @@ class Database internal constructor(
 
     private fun open(): Connection {
         if (closeJobDone) throw closedError()
+        val path = resolvePath()
         path.parent?.let { Files.createDirectories(it) }
         val config = SQLiteConfig().apply {
             setBusyTimeout(BUSY_TIMEOUT_MS)
@@ -69,10 +74,6 @@ class Database internal constructor(
         return opened
     }
 
-    /**
-     * 두 연결이 새 파일을 동시에 WAL로 바꾸면 SQLite는 교착을 피하려고 busy handler를 부르지 않고 바로 SQLITE_BUSY를 돌려준다.
-     * 먼저 바꾼 쪽이 끝나면 파일이 이미 WAL이라 다시 시도하면 성공한다. https://www.sqlite.org/c3ref/busy_handler.html
-     */
     private fun enableWal(connection: Connection) {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(BUSY_TIMEOUT_MS.toLong())
         while (true) {
