@@ -5,6 +5,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.notification.Notifications
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.driflux.jnote.JNoteBundle
@@ -150,7 +151,7 @@ class DbPathChangerTest : BasePlatformTestCase() {
         DbPathChanger.request(dir.resolve("next.db"))
         val n = notifications.single()
         assertEquals(JNoteBundle.message("notification.dbPath.failed.title"), n.title)
-        assertEquals(JNoteBundle.message("notification.dbPath.targetExists.content", stale), n.content)
+        assertEquals(JNoteBundle.message("notification.dbPath.targetExists.content", StringUtil.escapeXmlEntities(stale.toString())), n.content)
         assertEquals(current, DatabaseService.getInstance().currentPath())
         assertEquals(current.toString(), DbPathSettings.getInstance().state.dbPath)
         assertEquals("stale", Files.readString(stale))
@@ -162,7 +163,7 @@ class DbPathChangerTest : BasePlatformTestCase() {
         val n = notifications.single()
         assertEquals(NotificationType.WARNING, n.type)
         assertEquals(JNoteBundle.message("notification.dbPath.closeFailed.title"), n.title)
-        assertEquals(JNoteBundle.message("notification.dbPath.closeFailed.content", target, "stuck"), n.content)
+        assertEquals(JNoteBundle.message("notification.dbPath.closeFailed.content", StringUtil.escapeXmlEntities(target.toString()), "stuck"), n.content)
     }
 
     fun testSameFileIsNoChange() {
