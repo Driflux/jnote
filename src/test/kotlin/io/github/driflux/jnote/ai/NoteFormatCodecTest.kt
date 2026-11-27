@@ -195,6 +195,15 @@ class NoteFormatCodecTest {
         )
     }
 
+    @Test fun duplicateUidCountsInvalidCopiesToo() {
+        val result = decoded(document("""{"uid":"x","kind":"FREE","title":"valid"}""", """{"uid":"x","kind":"FREE"}"""))
+        assertEquals(emptyList<FormatNote>(), result.notes)
+        assertEquals(
+            listOf(SkippedItem(0, "x", "uid", FieldProblem.DUPLICATE), SkippedItem(1, "x", "title", FieldProblem.MISSING)),
+            result.skipped,
+        )
+    }
+
     @Test fun documentProblems() {
         assertEquals(DocumentError.MALFORMED_JSON, rejected(""))
         assertEquals(DocumentError.MALFORMED_JSON, rejected("{\"format_version\": 1, \"notes\": ["))
