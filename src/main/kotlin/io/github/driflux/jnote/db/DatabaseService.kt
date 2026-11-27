@@ -16,6 +16,9 @@ class DatabaseService : Disposable {
     private var current: Database? = null
     private var disposed = false
 
+    /** 처음 정한 기본 경로. 경로가 정해지기 전에 만들어진 DB는 이 경로의 것이며, 뒤의 전환이나 설정 변경을 따라가지 않는다. */
+    private var firstDefault: Path? = null
+
     internal var defaultPath: () -> Path = DatabasePaths::default
 
     val database: Database
@@ -59,14 +62,15 @@ class DatabaseService : Disposable {
         old?.close()
     }
 
-    /**
-     * 설정 읽기는 파일 I/O라 잠금 밖에서 한다. 잠금을 쥔 채 읽으면 EDT의 [database]와 [dispose]가 그동안 기다린다.
-     * 경로가 정해지기 전에 만들어진 DB는 기본 경로의 것이므로, 그 사이 전환이 있었어도 읽은 값을 그대로 쓴다.
-     */
+    // 설정 읽기는 파일 I/O라 잠금 밖에서 한다. 잠금을 쥔 채 읽으면 EDT의 database와 dispose가 그동안 기다린다
     private fun resolveDefault(): Path {
+        synchronized(lock) { firstDefault }?.let { return it }
         val resolved = defaultPath()
-        synchronized(lock) { if (path == null) path = resolved }
-        return resolved
+        return synchronized(lock) {
+            val first = firstDefault ?: resolved.also { firstDefault = it }
+            if (path == null) path = first
+            first
+        }
     }
 
     override fun dispose() {

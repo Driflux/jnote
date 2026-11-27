@@ -5,6 +5,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -67,17 +68,36 @@ class DatabaseServiceTest : BasePlatformTestCase() {
             gate.await()
             dir.resolve("slow.db")
         }
-        val database = service.database
-        val first = database.submit { 1 }
-        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        try {
+            val database = service.database
+            val first = database.submit { 1 }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
 
-        val started = System.nanoTime()
-        assertSame(database, service.database)
-        val waitedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
-        gate.countDown()
+            val again = CompletableFuture.supplyAsync { service.database }
+            assertSame(database, again.get(1, TimeUnit.SECONDS))
+            gate.countDown()
+            assertEquals(1, first.get(10, TimeUnit.SECONDS))
+        } finally {
+            gate.countDown()
+            service.dispose()
+        }
+    }
 
-        assertTrue("database waited ${waitedMillis} ms", waitedMillis < 1000)
-        assertEquals(1, first.get(10, TimeUnit.SECONDS))
+    fun testFirstDatabaseKeepsTheDefaultPathEvenIfTheSettingChangesBeforeItOpens() {
+        val service = DatabaseService()
+        val first = dir.resolve("first.db")
+        val second = dir.resolve("second.db")
+        var setting = first
+        service.defaultPath = { setting }
+        val old = service.database
+
+        assertTrue(service.replace(service.current(), second))
+        setting = second
+
+        val opened = old.submitAndWait { openedFile(it) }
+        assertEquals(first.toRealPath(), Paths.get(opened).toRealPath())
+        assertFalse(Files.exists(second))
+        old.close()
         service.dispose()
     }
 
@@ -115,8 +135,14 @@ class DatabaseServiceTest : BasePlatformTestCase() {
 
         val second = dir.resolve("second.db")
         val switching = Thread { service.switchTo(second) }.apply { start() }
-        while (switching.isAlive && switching.state != Thread.State.TIMED_WAITING) Thread.onSpinWait()
-        gate.countDown()
+        try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (switching.isAlive && switching.state != Thread.State.TIMED_WAITING && System.nanoTime() < deadline) {
+                Thread.onSpinWait()
+            }
+        } finally {
+            gate.countDown()
+        }
         switching.join(15_000)
 
         assertEquals(first.toRealPath(), Paths.get(openedFile.get(10, TimeUnit.SECONDS)).toRealPath())
