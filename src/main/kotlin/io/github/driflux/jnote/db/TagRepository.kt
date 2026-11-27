@@ -62,30 +62,12 @@ class TagRepository(private val database: Database) {
     }
 
     fun replaceTags(noteId: Long, names: List<String>): CompletableFuture<List<Tag>> = database.submit { c ->
-        val cleaned = names.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-        require(cleaned.none { ',' in it }) { "tag name must not contain a comma" }
+        val cleaned = cleanTagNames(names)
         c.autoCommit = false
         try {
-            val tags = cleaned.map { name ->
-                c.prepareStatement("INSERT OR IGNORE INTO tag (name) VALUES (?)").use { s ->
-                    s.setString(1, name)
-                    s.executeUpdate()
-                }
-                checkNotNull(findByName(c, name))
-            }
-            c.prepareStatement("DELETE FROM note_tag WHERE note_id = ?").use { s ->
-                s.setLong(1, noteId)
-                s.executeUpdate()
-            }
-            c.prepareStatement("INSERT INTO note_tag (note_id, tag_id) VALUES (?, ?)").use { s ->
-                for (tag in tags) {
-                    s.setLong(1, noteId)
-                    s.setLong(2, tag.id)
-                    s.executeUpdate()
-                }
-            }
+            val tags = setNoteTags(c, noteId, cleaned)
             c.commit()
-            tags.sortedBy { it.name }
+            tags
         } catch (e: Throwable) {
             c.rollback()
             throw e
@@ -162,12 +144,40 @@ class TagRepository(private val database: Database) {
             s.setLong(1, id)
             s.executeQuery().use { it.next() }
         }
-
-    private fun findByName(c: java.sql.Connection, name: String): Tag? =
-        c.prepareStatement("SELECT id, name FROM tag WHERE name = ?").use { s ->
-            s.setString(1, name)
-            s.executeQuery().use { if (it.next()) it.toTag() else null }
-        }
-
-    private fun ResultSet.toTag() = Tag(getLong(1), getString(2))
 }
+
+internal fun cleanTagNames(names: List<String>): List<String> {
+    val cleaned = names.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    require(cleaned.none { ',' in it }) { "tag name must not contain a comma" }
+    return cleaned
+}
+
+internal fun setNoteTags(c: java.sql.Connection, noteId: Long, cleaned: List<String>): List<Tag> {
+    val tags = cleaned.map { name ->
+        c.prepareStatement("INSERT OR IGNORE INTO tag (name) VALUES (?)").use { s ->
+            s.setString(1, name)
+            s.executeUpdate()
+        }
+        checkNotNull(findByName(c, name))
+    }
+    c.prepareStatement("DELETE FROM note_tag WHERE note_id = ?").use { s ->
+        s.setLong(1, noteId)
+        s.executeUpdate()
+    }
+    c.prepareStatement("INSERT INTO note_tag (note_id, tag_id) VALUES (?, ?)").use { s ->
+        for (tag in tags) {
+            s.setLong(1, noteId)
+            s.setLong(2, tag.id)
+            s.executeUpdate()
+        }
+    }
+    return tags.sortedBy { it.name }
+}
+
+private fun findByName(c: java.sql.Connection, name: String): Tag? =
+    c.prepareStatement("SELECT id, name FROM tag WHERE name = ?").use { s ->
+        s.setString(1, name)
+        s.executeQuery().use { if (it.next()) it.toTag() else null }
+    }
+
+private fun ResultSet.toTag() = Tag(getLong(1), getString(2))

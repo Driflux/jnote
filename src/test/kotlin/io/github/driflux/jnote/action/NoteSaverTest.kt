@@ -27,7 +27,6 @@ class NoteSaverTest : BasePlatformTestCase() {
     private val anchor = CodeAnchor("src/A.kt", 3, 5, "snap", "A.b")
     private val published = AtomicInteger()
 
-    // 작업이 execute 반환 전에 끝나게 해서, 뒤에 붙인 단계가 호출 스레드에서 도는지 background에서 도는지가 항상 갈리게 한다
     private val joiningBackground = Executor { r -> Thread(r, "fake-background").also { it.start(); it.join() } }
 
     override fun setUp() {
@@ -135,6 +134,24 @@ class NoteSaverTest : BasePlatformTestCase() {
         assertEquals(existing, tags.list().get().single { it.name == "old" })
         assertEquals(2, tags.list().get().size)
         assertEquals(1, published.get())
+    }
+
+    fun testSaveThatFailsWhileAttachingTagsLeavesNoNoteAndDoesNotPublish() {
+        val repo = NoteRepository(db)
+        db.submit { c ->
+            c.createStatement().use { it.execute("CREATE TEMP TRIGGER fail_link BEFORE INSERT ON note_tag BEGIN SELECT RAISE(ABORT, 'link failed'); END") }
+        }.get()
+        val saver = NoteSaver(repository = { repo }, projectKey = { "k" })
+
+        val code = saver.save(project, anchor, NoteDraft("T", tags = listOf("x")))
+        val free = saver.saveFree(NoteDraft("q", tags = listOf("x")))
+        await(code)
+        await(free)
+
+        assertTrue(code.isCompletedExceptionally)
+        assertTrue(free.isCompletedExceptionally)
+        assertTrue(repo.list(null, true).get().isEmpty())
+        assertEquals(0, published.get())
     }
 
     fun testSaveFreeAttachesTags() {
@@ -255,7 +272,6 @@ class NoteSaverTest : BasePlatformTestCase() {
         assertEquals(0, published.get())
     }
 
-    // 노트 경로는 basePath 기준이므로 basePath 아래에 실제 파일을 만든다. 테스트마다 이름을 달리해 VFS 캐시가 섞이지 않게 한다
     private fun sourceFile(name: String, text: String): String {
         val real = Path.of(project.basePath!!, "src", name)
         Files.createDirectories(real.parent)

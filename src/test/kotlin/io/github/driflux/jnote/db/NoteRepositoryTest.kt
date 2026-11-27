@@ -49,6 +49,36 @@ class NoteRepositoryTest {
     }
 
     @Test
+    fun createAttachesTheGivenTagsAndRegistersNewNames() {
+        val tags = TagRepository(db)
+        val old = tags.getOrCreate("old").get()
+
+        val created = repo.create(code(), listOf("old", " fresh ", "old", "")).get()
+
+        assertEquals(listOf("fresh", "old"), tags.tagsOf(created.id).get().map { it.name })
+        assertEquals(old, tags.list().get().single { it.name == "old" })
+    }
+
+    @Test
+    fun createLeavesNothingWhenAttachingTagsFails() {
+        db.submit { c ->
+            c.createStatement().use { it.execute("CREATE TEMP TRIGGER fail_link BEFORE INSERT ON note_tag BEGIN SELECT RAISE(ABORT, 'link failed'); END") }
+        }.get()
+
+        assertThrows(ExecutionException::class.java) { repo.create(code(), listOf("x")).get() }
+
+        assertTrue(repo.list(null, true).get().isEmpty())
+        assertTrue(TagRepository(db).list().get().isEmpty())
+    }
+
+    @Test
+    fun createRejectsACommaInATagNameWithoutWriting() {
+        val e = assertThrows(ExecutionException::class.java) { repo.create(code(), listOf("a,b")).get() }
+        assertTrue(e.cause is IllegalArgumentException)
+        assertTrue(repo.list(null, true).get().isEmpty())
+    }
+
+    @Test
     fun createFreeNoteHasNoAnchorAndNoProject() {
         val created = repo.create(NewNote.free("query", "select 1")).get()
         assertEquals(NoteKind.FREE, created.kind)
