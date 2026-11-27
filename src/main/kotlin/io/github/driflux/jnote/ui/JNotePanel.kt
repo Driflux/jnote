@@ -1,6 +1,9 @@
 package io.github.driflux.jnote.ui
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.CommonShortcuts
+import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.keymap.KeymapUtil
@@ -40,9 +43,15 @@ import io.github.driflux.jnote.model.Tag
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.awt.BorderLayout
 import java.awt.FlowLayout
+import java.awt.event.ActionEvent
+import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import javax.swing.AbstractAction
+import javax.swing.JButton
+import javax.swing.JComponent
 import javax.swing.JMenuItem
+import javax.swing.KeyStroke
 import javax.swing.JPopupMenu
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
@@ -57,6 +66,7 @@ class JNotePanel internal constructor(
     private val askEdit: (Project, Note, List<String>) -> NoteDraft? = AddNoteDialog::edit,
     private val askTagName: (Project, Tag, List<Tag>) -> String? = TagDialogs::askNewName,
     private val confirmTagDelete: (Project, Tag) -> Boolean = TagDialogs::confirmDelete,
+    private val goToCode: (Project, Note) -> Unit = { target, note -> CodeNavigator.goTo(target, note) },
 ) : JBPanel<JNotePanel>(BorderLayout()), Disposable {
     constructor(project: Project) : this(project, AppDelayScheduler)
 
@@ -75,7 +85,7 @@ class JNotePanel internal constructor(
     }
 
     internal val detail = NoteDetailPanel(
-        onGoToCode = { CodeNavigator.goTo(project, it) },
+        onGoToCode = { goToCode(project, it) },
         onDelete = { delete(it) },
         onEdit = { edit(it) },
         onRelocate = { note -> note.relPath?.let { RelocateNotesTask(project, it).queue() } },
@@ -140,9 +150,13 @@ class JNotePanel internal constructor(
 
     @Volatile
     private var disposed = false
+    internal val focusSearchAction = DumbAwareAction.create { focusSearch() }
 
     init {
         Disposer.register(this, spinnerIcon)
+        focusSearchAction.registerCustomShortcutSet(CommonShortcuts.getFind(), this)
+        bindListKey(KeyEvent.VK_ENTER, "jnote.goToCode") { detail.goToCodeButton }
+        bindListKey(KeyEvent.VK_DELETE, "jnote.delete") { detail.deleteButton }
         list.addListSelectionListener { if (!it.valueIsAdjusting && !renderingSelection) showDetailOf(list.selectedValue?.summary) }
         val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(2, 8)
@@ -169,6 +183,20 @@ class JNotePanel internal constructor(
         reload()
     }
 
+    internal fun focusSearch() {
+        IdeFocusManager.getInstance(project).requestFocus(searchField.textEditor, true)
+        searchField.textEditor.selectAll()
+    }
+    private fun bindListKey(keyCode: Int, name: String, button: () -> JButton) {
+        list.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(keyCode, 0), name)
+        list.actionMap.put(name, object : AbstractAction() {
+            override fun actionPerformed(e: ActionEvent) {
+                val target = button()
+                val selectedUid = list.selectedValue?.summary?.uid
+                if (selectedUid != null && selectedUid == shownDetailUid && detail.isVisible && target.isVisible) target.doClick(0)
+            }
+        })
+    }
     fun reload() {
         val ticket = generation.incrementAndGet()
         val allProjects = allProjects
