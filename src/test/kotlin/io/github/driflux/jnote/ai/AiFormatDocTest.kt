@@ -6,7 +6,6 @@ import org.junit.Test
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** 명세 문서의 예시가 실제 코덱으로 그대로 읽히는지 확인한다. 문서가 스킬과 복사용 안내의 원본이기 때문이다. */
 class AiFormatDocTest {
     private val doc = Files.readString(Path.of("docs/ai-format.md"))
 
@@ -29,5 +28,13 @@ class AiFormatDocTest {
 
     @Test fun formatVersionMatchesTheCodec() {
         assertTrue(doc.contains("\"format_version\": ${NoteFormatCodec.FORMAT_VERSION}"))
+    }
+
+    @Test fun promptsCoverTheOriginlessFallbackAndTheRawOrigin() {
+        val prompts = doc.substringAfter("## Prompt examples").substringBefore("## Validation reference")
+        assertEquals(2, Regex("project_path").findAll(prompts).count())
+        assertTrue(prompts.contains("git config --get remote.origin.url"))
+        assertTrue(doc.contains("git config --get remote.origin.url"))
+        assertTrue(!prompts.contains("get-url"))
     }
 }
