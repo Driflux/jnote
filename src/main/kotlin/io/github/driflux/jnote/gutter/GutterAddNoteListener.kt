@@ -1,6 +1,8 @@
 package io.github.driflux.jnote.gutter
 
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.editor.event.EditorMouseEvent
+import com.intellij.openapi.editor.event.EditorMouseListener
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.ex.util.EditorUtil
 import com.intellij.openapi.editor.markup.HighlighterLayer
@@ -10,9 +12,9 @@ import com.intellij.openapi.project.Project
 import io.github.driflux.jnote.action.AddNoteAction
 import io.github.driflux.jnote.anchor.AnchorDraft
 import io.github.driflux.jnote.anchor.CodeAnchors
+import java.awt.event.InputEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
-import javax.swing.JComponent
 
 internal class GutterGeometry(
     val lineAt: (MouseEvent) -> Int,
@@ -46,6 +48,15 @@ internal class GutterAddNoteListener(
     private var highlighter: RangeHighlighter? = null
     private var selecting = false
 
+    // 드래그 동안만 등록된다. EditorImpl은 이 리스너가 소비한 release를 거터에 넘기지 않으므로(ADR 0115),
+    // "+" 밖에서 놓으면 그 자리 아이콘의 클릭 액션이 돌지 않고, "+" 위에서 놓으면 "+"의 클릭 액션이 그대로 돈다.
+    private val releaseGuard = object : EditorMouseListener {
+        override fun mouseReleased(event: EditorMouseEvent) {
+            val e = event.mouseEvent
+            if (e.button == MouseEvent.BUTTON1 && e.component === editor.gutter && !geometry.onAddIcon(e)) event.consume()
+        }
+    }
+
     internal val shownLine: Int? get() = highlighter?.takeIf { it.isValid }?.let { editor.document.getLineNumber(it.startOffset) }
 
     override fun mouseMoved(e: MouseEvent) {
@@ -63,15 +74,19 @@ internal class GutterAddNoteListener(
     }
 
     override fun mousePressed(e: MouseEvent) {
-        if (e.button != MouseEvent.BUTTON1 || e.isPopupTrigger || editor.isDisposed) return
-        if (!geometry.onAddIcon(e)) return
-        drag.press(clamp(geometry.lineAt(e)))
-        GutterDragging.mark(e, true)
+        if (e.button != MouseEvent.BUTTON1 || editor.isDisposed) return
+        // 왼쪽 버튼을 누른 채로는 왼쪽 press가 다시 올 수 없으므로, 남은 드래그는 release를 잃은 것이다(ADR 0115).
+        drag.cancel()
+        selecting = false
+        if (e.isPopupTrigger || !geometry.onAddIcon(e)) return
+        drag.press(clamp(geometry.lineAt(e))) { editor.removeEditorMouseListener(releaseGuard) }
+        editor.addEditorMouseListener(releaseGuard)
     }
 
     override fun mouseDragged(e: MouseEvent) {
         if (editor.isDisposed) return
-        if (!drag.active) return
+        // 왼쪽 release를 잃은 뒤 다른 버튼만 누른 드래그가 이전 시작 줄로 선택을 바꾸지 않게 한다(ADR 0115).
+        if (!drag.active || (e.modifiersEx and InputEvent.BUTTON1_DOWN_MASK) == 0) return
         val range = drag.drag(clamp(geometry.lineAt(e)))
         if (range == null) {
             if (selecting) editor.selectionModel.removeSelection()
@@ -84,10 +99,9 @@ internal class GutterAddNoteListener(
     }
 
     override fun mouseReleased(e: MouseEvent) {
-        if (!drag.active) return
+        if (e.button != MouseEvent.BUTTON1 || !drag.active) return
         val range = drag.release(clamp(geometry.lineAt(e)))
         selecting = false
-        GutterDragging.mark(e, false)
         if (!geometry.inIconArea(e)) hide()
         if (range != null && !editor.isDisposed) addNoteForLines(range.start, range.end)
     }
@@ -118,14 +132,4 @@ internal class GutterAddNoteListener(
         val draft = CodeAnchors.fromLines(project, file, document, startLine + 1, endLine + 1) ?: return
         addNote(project, draft)
     }
-}
-
-internal object GutterDragging {
-    private const val KEY = "jnote.gutter.dragging"
-
-    fun mark(e: MouseEvent, dragging: Boolean) {
-        (e.component as? JComponent)?.putClientProperty(KEY, if (dragging) true else null)
-    }
-
-    fun active(e: MouseEvent): Boolean = (e.component as? JComponent)?.getClientProperty(KEY) == true
 }

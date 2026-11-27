@@ -3,27 +3,32 @@ package io.github.driflux.jnote.gutter
 import io.github.driflux.jnote.anchor.LineRange
 
 internal class GutterDrag {
-    private var start: Int? = null
+    private class Pressed(val line: Int, val onEnd: () -> Unit)
 
-    val active: Boolean get() = start != null
+    private var pressed: Pressed? = null
 
-    fun press(line: Int) {
-        start = line
+    val active: Boolean get() = pressed != null
+
+    fun press(line: Int, onEnd: () -> Unit) {
+        cancel()
+        pressed = Pressed(line, onEnd)
     }
 
     fun drag(line: Int): LineRange? {
-        val from = start ?: return null
-        return rangeOf(from, line)
+        val from = pressed ?: return null
+        return rangeOf(from.line, line)
     }
 
     fun release(line: Int): LineRange? {
-        val from = start ?: return null
-        start = null
-        return rangeOf(from, line)
+        val from = pressed ?: return null
+        cancel()
+        return rangeOf(from.line, line)
     }
 
     fun cancel() {
-        start = null
+        val ended = pressed ?: return
+        pressed = null
+        ended.onEnd()
     }
 
     private fun rangeOf(from: Int, to: Int): LineRange? =
