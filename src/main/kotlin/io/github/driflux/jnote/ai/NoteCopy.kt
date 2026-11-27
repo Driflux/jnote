@@ -24,12 +24,12 @@ object NoteCopy {
 
     fun markdown(notes: List<FormatNote>): String = notes.joinToString("\n\n") { note ->
         buildList {
-            add("## " + note.title)
+            add("## " + oneLine(note.title))
             note.anchor?.let { anchor ->
-                add(inlineCode(anchor.relPath + ":" + NoteRows.lineRange(anchor.startLine, anchor.endLine)))
-                anchor.snapshot?.takeIf { it.isNotEmpty() }?.let { add(codeBlock(it, anchor.relPath)) }
+                add(inlineCode(oneLine(anchor.relPath) + ":" + NoteRows.lineRange(anchor.startLine, anchor.endLine)))
+                anchor.snapshot?.takeIf { it.isNotEmpty() }?.let { add(codeBlock(it.trimEnd('\n') + "\n", language(anchor.relPath))) }
             }
-            note.body.takeIf { it.isNotBlank() }?.let { add(it) }
+            note.body.takeIf { it.isNotBlank() }?.let { add(codeBlock(if (it.endsWith('\n') || it.endsWith('\r')) it else it + "\n", "text")) }
         }.joinToString("\n\n")
     }
 
@@ -39,11 +39,15 @@ object NoteCopy {
         return tick + pad + text + pad + tick
     }
 
-    private fun codeBlock(snippet: String, relPath: String): String {
-        val fence = "`".repeat(maxOf(3, longestBacktickRun(snippet) + 1))
-        val language = relPath.substringAfterLast('/').substringAfterLast('.', "").lowercase().takeIf { it.all(Char::isLetterOrDigit) }.orEmpty()
-        return fence + language + "\n" + snippet.trimEnd('\n') + "\n" + fence
+    private fun oneLine(text: String): String = text.replace(Regex("\r\n|\r|\n"), " ")
+
+    private fun codeBlock(lines: String, language: String): String {
+        val fence = "`".repeat(maxOf(3, longestBacktickRun(lines) + 1))
+        return fence + language + "\n" + lines + fence
     }
+
+    private fun language(relPath: String): String =
+        relPath.substringAfterLast('/').substringAfterLast('.', "").lowercase().takeIf { it.all(Char::isLetterOrDigit) }.orEmpty()
 
     private fun longestBacktickRun(text: String): Int = Regex("`+").findAll(text).maxOfOrNull { it.value.length } ?: 0
 
