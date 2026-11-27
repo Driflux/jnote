@@ -63,7 +63,6 @@ class TagRepositoryTest {
         val other = Database(tmp.root.toPath().resolve("jnote.db"))
         try {
             val otherTags = TagRepository(other)
-            // 첫 열기 때 마이그레이션이 겹치는 경합과 getOrCreate 경합을 섞지 않도록, 두 연결을 먼저 순서대로 연다
             tags.list().get()
             otherTags.list().get()
             repeat(20) { i ->
@@ -111,7 +110,6 @@ class TagRepositoryTest {
     @Test
     fun renameIsAConflictWhenAnotherWriterTakesTheNameAfterTheCheck() {
         val a = tag("a")
-        // 다른 IDE 프로세스가 중복 확인과 UPDATE 사이에 같은 이름을 넣는 순간을, UPDATE 직전에 도는 트리거로 재현한다
         db.submit { c ->
             c.createStatement().use {
                 it.execute("CREATE TEMP TRIGGER race BEFORE UPDATE OF name ON tag BEGIN INSERT INTO tag (name) VALUES (NEW.name); END")
