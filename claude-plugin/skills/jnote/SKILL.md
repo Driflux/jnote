@@ -5,7 +5,7 @@ description: Save notes into the JNote IntelliJ plugin and look up notes saved t
 
 # JNote
 
-JNote is an IntelliJ plugin that keeps personal notes, anchored to code lines or free, in a local SQLite file. You never write to that file. You write a JSON document into the inbox, and the user reviews it in the IDE before anything is saved.
+JNote is an IntelliJ plugin that keeps personal notes, anchored to code lines or free, in a local SQLite file. You never write to that file. You write a JSON document into the inbox. A JNote build with the inbox import shows it to the user for review, and nothing is saved until they apply it. A build without that feature does not read the inbox yet.
 
 The format is JNote JSON format v1. Its full rules are in `${CLAUDE_PLUGIN_ROOT}/skills/jnote/ai-format.md` (a copy of `docs/ai-format.md` in the JNote repository). Read it before your first write in a session, and follow it over anything below.
 
@@ -41,7 +41,7 @@ Save something from the conversation as one or more notes.
    ```
    If neither `python3` nor `jq` is installed, the check fails and nothing is published; tell the user instead of publishing unchecked. If the check fails, fix the temporary file and run the last command again; never publish a document that does not parse.
    If `ln` fails because the name exists, publish the same temporary file again with `-2`, `-3`, ... before `.json`, then remove the temporary file.
-5. Tell the user the file name and that JNote shows it for review when its Tool Window gains focus. Nothing is saved until they click Apply there.
+5. Tell the user the file name and what happens next, which depends on their JNote build. With the inbox import, JNote shows the file for review when its Tool Window gains focus, and nothing is saved until they click Apply there. Without it, JNote does not read the inbox, so the file stays there until a build with the import processes it.
 
 ### Example
 
