@@ -32,7 +32,6 @@ tasks.processResources {
 }
 
 tasks.test {
-    // 테스트가 -PpluginVersion 같은 덮어쓰기까지 반영한 실제 버전을 보게 한다
     systemProperty("jnote.pluginVersion", version.toString())
     inputs.file("docs/ai-format.md")
     inputs.dir("claude-plugin")
@@ -40,9 +39,9 @@ tasks.test {
     inputs.file("src/main/resources/META-INF/plugin.xml")
     inputs.file("LICENSE")
     inputs.file("gradle.properties")
+    inputs.file("build.gradle.kts")
 }
 
-// 개발용 버전(-SNAPSHOT)이 Marketplace에 올라가는 일을 막는다
 tasks.named("publishPlugin") {
     val releaseVersion = version.toString()
     doFirst {
@@ -67,13 +66,12 @@ intellijPlatform {
             untilBuild = provider { null }
         }
     }
-    // 토큰은 저장소에 두지 않고 환경 변수로만 받는다
     publishing {
         token = providers.environmentVariable("PUBLISH_TOKEN")
     }
     pluginVerification {
         ides {
-            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity, providers.gradleProperty("platformVersion"))
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity, "2024.2")
             create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity, "2025.2")
             create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdea, "2026.1")
         }
