@@ -89,6 +89,7 @@ class JNotePanel internal constructor(
     }
 
     internal val detail = NoteDetailPanel(
+        project,
         onGoToCode = { goToCode(project, it) },
         onDelete = { delete(it) },
         onEdit = { edit(it) },
@@ -497,7 +498,10 @@ class JNotePanel internal constructor(
     override fun dispose() {
         disposed = true
         searchTimer?.cancel()
-        UIUtil.invokeLaterIfNeeded { spinner.stop() }
+        UIUtil.invokeLaterIfNeeded {
+            spinner.stop()
+            detail.snippetViewer.release()
+        }
     }
 
     companion object {

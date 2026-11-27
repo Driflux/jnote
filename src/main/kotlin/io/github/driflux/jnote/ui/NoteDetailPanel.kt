@@ -4,6 +4,7 @@ import com.intellij.icons.AllIcons
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.colors.EditorFontType
 import com.intellij.openapi.ide.CopyPasteManager
+import com.intellij.openapi.project.Project
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
@@ -23,6 +24,7 @@ import javax.swing.JComponent
 import javax.swing.JPanel
 
 internal class NoteDetailPanel(
+    project: Project,
     private val onGoToCode: (Note) -> Unit,
     private val onDelete: (Note) -> Unit,
     private val onEdit: (Note) -> Unit,
@@ -36,7 +38,7 @@ internal class NoteDetailPanel(
     internal val classLabel = JBLabel().plainText()
     internal val locationLabel = JBLabel().plainText().apply { foreground = UIUtil.getContextHelpForeground() }
     internal val approxLabel = JBLabel(JNoteBundle.message("toolWindow.detail.approx"), AllIcons.General.BalloonWarning, JBLabel.LEFT)
-    internal val snippetArea = readOnlyArea(wrap = false)
+    internal val snippetViewer = SnippetViewer(project)
     internal val bodyArea = readOnlyArea(wrap = true)
     internal val aiSourceLabel = JBLabel().plainText()
     internal val aiUrlLabel = JBLabel().plainText()
@@ -68,7 +70,7 @@ internal class NoteDetailPanel(
         add(deleteButton)
     }
 
-    private val snippetSection = section("toolWindow.detail.snippet", JBScrollPane(snippetArea))
+    private val snippetSection = section("toolWindow.detail.snippet", snippetViewer)
     private val bodySection = section("toolWindow.detail.note", bodyArea)
     private val aiSection = section("toolWindow.detail.aiSource", column(aiSourceLabel, aiUrlLabel, aiPromptArea))
 
@@ -92,13 +94,17 @@ internal class NoteDetailPanel(
     fun show(note: Note?) {
         this.note = note
         isVisible = note != null
-        val detail = note?.let(NoteDetails::of) ?: return
+        val detail = note?.let(NoteDetails::of)
+        if (detail == null) {
+            snippetViewer.release()
+            return
+        }
         titleLabel.text = detail.title
         classLabel.text = detail.className.orEmpty()
         classLabel.isVisible = detail.className != null
         locationLabel.text = detail.location.orEmpty()
         locationLabel.isVisible = detail.location != null
-        snippetArea.text = detail.snippet.orEmpty()
+        snippetViewer.show(detail.snippet, note.relPath?.substringAfterLast('/'))
         snippetSection.isVisible = detail.snippet != null
         copySnippetButton.isVisible = detail.snippet != null
         bodyArea.text = detail.body
