@@ -69,7 +69,6 @@
                     doNotActivateOnStart="true"
                     factoryClass="io.github.driflux.jnote.ui.JNoteToolWindowFactory"/>
 
-        <!-- language=""는 모든 언어(Language.ANY)를 뜻한다 -->
         <codeInsight.lineMarkerProvider language=""
                                         implementationClass="io.github.driflux.jnote.gutter.NoteLineMarkerProvider"/>
     </extensions>

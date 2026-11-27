@@ -9,7 +9,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import javax.xml.parsers.DocumentBuilderFactory
 
-/** Marketplace에 올릴 설명, 변경 사항, 아이콘, 라이선스가 갖춰졌는지 확인한다. */
 class MarketplaceMetadataTest {
     private val pluginXml = Path.of("src/main/resources/META-INF/plugin.xml")
 
@@ -20,7 +19,6 @@ class MarketplaceMetadataTest {
 
     private fun visible(html: String) = html.replace(Regex("<[^>]*>"), "").trim()
 
-    // 영어 블록 다음에 <hr/>, 그 뒤가 한국어 블록이다
     private fun blocks(): Pair<String, String> {
         val parts = element("description").split("<hr/>")
         assertEquals(2, parts.size)
