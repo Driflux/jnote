@@ -132,6 +132,19 @@ class NoteRepositoryTest {
     }
 
     @Test
+    fun updateTextRollsBackTheTextWhenSettingTagsFails() {
+        val read = repo.create(code(), listOf("a")).get()
+        db.submit { c ->
+            c.createStatement().use { it.execute("CREATE TEMP TRIGGER fail_link BEFORE INSERT ON note_tag BEGIN SELECT RAISE(ABORT, 'link failed'); END") }
+        }.get()
+
+        assertThrows(ExecutionException::class.java) { repo.updateText(read.uid, NoteText("New", "", null, null, null), listOf("b")).get() }
+
+        assertEquals(read, repo.get(read.id).get())
+        assertEquals(listOf("a"), TagRepository(db).tagsOf(read.id).get().map { it.name })
+    }
+
+    @Test
     fun confirmLocationOverridesAStatusThatChangedAtTheSameLocation() {
         val read = repo.create(NewNote.code("p1", "src/A.kt", 3, 5, "t", snapshot = "old", status = NoteStatus.APPROX)).get()
         repo.updateAnchors(listOf(AnchorUpdate(read.uid, "src/A.kt", 3, 5, NoteStatus.ORPHAN))).get()
