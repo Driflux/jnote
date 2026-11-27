@@ -46,12 +46,11 @@ class DbPathChangerTest : BasePlatformTestCase() {
     }
 
     fun testPlanIsMadeInTheBackgroundNotOnTheCallingThread() {
-        // 테스트에서는 백그라운드 작업이 기본으로 동기 실행되므로, 실제 IDE처럼 비동기로 돌게 한다
         val key = "intellij.progress.task.ignoreHeadless"
         val before = System.getProperty(key)
         System.setProperty(key, "true")
         try {
-            DbPathChanger.request(dir) // 폴더라는 사실은 파일 시스템을 봐야 안다
+            DbPathChanger.request(dir)
             assertTrue(notifications.isEmpty())
             PlatformTestUtil.waitWithEventsDispatching("plan was not made", { notifications.isNotEmpty() }, 20)
         } finally {
@@ -64,7 +63,6 @@ class DbPathChangerTest : BasePlatformTestCase() {
         val other = dir.resolve("other.db").also { Files.createFile(it) }
         val another = dir.resolve("another.db")
         DbPathChanger.request(other) {
-            // 첫 요청이 확인을 기다리는 동안 두 번째 Apply가 온 상황
             DbPathChanger.request(another) { true }
             false
         }
@@ -125,10 +123,8 @@ class DbPathChangerTest : BasePlatformTestCase() {
 
     fun testCopyThatCannotFinishIsReportedAndNothingChanges() {
         val db = createProbe()
-        // 시도마다 5초씩 기다리지 않도록 이 연결의 대기 시간만 줄인다
         db.submitAndWait { c -> c.createStatement().use { it.execute("PRAGMA busy_timeout = 50") } }
         val target = dir.resolve("next.db")
-        // 다른 연결이 읽기 트랜잭션을 연 채로 있어 체크포인트가 끝나지 않는다
         org.sqlite.JDBC().connect("jdbc:sqlite:$current", java.util.Properties())!!.use { reader ->
             reader.autoCommit = false
             reader.createStatement().use { s -> s.executeQuery("select count(*) from probe").use { it.next() } }

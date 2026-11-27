@@ -8,6 +8,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import io.github.driflux.jnote.db.Database
+import io.github.driflux.jnote.db.Migrations
 import org.sqlite.JDBC
 import java.nio.file.Files
 import java.nio.file.Path
@@ -42,6 +43,10 @@ class DbPathChangeTest {
         JDBC().connect("jdbc:sqlite:$p", Properties())!!.use { c -> c.createStatement().use { s -> statements.forEach(s::execute) } }
     }
 
+    private fun jnoteDatabaseAtVersion(name: String, version: Int): Path = path(name).also { p ->
+        JDBC().connect("jdbc:sqlite:$p", Properties())!!.use { Migrations.run(it, Migrations.ALL.take(version)) }
+    }
+
     private fun filesIn(): Set<String> = tmp.root.list()!!.toSet()
 
     @Test
@@ -61,6 +66,48 @@ class DbPathChangeTest {
     @Test
     fun emptySqliteDatabaseWithAVersionIsInvalidBecauseMigrationsWouldSkipTheSchema() {
         val target = sqlite("versioned.db", "PRAGMA user_version = 3")
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun oldJNoteDatabasesAtEveryEarlierVersionSwitchToExisting() {
+        for (version in 1..Migrations.ALL.size) {
+            val target = jnoteDatabaseAtVersion("v$version.db", version)
+            assertEquals("version $version", Plan.SwitchToExisting(target), DbPathChange.plan(path("cur.db"), target))
+        }
+    }
+
+    @Test
+    fun foreignDatabaseWithANoteTableIsInvalidAtEveryVersion() {
+        for (version in 0..Migrations.ALL.size) {
+            val target = sqlite("foreign$version.db", "create table note(x)", "PRAGMA user_version = $version")
+            assertEquals("version $version", Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), target))
+        }
+    }
+
+    @Test
+    fun jnoteDatabaseMissingARequiredColumnOrTableIsInvalid() {
+        val missingColumn = sqlite("column.db", "create table note(id integer primary key)", "create table tag(id integer primary key, name text)", "create table note_tag(note_id integer, tag_id integer)", "PRAGMA user_version = 1")
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), missingColumn))
+        val missingTable = jnoteDatabaseAtVersion("table.db", 1).also { p ->
+            JDBC().connect("jdbc:sqlite:$p", Properties())!!.use { c -> c.createStatement().use { it.execute("drop table note_tag") } }
+        }
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), missingTable))
+    }
+
+    @Test
+    fun nonEmptyRollbackJournalIsRefusedAndAnEmptyOneIsNot() {
+        val target = jnoteDatabase("journal.db")
+        val journal = path("journal.db-journal")
+        Files.createFile(journal)
+        assertEquals(Plan.SwitchToExisting(target), DbPathChange.plan(path("cur.db"), target))
+        Files.writeString(journal, "x")
+        assertEquals(Plan.Invalid(Reason.HAS_JOURNAL), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun databaseWithOnlyAViewIsNotEmpty() {
+        val target = sqlite("view.db", "create view v as select 1 as x")
         assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), target))
     }
 
@@ -87,7 +134,6 @@ class DbPathChangeTest {
                 s.execute("PRAGMA wal_autocheckpoint = 0")
                 statements.forEach(s::execute)
             }
-            // 쓰던 프로세스가 비정상 종료해 본 파일과 -wal만 남은 상황
             Files.copy(live, crashed)
             Files.copy(path("live-$name-wal"), path("$name-wal"))
         }

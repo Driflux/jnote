@@ -112,7 +112,6 @@ class DbPathSwitcherTest : BasePlatformTestCase() {
         val target = dir.resolve("next.db")
         var duringCopy: CompletableFuture<Unit>? = null
         run(DbPathChange.Plan.CopyThenSwitch(target)) {
-            // 복사가 도는 동안 노트를 저장한 상황: 이 쓰기는 복사 작업 뒤에 줄 선다
             if (duringCopy == null) duringCopy = insert(service.database, 99)
         }
         assertEquals(target, service.currentPath())
@@ -128,7 +127,6 @@ class DbPathSwitcherTest : BasePlatformTestCase() {
         val target = dir.resolve("next.db")
         var opened = false
         run(DbPathChange.Plan.CopyThenSwitch(target)) {
-            // 한 번도 열지 않은 DB를 복사하는 사이 처음 쓰인 상황
             if (!opened) {
                 opened = true
                 insert(service.database, 77).get()

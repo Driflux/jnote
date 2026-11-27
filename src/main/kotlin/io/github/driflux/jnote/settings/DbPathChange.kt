@@ -1,9 +1,11 @@
 package io.github.driflux.jnote.settings
 
 import com.intellij.openapi.diagnostic.thisLogger
+import io.github.driflux.jnote.db.Migrations
 import org.sqlite.JDBC
 import java.nio.file.Files
 import java.nio.file.Path
+import java.sql.Connection
 import java.util.Properties
 
 object DbPathChange {
@@ -14,6 +16,7 @@ object DbPathChange {
         NOT_WRITABLE("settings.dbPath.invalid.notWritable"),
         NOT_SQLITE("settings.dbPath.invalid.notSqlite"),
         NOT_JNOTE("settings.dbPath.invalid.notJNote"),
+        HAS_JOURNAL("settings.dbPath.invalid.hasJournal"),
     }
 
     sealed interface Plan {
@@ -21,7 +24,6 @@ object DbPathChange {
 
         data class CopyThenSwitch(val target: Path) : Plan
 
-        /** 새 경로에 파일이 이미 있다: 확인을 받고 그 DB로 전환한다(병합하지 않는다). */
         data class SwitchToExisting(val target: Path) : Plan
 
         data class Invalid(val reason: Reason) : Plan
@@ -46,29 +48,36 @@ object DbPathChange {
         }
     }
 
-    /**
-     * 기존 파일이 JNote가 열어도 되는 DB인지 본다. 파일에는 쓰지 않는다. 0바이트, 테이블이 없고 user_version이 0인 DB, note 테이블이 있는 DB만 통과한다.
-     * 계획과 전환 직전 모두에서 부르지만, 그 사이 파일이 바뀌는 것까지 막지는 못한다.
-     */
     internal fun existingFileProblem(target: Path): Reason? {
         val file = target.toRealPath()
+        val journal = sidecar(file, "-journal")
+        if (Files.exists(journal) && Files.size(journal) > 0L) return Reason.HAS_JOURNAL
         if (Files.size(file) == 0L) return null
         val header = ByteArray(SQLITE_HEADER.size)
         val read = Files.newInputStream(file).use { it.readNBytes(header, 0, header.size) }
         if (read < header.size || !header.contentEquals(SQLITE_HEADER)) return Reason.NOT_SQLITE
         val schema = readSchema(file)
-        val usable = if (schema.tables.isEmpty()) schema.userVersion == 0 else NOTE_TABLE in schema.tables
+        val usable = if (!schema.hasObjects) schema.userVersion == 0 else hasJNoteSchema(schema)
         return if (usable) null else Reason.NOT_JNOTE
     }
 
-    private class Schema(val tables: Set<String>, val userVersion: Int)
+    private fun hasJNoteSchema(schema: Schema): Boolean {
+        if (schema.userVersion < 1) return false
+        val expected = expectedTables(minOf(schema.userVersion, Migrations.ALL.size))
+        return expected.all { (table, columns) -> schema.tables[table]?.containsAll(columns) == true }
+    }
+
+    private fun expectedTables(version: Int): Map<String, Set<String>> =
+        JDBC().connect("jdbc:sqlite::memory:", Properties())!!.use { c ->
+            Migrations.run(c, Migrations.ALL.take(version))
+            tableColumns(c)
+        }
+
+    private class Schema(val tables: Map<String, Set<String>>, val hasObjects: Boolean, val userVersion: Int)
 
     private fun readSchema(file: Path): Schema {
         val wal = sidecar(file, "-wal")
-        // -wal이 없으면 본 파일이 내용의 전부라 immutable로 연다. 잠금을 잡지 않고 -wal/-shm 파일도 만들지 않는다
         if (!Files.exists(wal)) return querySchema(immutable(file))
-        // -wal에만 있는 내용까지 읽어야 하지만 원본에 잠금이나 -shm을 남기지 않도록 사본을 읽는다.
-        // 너무 커서 복사하지 않으면 -wal에 무엇이 있는지 모르므로 통과시키지 않는다
         repeat(COPY_ATTEMPTS) {
             val before = stamps(file, wal)
             if (before.sumOf { it.first } > maxCopyBytes) return UNKNOWN
@@ -77,7 +86,6 @@ object DbPathChange {
                 val copy = dir.resolve("check.db")
                 Files.copy(file, copy)
                 Files.copy(wal, sidecar(copy, "-wal"))
-                // 두 파일을 따로 복사하는 사이 다른 연결이 쓰거나 체크포인트하면 서로 다른 시점의 사본이 되므로 다시 한다
                 if (stamps(file, wal) == before) return querySchema("jdbc:sqlite:" + copy.toUri())
             } finally {
                 if (!dir.toFile().deleteRecursively()) thisLogger().warn("Cannot delete the temporary copy in $dir")
@@ -97,11 +105,21 @@ object DbPathChange {
         val connection = JDBC().connect(url, Properties()) ?: error("sqlite-jdbc rejected url $url")
         return connection.use { c ->
             c.createStatement().use { s ->
-                val tables = s.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table'").use { rows ->
-                    buildSet { while (rows.next()) add(rows.getString(1)) }
-                }
+                val tables = tableColumns(c)
+                val hasObjects = s.executeQuery("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").use { it.next() }
                 val version = s.executeQuery("PRAGMA user_version").use { it.next(); it.getInt(1) }
-                Schema(tables, version)
+                Schema(tables, hasObjects, version)
+            }
+        }
+    }
+
+    private fun tableColumns(c: Connection): Map<String, Set<String>> = c.createStatement().use { s ->
+        val names = s.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table'").use { rows ->
+            buildList { while (rows.next()) add(rows.getString(1)) }
+        }
+        names.associateWith { name ->
+            s.executeQuery("PRAGMA table_info(\"" + name.replace("\"", "\"\"") + "\")").use { rows ->
+                buildSet { while (rows.next()) add(rows.getString("name")) }
             }
         }
     }
@@ -112,7 +130,6 @@ object DbPathChange {
         return p
     }
 
-    // 심볼릭 링크와 대소문자 무시 파일시스템에서도 같은 파일을 같게 보도록, 존재하는 상위 경로만 실제 경로로 푼다
     private fun canonical(path: Path): Path {
         val abs = path.toAbsolutePath().normalize()
         val existing = nearestExisting(abs) ?: return abs
@@ -120,10 +137,8 @@ object DbPathChange {
     }
 
     private val SQLITE_HEADER = "SQLite format 3".toByteArray(Charsets.US_ASCII) + 0.toByte()
-    private const val NOTE_TABLE = "note"
     private const val COPY_ATTEMPTS = 3
-    private val UNKNOWN = Schema(emptySet(), -1)
+    private val UNKNOWN = Schema(emptyMap(), true, -1)
 
-    /** -wal이 있는 DB를 사본으로 읽을 때 복사할 최대 크기(본 파일 + -wal). */
     internal var maxCopyBytes: Long = 64L shl 20
 }
