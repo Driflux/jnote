@@ -1,5 +1,6 @@
 package io.github.driflux.jnote.ai
 
+import com.google.gson.Gson
 import io.github.driflux.jnote.db.COLUMNS
 import io.github.driflux.jnote.db.Database
 import io.github.driflux.jnote.db.toNote
@@ -14,13 +15,10 @@ class ExportTargetIsDatabaseException : IllegalArgumentException("export target 
 class NoteExporter(private val database: Database) {
     fun export(target: Path, selectedUids: Set<String>?, checkCanceled: () -> Unit): Int {
         checkCanceled()
-        val snapshot = database.submit { c -> readSnapshot(c) }.get()
-        val all = snapshot.notes
-        val tagsByNote = snapshot.tags
+        val snapshot = database.submit { c -> readSnapshot(c, selectedUids) }.get()
         if (sameFile(snapshot.databaseFile, target)) throw ExportTargetIsDatabaseException()
         checkCanceled()
-        val chosen = if (selectedUids == null) all else all.filter { it.uid in selectedUids }
-        val exported = chosen.map { toExported(it, tagsByNote[it.id].orEmpty()) }
+        val exported = snapshot.notes.map { toExported(it, snapshot.tags[it.id].orEmpty()) }
         val partial = Files.createTempFile(target.toAbsolutePath().parent, "jnote-export-", ".tmp")
         try {
             Files.newBufferedWriter(partial, StandardCharsets.UTF_8).use { NoteFormatCodec.encode(exported, it) }
@@ -32,15 +30,23 @@ class NoteExporter(private val database: Database) {
         return exported.size
     }
 
-    private fun readSnapshot(c: java.sql.Connection): Snapshot {
+    private fun readSnapshot(c: java.sql.Connection, selectedUids: Set<String>?): Snapshot {
+        val selection = selectedUids?.let { Gson().toJson(it) }
         c.autoCommit = false
         try {
-            val notes = c.prepareStatement("SELECT $COLUMNS FROM note ORDER BY updated_at DESC, id DESC").use { s ->
+            val notes = c.prepareStatement(
+                "SELECT $COLUMNS FROM note" + (if (selection == null) "" else " WHERE uid IN $SELECTED_UIDS") +
+                    " ORDER BY updated_at DESC, id DESC",
+            ).use { s ->
+                if (selection != null) s.setString(1, selection)
                 s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.toNote() else null }.toList() }
             }
             val tags = c.prepareStatement(
-                "SELECT nt.note_id, t.name FROM note_tag nt JOIN tag t ON t.id = nt.tag_id ORDER BY nt.note_id, t.name",
+                "SELECT nt.note_id, t.name FROM note_tag nt JOIN tag t ON t.id = nt.tag_id" +
+                    (if (selection == null) "" else " WHERE nt.note_id IN (SELECT id FROM note WHERE uid IN $SELECTED_UIDS)") +
+                    " ORDER BY nt.note_id, t.name",
             ).use { s ->
+                if (selection != null) s.setString(1, selection)
                 s.executeQuery().use { rs ->
                     val result = HashMap<Long, MutableList<String>>()
                     while (rs.next()) result.getOrPut(rs.getLong(1)) { mutableListOf() } += rs.getString(2)
@@ -72,6 +78,9 @@ class NoteExporter(private val database: Database) {
     }
 
     internal companion object {
+        // 선택한 uid를 JSON 배열 하나로 묶어 바인딩하므로 SQLite 변수 개수 한도에 걸리지 않고 나눠 보낼 필요도 없다
+        private const val SELECTED_UIDS = "(SELECT value FROM json_each(?))"
+
         fun toExported(note: Note, tags: List<String>): ExportedNote {
             val anchor = if (note.project != null && note.relPath != null && note.startLine != null && note.endLine != null) {
                 FormatAnchor(note.project, note.relPath, note.startLine, note.endLine, note.className, note.snapshot)

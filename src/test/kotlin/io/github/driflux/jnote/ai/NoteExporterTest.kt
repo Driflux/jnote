@@ -78,6 +78,43 @@ class NoteExporterTest {
         assertEquals(listOf(first.uid), decode(target).map { it.uid })
     }
 
+    @Test fun selectedNotesKeepTheirTagsAndOrderAcrossProjects() {
+        val older = notes.create(NewNote.code("github.com/org/repo", "A.kt", 1, 1, "older")).get()
+        val skipped = notes.create(NewNote.free("skipped")).get()
+        val newer = notes.create(NewNote.code("/Users/me/scratch", "B.kt", 2, 2, "newer")).get()
+        tags.replaceTags(older.id, listOf("b", "a")).get()
+        tags.replaceTags(skipped.id, listOf("only-skipped")).get()
+        tags.replaceTags(newer.id, listOf("c")).get()
+        val target = dir.resolve("out.json")
+
+        assertEquals(2, exporter.export(target, setOf(older.uid, newer.uid)) {})
+
+        assertEquals(
+            listOf(newer.uid to listOf("c"), older.uid to listOf("a", "b")),
+            decode(target).map { it.uid to it.tags },
+        )
+    }
+
+    @Test fun selectionLargerThanTheSqliteVariableLimitIsExported() {
+        val kept = notes.create(NewNote.free("kept")).get()
+        notes.create(NewNote.free("not selected")).get()
+        val selection = (1..40_000).mapTo(HashSet()) { "missing-$it" } + kept.uid
+        val target = dir.resolve("out.json")
+
+        assertEquals(1, exporter.export(target, selection) {})
+
+        assertEquals(listOf(kept.uid), decode(target).map { it.uid })
+    }
+
+    @Test fun emptySelectionExportsNothing() {
+        notes.create(NewNote.free("note")).get()
+        val target = dir.resolve("out.json")
+
+        assertEquals(0, exporter.export(target, emptySet()) {})
+
+        assertEquals(emptyList<FormatNote>(), decode(target))
+    }
+
     @Test fun selectedNoteDeletedAndItsIdReusedIsNotExported() {
         val selected = notes.create(NewNote.free("selected")).get()
         notes.delete(selected.id).get()
