@@ -7,7 +7,6 @@ import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.NoteStatus
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
@@ -155,22 +154,62 @@ class NoteCopyTest {
 
     @Test
     fun noBodyCanCloseItsFenceEarly() {
-        val bodies = listOf(
-            "```",
-            "`````\n```",
-            "   ````\ntext ``` inline",
-            "~~~\nnot closed",
-            "~~~~~\n```\n~~~",
-            "<!-- unclosed comment",
-            "<pre>\nunclosed",
-            "trailing newlines\n\n",
+        val blocks = listOf(
+            "```" to "````text\n```\n````",
+            "`````" to "``````text\n`````\n``````",
+            "`````\n```" to "``````text\n`````\n```\n``````",
+            "   ````\ntext ``` inline" to "`````text\n   ````\ntext ``` inline\n`````",
+            "~~~\nnot closed" to "```text\n~~~\nnot closed\n```",
+            "~~~~~\n```\n~~~" to "````text\n~~~~~\n```\n~~~\n````",
+            "<!-- unclosed comment" to "```text\n<!-- unclosed comment\n```",
+            "<pre>\nunclosed" to "```text\n<pre>\nunclosed\n```",
         )
-        for (body in bodies) {
-            val markdown = NoteCopy.markdown(listOf(FormatNote(uid = "u1", title = "a", body = body), FormatNote(uid = "u2", title = "b")))
-
-            val fence = markdown.removePrefix("## a\n\n").takeWhile { it == '`' }
-            assertTrue("fence for ${body}", fence.length >= 3 && fence !in body)
-            assertEquals("${fence}text\n${body.trimEnd('\n')}\n$fence\n\n## b", markdown.removePrefix("## a\n\n"))
+        for ((body, block) in blocks) {
+            assertEquals("body ${body}", "## a\n\n$block\n\n## b", markdownOf(body))
         }
     }
+
+    @Test
+    fun aBodyKeepsItsTrailingLineBreakAndOtherwiseGetsOneBeforeTheFence() {
+        val blocks = listOf(
+            "a" to "```text\na\n```",
+            "a\n" to "```text\na\n```",
+            "a\r\n" to "```text\na\r\n```",
+            "a\r" to "```text\na\r```",
+            "a\n\n" to "```text\na\n\n```",
+            "a\r\n\r\n" to "```text\na\r\n\r\n```",
+        )
+        for ((body, block) in blocks) {
+            assertEquals("body ${body.replace("\r", "\\r").replace("\n", "\\n")}", "## a\n\n$block\n\n## b", markdownOf(body))
+        }
+    }
+
+    @Test
+    fun anEmptyOrBlankBodyIsLeftOut() {
+        for (body in listOf("", " ", "\n", " \t\r\n ")) {
+            assertEquals("## a\n\n## b", markdownOf(body))
+        }
+    }
+
+    @Test
+    fun aTitleWithLineBreaksIsWrittenOnOneLine() {
+        for (title in listOf("x\n```", "x\r\n```", "x\r```")) {
+            val markdown = NoteCopy.markdown(listOf(FormatNote(uid = "u1", title = title), FormatNote(uid = "u2", title = "b", body = "after")))
+
+            assertEquals("## x ```\n\n## b\n\n```text\nafter\n```", markdown)
+        }
+    }
+
+    @Test
+    fun aPathWithLineBreaksIsWrittenOnOneLine() {
+        for (relPath in listOf("src/a\n```\nb.kt", "src/a\r\n```\r\nb.kt", "src/a\r```\rb.kt")) {
+            val code = FormatNote(uid = "u1", title = "a", anchor = FormatAnchor("p", relPath, 1, 2))
+            val markdown = NoteCopy.markdown(listOf(code, FormatNote(uid = "u2", title = "b")))
+
+            assertEquals("## a\n\n````src/a ``` b.kt:L1-2````\n\n## b", markdown)
+        }
+    }
+
+    private fun markdownOf(body: String): String =
+        NoteCopy.markdown(listOf(FormatNote(uid = "u1", title = "a", body = body), FormatNote(uid = "u2", title = "b")))
 }
