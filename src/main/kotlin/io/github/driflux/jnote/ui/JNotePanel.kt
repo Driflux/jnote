@@ -6,6 +6,9 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
@@ -32,6 +35,7 @@ import io.github.driflux.jnote.NoteSelectRequestedListener
 import io.github.driflux.jnote.NotesChangedListener
 import io.github.driflux.jnote.action.NoteSaver
 import io.github.driflux.jnote.action.RelocateNotesTask
+import io.github.driflux.jnote.anchor.AnchorLines
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.db.SearchRepository
@@ -111,6 +115,14 @@ class JNotePanel internal constructor(
             render()
         }
     }
+    internal val currentFileBox = JBCheckBox(JNoteBundle.message("toolWindow.currentFile")).apply {
+        // 이미 읽은 행에만 걸리므로 다시 읽지 않는다
+        addActionListener {
+            state = state.copy(currentFileOnly = isSelected, currentRelPath = currentRelPath())
+            render()
+        }
+    }
+    // 사전이 다시 읽힐 때마다 칩을 새로 만든다. 켜고 끄는 것은 이 줄이 아니라 state가 기억한다
     internal val tagBar = JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 2)).apply { isVisible = false }
     internal val searchField = SearchTextField(false).apply {
         textEditor.emptyText.text = JNoteBundle.message("toolWindow.search.placeholder")
@@ -160,10 +172,11 @@ class JNotePanel internal constructor(
         list.addListSelectionListener { if (!it.valueIsAdjusting && !renderingSelection) showDetailOf(list.selectedValue?.summary) }
         val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(2, 8)
-            add(JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            add(JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 0)).apply {
                 add(allProjectsBox)
+                add(currentFileBox)
                 add(filterCombo)
-            }, BorderLayout.WEST)
+            }, BorderLayout.CENTER)
             add(spinnerIcon, BorderLayout.EAST)
         }
         add(JBPanel<JBPanel<*>>(BorderLayout()).apply {
@@ -176,11 +189,29 @@ class JNotePanel internal constructor(
             firstComponent = JBScrollPane(list)
             secondComponent = detail
         }, BorderLayout.CENTER)
+        // 편집기에서 다른 파일로 옮기면 "현재 파일만" 보기를 따라 바꾼다. 켜 둔 동안에만 다시 그린다
+        project.messageBus.connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
+            override fun selectionChanged(event: FileEditorManagerEvent) = onEditorSelectionChanged()
+        })
+        // 구독을 먼저 걸어 첫 읽기 사이에 오는 알림을 놓치지 않는다
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(NotesChanged.TOPIC, NotesChangedListener { reload() })
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(NoteSelectRequested.TOPIC, NoteSelectRequestedListener { requested, noteId -> onSelectRequested(requested, noteId) })
         reload()
+    }
+
+    // 열린 파일의 경로는 문자열 계산뿐이라 EDT에서 해도 된다
+    private fun currentRelPath(): String? =
+        FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.let { AnchorLines.relativePath(project.basePath, it.path) }
+
+    private fun onEditorSelectionChanged() {
+        if (disposed || !state.currentFileOnly) return
+        val relPath = currentRelPath()
+        // 같은 파일에서 편집기만 바뀐 경우는 결과가 같으므로 다시 그리지 않는다(상세를 다시 읽게 된다)
+        if (relPath == state.currentRelPath) return
+        state = state.copy(currentRelPath = relPath)
+        render()
     }
 
     internal fun focusSearch() {
@@ -327,7 +358,10 @@ class JNotePanel internal constructor(
         val free = JNoteBundle.message("toolWindow.subtitle.free")
         val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free, loaded.noteTags[it.id].orEmpty()) }
         shownProjectKey = loaded.projectKey
-        state = state.copy(notes = rows, allProjects = allProjects, match = loaded.match ?: state.match).withTags(loaded.dictionary)
+        // 검색 없이 읽은 결과가 그 사이 도착한 검색 결과를 지우지 않게 한다
+        // 열어 둔 파일의 이름이 바뀌었을 수 있으므로 다시 읽을 때 경로도 새로 구한다
+        val relPath = if (state.currentFileOnly) currentRelPath() else state.currentRelPath
+        state = state.copy(notes = rows, allProjects = allProjects, match = loaded.match ?: state.match, currentRelPath = relPath).withTags(loaded.dictionary)
         rebuildTagBar()
         render()
     }
@@ -438,12 +472,20 @@ class JNotePanel internal constructor(
 
     private fun showEmptyText() {
         val text = list.emptyText
-        if (state.showEmptyState && state.tagFilterActive) {
+        // 태그 칩이 켜져 있으면 검색어보다 칩이 목록을 비운 것일 수 있으므로 칩 안내를 먼저 보인다
+        if (state.showEmptyState && state.currentFileOnly && state.currentRelPath == null) {
+            // 열린 파일이 없으면 다른 필터와 상관없이 이것이 목록을 비운 이유다
+            text.text = JNoteBundle.message("toolWindow.empty.currentFile.none.title")
+            text.appendLine(JNoteBundle.message("toolWindow.empty.currentFile.none.hint"))
+        } else if (state.showEmptyState && state.tagFilterActive) {
             text.text = JNoteBundle.message("toolWindow.empty.tags.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.tags.hint"))
         } else if (state.noSearchResults) {
             text.text = JNoteBundle.message("toolWindow.search.empty.title", state.query)
             text.appendLine(JNoteBundle.message(if (state.allProjects) "toolWindow.search.empty.hint.all" else "toolWindow.search.empty.hint"))
+        } else if (state.showEmptyState && state.currentFileOnly) {
+            text.text = JNoteBundle.message("toolWindow.empty.currentFile.title")
+            text.appendLine(JNoteBundle.message("toolWindow.empty.currentFile.hint"))
         } else if (state.showEmptyState) {
             text.text = JNoteBundle.message(state.filter.emptyTitleKey)
             text.appendLine(if (state.filter == NoteFilter.FREE) JNoteBundle.message("toolWindow.empty.free.hint") else emptyHint())

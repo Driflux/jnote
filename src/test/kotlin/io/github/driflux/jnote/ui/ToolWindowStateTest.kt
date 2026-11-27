@@ -145,4 +145,38 @@ class ToolWindowStateTest {
     fun matchesPresentWithoutRowsAreNotNoResultsBeforeTheFirstLoad() {
         assertFalse(ToolWindowState(query = "ab", match = SearchMatch("ab", emptySet())).showEmptyState)
     }
+
+    private fun codeIn(id: Long, project: String, relPath: String, current: String = "p") = NoteRows.of(
+        NoteSummary(id, "u$id", NoteKind.CODE, project, relPath, null, 1, 1, NoteStatus.OK, "t$id", null, 1),
+        current,
+        "free",
+    )
+
+    @Test
+    fun currentFileOnlyKeepsCodeNotesOfThisProjectInThatFile() {
+        val here = codeIn(10, "p", "src/A.kt")
+        val otherFile = codeIn(11, "p", "src/B.kt")
+        val otherProject = codeIn(12, "q", "src/A.kt")
+        val state = ToolWindowState(notes = listOf(row, here, otherFile, otherProject), currentFileOnly = true, currentRelPath = "src/A.kt")
+        assertEquals(listOf(10L), state.visibleNotes.map { it.summary.id })
+    }
+
+    @Test
+    fun currentFileOffIgnoresThePath() {
+        val state = ToolWindowState(notes = listOf(row, codeIn(10, "p", "src/A.kt")), currentFileOnly = false, currentRelPath = "src/Z.kt")
+        assertEquals(2, state.visibleNotes.size)
+    }
+
+    @Test
+    fun currentFileOnlyWithNoOpenFileMatchesNothingAndShowsTheEmptyState() {
+        val state = ToolWindowState(notes = listOf(row, codeIn(10, "p", "src/A.kt")), currentFileOnly = true, currentRelPath = null)
+        assertTrue(state.visibleNotes.isEmpty())
+        assertTrue(state.showEmptyState)
+    }
+
+    @Test
+    fun currentFileCombinesWithTheKindFilter() {
+        val state = ToolWindowState(notes = listOf(codeIn(10, "p", "src/A.kt")), filter = NoteFilter.FREE, currentFileOnly = true, currentRelPath = "src/A.kt")
+        assertTrue(state.visibleNotes.isEmpty())
+    }
 }
