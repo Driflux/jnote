@@ -29,6 +29,14 @@ The only new always-on cost is a mouse listener per editor (intent.md section 2)
 - **Known gap.** Turning off the "JNote notes" gutter icon option stops the daemon from calling the provider, so existing bars stay until the file is closed; they are registered in the document markup directly and not through marker infos. Fixing it needs a settings change hook, which is startup-adjacent work, so it is tracked as a separate issue.
 - **Painting.** The bar is a 2 px rounded rectangle right of the line number column; the gutter column offsets differ per editor and UI, so they are read at paint time.
 
+## Hover preview (PR 3)
+- **Trigger.** The same per-editor listener also watches the note column of the gutter (right of the line numbers, up to the end of the icon column), where the note icon and the range bar are. A line inside the range of a note (OK or APPROX) in that column starts a preview. `GutterPreviewController` waits 400 ms after the mouse settles on a line, then shows the preview. It only acts when the line changes, so events on the same line cost one comparison. A preview that is open when the mouse moves away closes 300 ms later, which lets the mouse cross from the gutter into the preview; entering the preview cancels the close, leaving it schedules it again. Coming back to the line of the open preview keeps it. Pressing the "+" for a drag hides it.
+- **Data.** `GutterNoteService.notesCovering` reads the per-file cache (a hash lookup) and the RangeMarker-tracked lines (`NotePositions.sync`, a short lock and a loop over the notes of that file) and returns the notes covering the line, up to three cards are shown and the rest are counted. `CachedNote` already holds title, body, tags, AI source and the first snippet lines, so no DB or file read happens on the EDT. A file the cache has not loaded yet gives no preview and starts its load off the EDT, as for icons.
+- **Content.** Each card shows the title, an AI badge when the note has an AI source, the tags, the body (cut at 8 lines or 500 characters, plain text in a read-only text area), the first snippet lines in a monospaced read-only area, and Edit, Open in Tool Window and Delete links. Labels set `html.disable` because note titles and tags can arrive from an AI import and a title starting with `<html>` must not be rendered as HTML.
+- **Popup.** A non-focusable `JBPopup` (no focus steal, cancels on click outside and on window deactivation) shown at the right edge of the gutter at the height of the hovered line.
+- **Actions.** `GutterNoteActions` follows the Tool Window panel: Open calls `NoteSelection.request`; Edit reads the note and its tags on the DB thread, asks with the existing dialog on the EDT and saves through `NoteSaver.update`; Delete uses `NoteDeletion` and the same undo notification. The Tool Window panel keeps its own copy of these steps, so the panel is not touched in this PR.
+- **Timing.** The delay uses the existing `AppDelayScheduler` (a scheduled executor task that hops to the EDT), so no thread waits and no Swing timer runs per editor.
+
 ## Alternatives considered
 - `EditorFactoryListener` registered in `plugin.xml`: attaches in every editor at creation, which is startup work and is what ADR 0009 rejected. Rejected.
 - Attaching from the marker pass only for files that have notes: the "+" would not appear where a first note is added. Rejected.
@@ -39,6 +47,9 @@ The only new always-on cost is a mouse listener per editor (intent.md section 2)
 - Range bars from the `LineMarkerInfo` pass: the daemon builds the highlighters from the infos and offers no hook for a line marker renderer. Rejected for `RangeBars`.
 - One bar highlighter per editor: it multiplies the work per split. The document markup model is shared. Rejected.
 - Background color over the range in the editor: excluded by intent.md section 7. Rejected.
+- Moving the Tool Window's edit and delete steps into a shared class: it touches the panel and its tests in a feature PR. Rejected; the gutter has its own small copy.
+- A preview that closes the moment the mouse leaves the gutter: the actions could not be reached. Rejected for the short close delay.
+- Reading the note again from the DB when the preview opens: it would make the popup wait on the DB thread and the issue requires the cache only. Rejected.
 - Moving the "+" while dragging: the click and the drag start would then refer to different lines. Rejected.
 
 ## Consequences
@@ -51,5 +62,4 @@ The only new always-on cost is a mouse listener per editor (intent.md section 2)
   - `getIconAreaOffset`, `getIconsAreaWidth` and `getGutterRenderer(Point)` are public platform API, but the layout they describe differs between the classic and the new UI. The gutter geometry could not be checked in a headless test, so it is covered by the `runIde` check in the PR.
   - A drag selects text in the editor, and the selection stays after the dialog closes.
 - Follow-up work
-  - PR 3 adds the hover preview to this ADR.
   - The bar's x position (right of the line numbers) was chosen from the measured 2024.2 gutter layout and needs an eye check in the classic and New UI.
