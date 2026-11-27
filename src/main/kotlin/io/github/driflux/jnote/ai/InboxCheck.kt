@@ -1,6 +1,7 @@
 package io.github.driflux.jnote.ai
 
 import com.intellij.notification.Notification
+import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
@@ -113,6 +114,11 @@ class InboxCheck internal constructor(
                     JNoteBundle.message("notification.inbox.waiting.title"),
                     JNoteBundle.message("notification.inbox.waiting.content", files.size),
                     NotificationType.INFORMATION,
+                )
+                .addAction(
+                    NotificationAction.createSimpleExpiring(JNoteBundle.message("notification.inbox.review")) {
+                        InboxReview().review(project, files)
+                    },
                 )
                 .also { it.notify(project) }
     }

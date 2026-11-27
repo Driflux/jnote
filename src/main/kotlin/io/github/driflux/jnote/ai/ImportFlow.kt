@@ -26,9 +26,23 @@ class ImportFlow(
         ApplicationManager.getApplication().messageBus.syncPublisher(NotesChanged.TOPIC).notesChanged()
     },
 ) {
-    /** [onApplied]는 반영을 마쳤거나 반영할 것이 없을 때 EDT에서 한 번 불린다. 취소, 실패, 거절 때는 불리지 않는다. */
-    fun start(sources: List<ImportSource>, onApplied: (ImportResult) -> Unit = {}) {
-        PlanTask(onApplied, null) { checkCanceled -> ImportPreparation.prepare(sources, checkCanceled) }.queue()
+    /**
+     * [onFinished]는 흐름이 끝날 때 EDT에서 정확히 한 번 불린다. 반영했거나 반영할 것이 없으면 [ImportOutcome.Finished],
+     * 거절·취소·실패·프로젝트 닫힘이면 [ImportOutcome.NotApplied]다.
+     */
+    fun start(sources: List<ImportSource>, onFinished: (ImportOutcome) -> Unit = {}) {
+        PlanTask(Finish(onFinished), null) { checkCanceled -> ImportPreparation.prepare(sources, checkCanceled) }.queue()
+    }
+
+    /** 끝 알림을 한 번만 보내도록 감싼다. EDT에서만 부른다. */
+    private class Finish(private val callback: (ImportOutcome) -> Unit) {
+        private var done = false
+
+        operator fun invoke(outcome: ImportOutcome) {
+            if (done) return
+            done = true
+            callback(outcome)
+        }
     }
 
     /**
@@ -36,7 +50,7 @@ class ImportFlow(
      * 다른 DB에 쓰지 않고 닫힌 DB 오류로 끝난다.
      */
     private inner class PlanTask(
-        private val onApplied: (ImportResult) -> Unit,
+        private val finish: Finish,
         private val bound: NoteImporter?,
         private val prepare: (checkCanceled: () -> Unit) -> PreparedImport,
     ) : Task.Backgroundable(project, JNoteBundle.message("task.import.reading"), true) {
@@ -59,33 +73,51 @@ class ImportFlow(
         }
 
         override fun onSuccess() {
-            if (project.isDisposed) return
-            val ready = prepared ?: return
-            val planned = plan ?: return
-            val chosen = target ?: return
+            val ready = prepared
+            val planned = plan
+            val chosen = target
+            if (project.isDisposed || ready == null || planned == null || chosen == null) return finish(ImportOutcome.NotApplied)
+            try {
+                decide(ready, planned, chosen)
+            } catch (e: Throwable) {
+                // 미리보기나 다음 작업 시작이 실패해도 원본(inbox 파일 등)이 정리되도록 끝을 알린다. 아직 쓴 것은 없다
+                finish(ImportOutcome.NotApplied)
+                throw e
+            }
+        }
+
+        private fun decide(ready: PreparedImport, planned: ImportPlan, chosen: NoteImporter) {
             when {
-                planned.creates.isEmpty() && planned.updates.isEmpty() && ready.notes.isEmpty() && ready.problems.isNotEmpty() ->
+                planned.creates.isEmpty() && planned.updates.isEmpty() && ready.notes.isEmpty() && ready.problems.isNotEmpty() -> {
                     notify("notification.import.failed.title", ImportMessages.problemList(ready.problems), NotificationType.ERROR)
+                    finish(ImportOutcome.NotApplied)
+                }
                 planned.creates.isEmpty() && planned.updates.isEmpty() -> {
                     notify(
                         "notification.import.nothing.title",
                         join(JNoteBundle.message("notification.import.nothing.content"), ImportMessages.problemList(ready.problems)),
                         if (ready.problems.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
                     )
-                    onApplied(ImportResult(0, 0, planned.unchanged.size))
+                    finish(ImportOutcome.Finished(ImportResult(0, 0, planned.unchanged.size), ready.decodedSources))
                 }
-                askApproval(project, planned, ready.problems) && !project.isDisposed -> ApplyTask(chosen, planned, ready, onApplied).queue()
+                askApproval(project, planned, ready.problems) && !project.isDisposed -> ApplyTask(chosen, planned, ready, finish).queue()
+                else -> finish(ImportOutcome.NotApplied)
             }
         }
 
-        override fun onThrowable(error: Throwable) = failed(error)
+        override fun onCancel() = finish(ImportOutcome.NotApplied)
+
+        override fun onThrowable(error: Throwable) {
+            failed(error)
+            finish(ImportOutcome.NotApplied)
+        }
     }
 
     private inner class ApplyTask(
         private val target: NoteImporter,
         private val plan: ImportPlan,
         private val prepared: PreparedImport,
-        private val onApplied: (ImportResult) -> Unit,
+        private val finish: Finish,
     ) : Task.Backgroundable(project, JNoteBundle.message("task.import.applying"), true) {
         @Volatile
         private var result: ImportResult? = null
@@ -101,29 +133,40 @@ class ImportFlow(
             }
         }
 
+        // 마지막 취소 확인 뒤 커밋까지 간 경우 플랫폼은 onCancel을 부르지만 DB에는 이미 반영되었다
+        override fun onCancel() = if (result != null || outdated) onSuccess() else finish(ImportOutcome.NotApplied)
+
         override fun onSuccess() {
             if (outdated) {
                 // 쓴 것이 없으므로 같은 노트, 같은 DB로 다시 계획해 새 미리보기를 보여 준다
-                if (!project.isDisposed) PlanTask(onApplied, target) { prepared }.queue()
+                if (project.isDisposed) finish(ImportOutcome.NotApplied) else PlanTask(finish, target) { prepared }.queue()
                 return
             }
-            val done = result ?: return
-            // 커밋은 끝났으므로 다른 창도 새로 읽도록 프로젝트가 닫혔어도 알린다. 이 프로젝트의 후속 처리만 건너뛴다
-            publish()
-            if (project.isDisposed) return
-            val content = join(
-                JNoteBundle.message("notification.import.done.content", done.created, done.updated, done.unchanged),
-                ImportMessages.problemList(prepared.problems),
-            )
-            notify(
-                "notification.import.done.title",
-                content,
-                if (prepared.problems.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
-            )
-            onApplied(done)
+            val done = result ?: return finish(ImportOutcome.NotApplied)
+            // 커밋은 끝났으므로 발행이나 알림이 실패해도, 프로젝트가 닫혔어도 반영된 것으로 끝낸다
+            try {
+                // 다른 창도 새로 읽도록 프로젝트가 닫혔어도 알린다
+                publish()
+                if (!project.isDisposed) {
+                    val content = join(
+                        JNoteBundle.message("notification.import.done.content", done.created, done.updated, done.unchanged),
+                        ImportMessages.problemList(prepared.problems),
+                    )
+                    notify(
+                        "notification.import.done.title",
+                        content,
+                        if (prepared.problems.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
+                    )
+                }
+            } finally {
+                finish(ImportOutcome.Finished(done, prepared.decodedSources))
+            }
         }
 
-        override fun onThrowable(error: Throwable) = failed(error)
+        override fun onThrowable(error: Throwable) {
+            failed(error)
+            finish(ImportOutcome.NotApplied)
+        }
     }
 
     // DB 스레드에서 난 취소와 예외를 작업 스레드의 것으로 되돌린다
