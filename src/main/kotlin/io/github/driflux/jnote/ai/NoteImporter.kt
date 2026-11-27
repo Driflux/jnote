@@ -1,0 +1,198 @@
+package io.github.driflux.jnote.ai
+
+import io.github.driflux.jnote.db.COLUMNS
+import io.github.driflux.jnote.db.Database
+import io.github.driflux.jnote.db.toNote
+import io.github.driflux.jnote.model.Note
+import io.github.driflux.jnote.model.NoteKind
+import io.github.driflux.jnote.model.NoteStatus
+import java.sql.Connection
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+
+/** 미리보기에 보여 줄 한 항목. 실제 반영은 [NoteImporter.apply]가 그 시점의 DB를 기준으로 다시 판단한다. */
+sealed interface PlannedItem {
+    val note: FormatNote
+
+    data class Create(override val note: FormatNote) : PlannedItem
+
+    /** [emptiedBody], [emptiedTags]는 값이 있던 본문이나 태그가 이 항목 때문에 비워진다는 뜻이다. */
+    data class Update(override val note: FormatNote, val existing: Note, val emptiedBody: Boolean, val emptiedTags: Boolean) : PlannedItem
+
+    /** uid가 같은 노트와 모든 필드가 같아 쓰지 않는다. */
+    data class Unchanged(override val note: FormatNote, val existing: Note) : PlannedItem
+}
+
+data class ImportPlan(val items: List<PlannedItem>) {
+    val creates: List<PlannedItem.Create> get() = items.filterIsInstance<PlannedItem.Create>()
+    val updates: List<PlannedItem.Update> get() = items.filterIsInstance<PlannedItem.Update>()
+    val unchanged: List<PlannedItem.Unchanged> get() = items.filterIsInstance<PlannedItem.Unchanged>()
+}
+
+data class ImportResult(val created: Int, val updated: Int, val unchanged: Int)
+
+/**
+ * uid 기준 업서트. 항목은 노트의 새 상태 전체라서 빠진 필드는 비워지고, 가져오기는 노트를 지우지 않는다.
+ * 모든 접근은 DB 스레드에서 하므로 EDT에서 불러도 막히지 않는다.
+ */
+class NoteImporter(
+    private val database: Database,
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
+    fun plan(notes: List<FormatNote>): CompletableFuture<ImportPlan> = database.submit { c ->
+        ImportPlan(notes.map { note -> classify(c, note) })
+    }
+
+    /**
+     * 한 쓰기 트랜잭션(BEGIN IMMEDIATE)에서 항목마다 그 순간의 uid로 다시 판단해 쓴다. 미리보기 뒤에 다른 IDE가 노트를
+     * 지우거나 만들었어도 업서트 규칙대로 반영된다. [checkCanceled]가 던지면 아무것도 쓰지 않은 채 되돌린다.
+     */
+    fun apply(notes: List<FormatNote>, checkCanceled: () -> Unit = {}): CompletableFuture<ImportResult> = database.submit { c ->
+        c.createStatement().use { it.execute("BEGIN IMMEDIATE") }
+        try {
+            var created = 0
+            var updated = 0
+            var unchanged = 0
+            val now = clock()
+            for (note in notes) {
+                checkCanceled()
+                when (val item = classify(c, note)) {
+                    is PlannedItem.Create -> {
+                        insert(c, note, now)
+                        created++
+                    }
+                    is PlannedItem.Update -> {
+                        update(c, note, item.existing, now)
+                        updated++
+                    }
+                    is PlannedItem.Unchanged -> unchanged++
+                }
+            }
+            c.createStatement().use { it.execute("COMMIT") }
+            ImportResult(created, updated, unchanged)
+        } catch (e: Throwable) {
+            runCatching { c.createStatement().use { it.execute("ROLLBACK") } }.exceptionOrNull()?.let(e::addSuppressed)
+            throw e
+        }
+    }
+
+    private fun classify(c: Connection, note: FormatNote): PlannedItem {
+        val existing = note.uid?.let { findByUid(c, it) } ?: return PlannedItem.Create(note)
+        val existingTags = tagNames(c, existing.id)
+        if (sameContent(existing, existingTags, note)) return PlannedItem.Unchanged(note, existing)
+        return PlannedItem.Update(
+            note = note,
+            existing = existing,
+            emptiedBody = existing.body.isNotEmpty() && note.body.isEmpty(),
+            emptiedTags = existingTags.isNotEmpty() && note.tags.isEmpty(),
+        )
+    }
+
+    private fun sameContent(existing: Note, existingTags: Set<String>, note: FormatNote): Boolean {
+        val anchor = note.anchor
+        return existing.kind == note.kind &&
+            existing.title == note.title &&
+            existing.body == note.body &&
+            existingTags == note.tags.toSet() &&
+            existing.aiSource == note.aiSource &&
+            existing.sourceUrl == note.sourceUrl &&
+            existing.prompt == note.prompt &&
+            existing.project == anchor?.project &&
+            existing.relPath == anchor?.relPath &&
+            existing.startLine == anchor?.startLine &&
+            existing.endLine == anchor?.endLine &&
+            existing.className == anchor?.className &&
+            existing.snapshot == anchor?.snapshot
+    }
+
+    private fun insert(c: Connection, note: FormatNote, now: Long) {
+        val anchor = note.anchor
+        val id = c.prepareStatement(
+            "INSERT INTO note (uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, status, title, body, " +
+                "ai_source, source_url, prompt, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ).use { s ->
+            var i = 1
+            s.setString(i++, note.uid ?: UUID.randomUUID().toString())
+            s.setString(i++, note.kind.name)
+            s.setString(i++, anchor?.project)
+            s.setString(i++, anchor?.relPath)
+            s.setString(i++, anchor?.className)
+            s.setObject(i++, anchor?.startLine)
+            s.setObject(i++, anchor?.endLine)
+            s.setString(i++, anchor?.snapshot)
+            s.setString(i++, NoteStatus.OK.name)
+            s.setString(i++, note.title)
+            s.setString(i++, note.body)
+            s.setString(i++, note.aiSource)
+            s.setString(i++, note.sourceUrl)
+            s.setString(i++, note.prompt)
+            s.setLong(i++, now)
+            s.setLong(i, now)
+            s.executeUpdate()
+            c.prepareStatement("SELECT last_insert_rowid()").use { q -> q.executeQuery().use { it.next(); it.getLong(1) } }
+        }
+        replaceTags(c, id, note.tags)
+    }
+
+    private fun update(c: Connection, note: FormatNote, existing: Note, now: Long) {
+        val anchor = note.anchor
+        // 위치가 그대로면 재배치가 정한 상태(APPROX 등)를 지키고, 위치가 바뀌었으면 새로 받은 위치를 믿는다
+        val sameLocation = existing.project == anchor?.project && existing.relPath == anchor?.relPath &&
+            existing.startLine == anchor?.startLine && existing.endLine == anchor?.endLine
+        val status = if (note.kind == NoteKind.CODE && sameLocation) existing.status else NoteStatus.OK
+        c.prepareStatement(
+            "UPDATE note SET kind=?, project=?, rel_path=?, class_name=?, start_line=?, end_line=?, snapshot=?, status=?, " +
+                "title=?, body=?, ai_source=?, source_url=?, prompt=?, updated_at=? WHERE id=?",
+        ).use { s ->
+            var i = 1
+            s.setString(i++, note.kind.name)
+            s.setString(i++, anchor?.project)
+            s.setString(i++, anchor?.relPath)
+            s.setString(i++, anchor?.className)
+            s.setObject(i++, anchor?.startLine)
+            s.setObject(i++, anchor?.endLine)
+            s.setString(i++, anchor?.snapshot)
+            s.setString(i++, status.name)
+            s.setString(i++, note.title)
+            s.setString(i++, note.body)
+            s.setString(i++, note.aiSource)
+            s.setString(i++, note.sourceUrl)
+            s.setString(i++, note.prompt)
+            s.setLong(i++, now)
+            s.setLong(i, existing.id)
+            s.executeUpdate()
+        }
+        replaceTags(c, existing.id, note.tags)
+    }
+
+    private fun replaceTags(c: Connection, noteId: Long, names: List<String>) {
+        c.prepareStatement("DELETE FROM note_tag WHERE note_id = ?").use { s ->
+            s.setLong(1, noteId)
+            s.executeUpdate()
+        }
+        for (name in names) {
+            // 사전에 없는 태그는 등록한다
+            c.prepareStatement("INSERT OR IGNORE INTO tag (name) VALUES (?)").use { s ->
+                s.setString(1, name)
+                s.executeUpdate()
+            }
+            c.prepareStatement("INSERT OR IGNORE INTO note_tag (note_id, tag_id) SELECT ?, id FROM tag WHERE name = ?").use { s ->
+                s.setLong(1, noteId)
+                s.setString(2, name)
+                s.executeUpdate()
+            }
+        }
+    }
+
+    private fun findByUid(c: Connection, uid: String): Note? =
+        c.prepareStatement("SELECT $COLUMNS FROM note WHERE uid = ?").use { s ->
+            s.setString(1, uid)
+            s.executeQuery().use { if (it.next()) it.toNote() else null }
+        }
+
+    private fun tagNames(c: Connection, noteId: Long): Set<String> =
+        c.prepareStatement("SELECT t.name FROM note_tag nt JOIN tag t ON t.id = nt.tag_id WHERE nt.note_id = ?").use { s ->
+            s.setLong(1, noteId)
+            s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getString(1) else null }.toSet() }
+        }
+}
