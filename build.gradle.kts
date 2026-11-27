@@ -30,6 +30,16 @@ tasks.processResources {
     from("docs/ai-format.md") { into("ai") }
 }
 
+tasks.register("syncSkillSpec") {
+    val source = layout.projectDirectory.file("docs/ai-format.md").asFile
+    val target = layout.projectDirectory.file("claude-plugin/skills/jnote/ai-format.md").asFile
+    inputs.file(source)
+    outputs.file(target)
+    doLast {
+        target.writeText("<!-- Copy of docs/ai-format.md. Do not edit; change the original and run ./gradlew syncSkillSpec. -->\n" + source.readText())
+    }
+}
+
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
