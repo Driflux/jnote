@@ -11,7 +11,6 @@ import io.github.driflux.jnote.JNoteBundle
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** 파일은 EDT에서 고르고, 읽기는 [ImportFlow]가 백그라운드에서 한다. 인자는 테스트에서 대화상자와 흐름을 바꿔 끼우기 위한 것이다. */
 class ImportFromFileAction(
     private val askFile: (Project) -> Path? = ::askFile,
     private val start: (Project, List<ImportSource>) -> Unit = { project, sources -> ImportFlow(project).start(sources) },

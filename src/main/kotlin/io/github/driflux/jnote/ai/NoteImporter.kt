@@ -34,12 +34,12 @@ class NoteImporter(
     private val database: Database,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    fun plan(notes: List<FormatNote>): CompletableFuture<ImportPlan> = database.submit { c ->
+    fun plan(notes: List<FormatNote>, checkCanceled: () -> Unit = {}): CompletableFuture<ImportPlan> = database.submit { c ->
         c.autoCommit = false
         try {
             val repeated = notes.mapNotNull { it.uid }.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
             val (skipped, kept) = notes.partition { it.uid in repeated }
-            ImportPlan(kept.map { note -> classify(c, note) }, skipped).also { c.commit() }
+            ImportPlan(kept.map { note -> checkCanceled(); classify(c, note) }, skipped).also { c.commit() }
         } catch (e: Throwable) {
             c.rollback()
             throw e
@@ -64,7 +64,7 @@ class NoteImporter(
                         created++
                     }
                     is PlannedItem.Update -> {
-                        if (item.emptiesMoreThan(planned)) throw PlanOutdatedException()
+                        if (planned is PlannedItem.Unchanged || item.emptiesMoreThan(planned)) throw PlanOutdatedException()
                         update(c, note, item.existing, now)
                         updated++
                     }

@@ -11,7 +11,6 @@ import java.awt.BorderLayout
 import javax.swing.JComponent
 import javax.swing.JPanel
 
-/** 가져올 노트를 보여 주고 적용 여부를 묻는다. 내용 문장은 [ImportMessages]가 만든다. EDT에서 부른다. */
 internal class ImportPreviewDialog(project: Project, private val plan: ImportPlan, private val skipped: Int) : DialogWrapper(project) {
     init {
         title = JNoteBundle.message("dialog.importPreview.title")

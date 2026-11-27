@@ -13,11 +13,6 @@ import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.settings.DbPathNotifier
 import java.util.concurrent.ExecutionException
 
-/**
- * 읽기·해석·계획(백그라운드) → 미리보기(EDT) → 반영(백그라운드) 순서로 가져온다. 두 백그라운드 작업 모두 취소할 수 있다.
- * 미리보기 뒤 DB가 바뀌어 반영이 [PlanOutdatedException]으로 끝나면 다시 계획해 미리보기를 보여 준다.
- * 인자는 테스트에서 DB, 대화상자, 알림 발행을 바꿔 끼우기 위한 것이다.
- */
 class ImportFlow(
     private val project: Project,
     private val importer: () -> NoteImporter = { NoteImporter(DatabaseService.getInstance().database) },
@@ -26,15 +21,10 @@ class ImportFlow(
         ApplicationManager.getApplication().messageBus.syncPublisher(NotesChanged.TOPIC).notesChanged()
     },
 ) {
-    /** [onApplied]는 반영을 마쳤거나 반영할 것이 없을 때 EDT에서 한 번 불린다. 취소, 실패, 거절 때는 불리지 않는다. */
     fun start(sources: List<ImportSource>, onApplied: (ImportResult) -> Unit = {}) {
         PlanTask(onApplied, null) { checkCanceled -> ImportPreparation.prepare(sources, checkCanceled) }.queue()
     }
 
-    /**
-     * [bound]가 null이면 지금의 DB를 잡는다. 미리보기와 반영은 같은 [NoteImporter]를 써서, 그 사이 DB 경로가 바뀌면
-     * 다른 DB에 쓰지 않고 닫힌 DB 오류로 끝난다.
-     */
     private inner class PlanTask(
         private val onApplied: (ImportResult) -> Unit,
         private val bound: NoteImporter?,
@@ -53,7 +43,7 @@ class ImportFlow(
             val ready = prepare { indicator.checkCanceled() }
             indicator.checkCanceled()
             val chosen = bound ?: importer()
-            plan = if (ready.notes.isEmpty()) ImportPlan(emptyList()) else unwrap { chosen.plan(ready.notes).get() }
+            plan = if (ready.notes.isEmpty()) ImportPlan(emptyList()) else unwrap { chosen.plan(ready.notes) { indicator.checkCanceled() }.get() }
             target = chosen
             prepared = ready
         }
@@ -103,12 +93,10 @@ class ImportFlow(
 
         override fun onSuccess() {
             if (outdated) {
-                // 쓴 것이 없으므로 같은 노트, 같은 DB로 다시 계획해 새 미리보기를 보여 준다
                 if (!project.isDisposed) PlanTask(onApplied, target) { prepared }.queue()
                 return
             }
             val done = result ?: return
-            // 커밋은 끝났으므로 다른 창도 새로 읽도록 프로젝트가 닫혔어도 알린다. 이 프로젝트의 후속 처리만 건너뛴다
             publish()
             if (project.isDisposed) return
             val content = join(
@@ -126,7 +114,6 @@ class ImportFlow(
         override fun onThrowable(error: Throwable) = failed(error)
     }
 
-    // DB 스레드에서 난 취소와 예외를 작업 스레드의 것으로 되돌린다
     private fun <T> unwrap(block: () -> T): T = try {
         block()
     } catch (e: ExecutionException) {

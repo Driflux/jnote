@@ -117,7 +117,6 @@ class ImportFlowTest : BasePlatformTestCase() {
 
         run(
             flow {
-                // 첫 미리보기를 보는 사이 다른 IDE가 본문을 쓴다
                 if (answers.incrementAndGet() == 1) repo.update(note.copy(body = "meanwhile")).get()
                 true
             },
@@ -139,7 +138,6 @@ class ImportFlowTest : BasePlatformTestCase() {
                 importer = { NoteImporter(current) },
                 askApproval = { _, plan, _ ->
                     asked += plan
-                    // 미리보기를 보는 사이 DB 경로가 바뀌었다
                     current = second
                     true
                 },

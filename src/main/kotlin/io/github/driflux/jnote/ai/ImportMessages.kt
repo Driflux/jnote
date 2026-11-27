@@ -2,14 +2,12 @@ package io.github.driflux.jnote.ai
 
 import io.github.driflux.jnote.JNoteBundle
 
-/** 미리보기와 알림에 쓰는 문장. 번들 문자열로만 만든다. */
 internal object ImportMessages {
     private const val MAX_PROBLEMS = 10
 
     fun summary(plan: ImportPlan, skipped: Int): String =
         JNoteBundle.message("dialog.importPreview.summary", plan.creates.size, plan.updates.size, plan.unchanged.size, skipped)
 
-    /** 바뀌는 노트만 보여 준다. 새 노트 먼저, 그다음 업데이트. */
     fun rows(plan: ImportPlan): List<String> =
         plan.creates.map { JNoteBundle.message("dialog.importPreview.row.new", it.note.title) } +
             plan.updates.map { update ->
@@ -37,7 +35,6 @@ internal object ImportMessages {
         is ImportProblem.DuplicateAcrossDocuments -> JNoteBundle.message("import.problem.sharedUid", problem.uid, problem.document)
     }
 
-    /** 알림에 붙일 문제 목록. 길면 앞의 몇 개만 보이고 나머지는 수로 줄인다. 알림 내용은 HTML이므로 이스케이프한다. */
     fun problemList(problems: List<ImportProblem>): String {
         if (problems.isEmpty()) return ""
         val shown = problems.take(MAX_PROBLEMS).map { escape(describe(it)) }
