@@ -1,6 +1,8 @@
 package io.github.driflux.jnote.ai
 
+import com.intellij.openapi.progress.ProcessCanceledException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
 import org.junit.Test
 import java.io.IOException
 
@@ -26,6 +28,48 @@ class ImportPreparationTest {
             ),
             prepared.problems,
         )
+    }
+
+    @Test fun documentsWithTheSameNameAreStillDistinct() {
+        val prepared = ImportPreparation.prepare(
+            listOf(
+                ImportSource("same.json") { doc("""{"uid":"x","kind":"FREE","title":"first"}""") },
+                ImportSource("same.json") { doc("""{"uid":"x","kind":"FREE","title":"second"}""") },
+            ),
+        )
+
+        assertEquals(emptyList<FormatNote>(), prepared.notes)
+        assertEquals(listOf(ImportProblem.DuplicateAcrossDocuments("same.json, same.json", "x")), prepared.problems.filterIsInstance<ImportProblem.DuplicateAcrossDocuments>())
+    }
+
+    @Test fun skippedCopiesCountAcrossDocuments() {
+        val prepared = ImportPreparation.prepare(
+            listOf(
+                ImportSource("a.json") { doc("""{"uid":"x","kind":"FREE"}""", """{"uid":"y","kind":"FREE","title":"1"}""", """{"uid":"y","kind":"FREE","title":"2"}""") },
+                ImportSource("b.json") { doc("""{"uid":"x","kind":"FREE","title":"valid x"}""", """{"uid":"y","kind":"FREE","title":"valid y"}""") },
+            ),
+        )
+
+        assertEquals(emptyList<FormatNote>(), prepared.notes)
+    }
+
+    @Test fun cancellationIsNotAReadError() {
+        var reads = 0
+        try {
+            ImportPreparation.prepare(
+                listOf(ImportSource("a.json") { reads++; throw ProcessCanceledException() }, ImportSource("b.json") { reads++; "" }),
+            )
+            fail("expected cancellation")
+        } catch (_: ProcessCanceledException) {
+        }
+        assertEquals(1, reads)
+
+        try {
+            ImportPreparation.prepare(listOf(ImportSource("a.json") { reads++; "" })) { throw ProcessCanceledException() }
+            fail("expected cancellation")
+        } catch (_: ProcessCanceledException) {
+        }
+        assertEquals("cancel is checked before reading", 1, reads)
     }
 
     @Test fun sameUidInTwoDocumentsSkipsBoth() {

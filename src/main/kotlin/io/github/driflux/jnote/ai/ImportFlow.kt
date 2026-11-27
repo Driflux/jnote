@@ -28,12 +28,17 @@ class ImportFlow(
 ) {
     /** [onApplied]는 반영을 마쳤거나 반영할 것이 없을 때 EDT에서 한 번 불린다. 취소, 실패, 거절 때는 불리지 않는다. */
     fun start(sources: List<ImportSource>, onApplied: (ImportResult) -> Unit = {}) {
-        PlanTask(onApplied) { ImportPreparation.prepare(sources) }.queue()
+        PlanTask(onApplied, null) { checkCanceled -> ImportPreparation.prepare(sources, checkCanceled) }.queue()
     }
 
+    /**
+     * [bound]가 null이면 지금의 DB를 잡는다. 미리보기와 반영은 같은 [NoteImporter]를 써서, 그 사이 DB 경로가 바뀌면
+     * 다른 DB에 쓰지 않고 닫힌 DB 오류로 끝난다.
+     */
     private inner class PlanTask(
         private val onApplied: (ImportResult) -> Unit,
-        private val prepare: () -> PreparedImport,
+        private val bound: NoteImporter?,
+        private val prepare: (checkCanceled: () -> Unit) -> PreparedImport,
     ) : Task.Backgroundable(project, JNoteBundle.message("task.import.reading"), true) {
         @Volatile
         private var prepared: PreparedImport? = null
@@ -41,16 +46,23 @@ class ImportFlow(
         @Volatile
         private var plan: ImportPlan? = null
 
+        @Volatile
+        private var target: NoteImporter? = null
+
         override fun run(indicator: ProgressIndicator) {
-            val ready = prepare()
+            val ready = prepare { indicator.checkCanceled() }
             indicator.checkCanceled()
+            val chosen = bound ?: importer()
+            plan = if (ready.notes.isEmpty()) ImportPlan(emptyList()) else unwrap { chosen.plan(ready.notes).get() }
+            target = chosen
             prepared = ready
-            plan = if (ready.notes.isEmpty()) ImportPlan(emptyList()) else unwrap { importer().plan(ready.notes).get() }
         }
 
         override fun onSuccess() {
+            if (project.isDisposed) return
             val ready = prepared ?: return
             val planned = plan ?: return
+            val chosen = target ?: return
             when {
                 planned.creates.isEmpty() && planned.updates.isEmpty() && ready.notes.isEmpty() && ready.problems.isNotEmpty() ->
                     notify("notification.import.failed.title", ImportMessages.problemList(ready.problems), NotificationType.ERROR)
@@ -62,8 +74,7 @@ class ImportFlow(
                     )
                     onApplied(ImportResult(0, 0, planned.unchanged.size))
                 }
-                project.isDisposed -> Unit
-                askApproval(project, planned, ready.problems) -> ApplyTask(planned, ready, onApplied).queue()
+                askApproval(project, planned, ready.problems) && !project.isDisposed -> ApplyTask(chosen, planned, ready, onApplied).queue()
             }
         }
 
@@ -71,6 +82,7 @@ class ImportFlow(
     }
 
     private inner class ApplyTask(
+        private val target: NoteImporter,
         private val plan: ImportPlan,
         private val prepared: PreparedImport,
         private val onApplied: (ImportResult) -> Unit,
@@ -83,7 +95,7 @@ class ImportFlow(
 
         override fun run(indicator: ProgressIndicator) {
             try {
-                result = unwrap { importer().apply(plan) { indicator.checkCanceled() }.get() }
+                result = unwrap { target.apply(plan) { indicator.checkCanceled() }.get() }
             } catch (_: PlanOutdatedException) {
                 outdated = true
             }
@@ -91,12 +103,14 @@ class ImportFlow(
 
         override fun onSuccess() {
             if (outdated) {
-                // 쓴 것이 없으므로 같은 노트로 다시 계획해 새 미리보기를 보여 준다
-                PlanTask(onApplied) { prepared }.queue()
+                // 쓴 것이 없으므로 같은 노트, 같은 DB로 다시 계획해 새 미리보기를 보여 준다
+                if (!project.isDisposed) PlanTask(onApplied, target) { prepared }.queue()
                 return
             }
             val done = result ?: return
+            // 커밋은 끝났으므로 다른 창도 새로 읽도록 프로젝트가 닫혔어도 알린다. 이 프로젝트의 후속 처리만 건너뛴다
             publish()
+            if (project.isDisposed) return
             val content = join(
                 JNoteBundle.message("notification.import.done.content", done.created, done.updated, done.unchanged),
                 ImportMessages.problemList(prepared.problems),

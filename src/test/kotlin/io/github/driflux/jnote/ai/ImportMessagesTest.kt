@@ -48,6 +48,15 @@ class ImportMessagesTest : BasePlatformTestCase() {
         }
     }
 
+    fun testSkippedItemShowsItsUidAndEscapesHtml() {
+        val text = ImportMessages.problemList(
+            listOf(ImportProblem.Skipped("<a>.json", SkippedItem(2, "<uid>", "title", FieldProblem.MISSING))),
+        )
+
+        assertTrue(text, text.contains(ImportMessages.escape(JNoteBundle.message("import.problem.itemWithUid", "<a>.json", 3, "<uid>", "title", JNoteBundle.message("import.problem.MISSING")))))
+        assertFalse(text, text.contains("<uid>") || text.contains("<a>"))
+    }
+
     fun testProblemListIsEscapedAndTruncated() {
         val problems = (1..12).map { ImportProblem.Unreadable("<b>$it</b>.json", "x") }
 
