@@ -9,6 +9,7 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileDocumentManagerListener
+import com.intellij.openapi.fileEditor.FileEditor
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
@@ -48,6 +49,14 @@ internal class GutterNoteService(private val project: Project) : Disposable, Pre
             FileDocumentManagerListener.TOPIC,
             object : FileDocumentManagerListener {
                 override fun beforeDocumentSaving(document: Document) = writeBack(document)
+            },
+        )
+        project.messageBus.connect(this).subscribe(
+            DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC,
+            object : DaemonCodeAnalyzer.DaemonListener {
+                override fun daemonFinished(fileEditors: Collection<FileEditor>) {
+                    bars.clearIfIconsOff()
+                }
             },
         )
         project.messageBus.connect(this).subscribe(
