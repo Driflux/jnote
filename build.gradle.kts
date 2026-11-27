@@ -30,6 +30,12 @@ tasks.processResources {
     from("docs/ai-format.md") { into("ai") }
 }
 
+tasks.test {
+    inputs.file("docs/ai-format.md")
+    inputs.dir("claude-plugin")
+    inputs.dir(".claude-plugin")
+}
+
 tasks.register("syncSkillSpec") {
     val source = layout.projectDirectory.file("docs/ai-format.md").asFile
     val target = layout.projectDirectory.file("claude-plugin/skills/jnote/ai-format.md").asFile
