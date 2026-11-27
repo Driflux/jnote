@@ -12,7 +12,7 @@ The format is JNote JSON format v1. Its full rules are in `${CLAUDE_PLUGIN_ROOT}
 ## Rules
 
 - Write only new files in `~/.jnote/inbox/`. Never create, change, or delete `~/.jnote/jnote.db` or any other file under `~/.jnote/`.
-- Never overwrite an inbox file. Create it with the shell's no-clobber mode (see Capture step 4), never with a tool that replaces existing files.
+- Never overwrite an inbox file, and never let a half-written `.json` file appear there. Publish it as in Capture step 4, never with a tool that writes the final name directly.
 - Output strict JSON: double quotes, no comments, no trailing commas.
 
 ## Capture
@@ -28,13 +28,17 @@ Save something from the conversation as one or more notes.
    - `snapshot`: the exact text of those lines, read from the file (for example `sed -n '<start>,<end>p' <file>`). Copy it verbatim, keeping indentation.
    - `class_name`: the enclosing class, or the file name without extension when there is none.
 3. Write the note: a short `title`; `body` in plain text (no Markdown rendering in JNote); `tags` as short names without commas; `ai_source` set to `"Claude"`; `prompt` set to the user's request that led to the note. Leave `uid` out, because these are new notes.
-4. Save one document per request as `~/.jnote/inbox/<YYYY-MM-DD>-<short-topic>.json` (create the folder with `mkdir -p`). Write it with no-clobber so that a file another session created at the same moment is never replaced:
+4. Save one document per request as `~/.jnote/inbox/<YYYY-MM-DD>-<short-topic>.json`. JNote reads only `*.json` files there, so write the document under a hidden temporary name first, check it, then publish it with `ln`, which fails instead of replacing an existing file:
    ```sh
-   (set -C; cat > ~/.jnote/inbox/2026-11-27-retry-backoff.json) <<'EOF'
+   inbox=~/.jnote/inbox; mkdir -p "$inbox"
+   tmp=$(mktemp "$inbox/.jnote-XXXXXX")
+   cat > "$tmp" <<'EOF'
    { ...the document... }
    EOF
+   python3 -m json.tool "$tmp" > /dev/null   # skip if python3 is missing
+   ln "$tmp" "$inbox/2026-11-27-retry-backoff.json" && rm "$tmp"
    ```
-   If the command fails because the file exists, add `-2`, `-3`, ... before `.json` and try again. If `python3` is available, check the file with `python3 -m json.tool <file> > /dev/null`.
+   If `ln` fails because the name exists, publish the same temporary file again with `-2`, `-3`, ... before `.json`, then remove the temporary file.
 5. Tell the user the file name and that JNote shows it for review when its Tool Window gains focus. Nothing is saved until they click Apply there.
 
 ### Example
