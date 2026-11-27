@@ -226,17 +226,18 @@ class NoteRepository(
         }
     }
 
-    internal fun deleteReturningTagIds(ids: List<Long>): CompletableFuture<List<Pair<Note, List<Long>>>> = database.submit { c ->
+    /** uid로 찾은 노트만 지운다. id는 지운 뒤 재사용되거나 DB가 바뀌면 다른 노트를 가리킬 수 있다. */
+    internal fun deleteReturningTagIds(uids: List<String>): CompletableFuture<List<Pair<Note, List<Long>>>> = database.submit { c ->
         c.createStatement().use { it.execute("BEGIN IMMEDIATE") }
         try {
-            val result = ids.mapNotNull { id ->
-                findById(c, id)?.let { note ->
+            val result = uids.mapNotNull { uid ->
+                findByUid(c, uid)?.let { note ->
                     val tagIds = c.prepareStatement("SELECT tag_id FROM note_tag WHERE note_id = ? ORDER BY tag_id").use { s ->
-                        s.setLong(1, id)
+                        s.setLong(1, note.id)
                         s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getLong(1) else null }.toList() }
                     }
                     c.prepareStatement("DELETE FROM note WHERE id = ?").use { s ->
-                        s.setLong(1, id)
+                        s.setLong(1, note.id)
                         s.executeUpdate()
                     }
                     note to tagIds

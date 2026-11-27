@@ -19,9 +19,9 @@ class DeletedNote(val note: Note, val tagIds: List<Long>)
 class NoteDeletion(private val database: Database) {
     private val notes = NoteRepository(database)
 
-    /** 노트들과 태그를 읽고 지우는 일을 한 트랜잭션으로 한다. 이미 없는 노트는 결과에서 빠진다. */
-    fun delete(ids: List<Long>): CompletableFuture<List<DeletedNote>> =
-        notes.deleteReturningTagIds(ids).thenApply { rows -> rows.map { (note, tagIds) -> DeletedNote(note, tagIds) } }
+    /** uid로 노트들과 태그를 읽고 지우는 일을 한 트랜잭션으로 한다. 이미 없는 노트는 결과에서 빠진다. */
+    fun delete(uids: List<String>): CompletableFuture<List<DeletedNote>> =
+        notes.deleteReturningTagIds(uids).thenApply { rows -> rows.map { (note, tagIds) -> DeletedNote(note, tagIds) } }
 
     /**
      * 지운 DB에 되살린다. 그 사이 DB 경로가 바뀌어 그 DB가 닫혔다면 다른 DB에 되살리지 않고 오류로 끝낸다.
