@@ -3,6 +3,7 @@ package io.github.driflux.jnote.ui
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.colors.EditorFontType
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
@@ -10,10 +11,12 @@ import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import com.intellij.util.ui.WrapLayout
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.model.Note
 import java.awt.BorderLayout
 import java.awt.FlowLayout
+import java.awt.datatransfer.StringSelection
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JComponent
@@ -41,6 +44,9 @@ internal class NoteDetailPanel(
     internal val goToCodeButton = JButton(JNoteBundle.message("toolWindow.detail.goToCode")).apply {
         addActionListener { note?.let(onGoToCode) }
     }
+    internal val copySnippetButton = JButton(JNoteBundle.message("toolWindow.detail.copySnippet")).apply {
+        addActionListener { note?.snapshot?.takeIf { it.isNotEmpty() }?.let { CopyPasteManager.getInstance().setContents(StringSelection(it)) } }
+    }
     internal val relocateButton = JButton(JNoteBundle.message("toolWindow.detail.relocate")).apply {
         addActionListener { note?.let(onRelocate) }
     }
@@ -53,8 +59,9 @@ internal class NoteDetailPanel(
     internal val deleteButton = JButton(JNoteBundle.message("toolWindow.detail.delete")).apply {
         addActionListener { note?.let(onDelete) }
     }
-    internal val buttons = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
+    internal val buttons = JPanel(WrapLayout(FlowLayout.LEFT)).apply {
         add(goToCodeButton)
+        add(copySnippetButton)
         add(relocateButton)
         add(confirmButton)
         add(editButton)
@@ -93,6 +100,7 @@ internal class NoteDetailPanel(
         locationLabel.isVisible = detail.location != null
         snippetArea.text = detail.snippet.orEmpty()
         snippetSection.isVisible = detail.snippet != null
+        copySnippetButton.isVisible = detail.snippet != null
         bodyArea.text = detail.body
         bodyArea.font = if (detail.monospaceBody) monospace() else JBFont.label()
         bodySection.isVisible = detail.body.isNotEmpty()
