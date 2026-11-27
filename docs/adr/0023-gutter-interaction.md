@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #23
-- PR: #TBD
+- PR: #73
 
 ## Context
 Issue #23 makes adding and previewing notes as direct as GitHub review comments (intent.md section 7). This ADR starts with the first part: a "+" button that follows the mouse in the gutter, a click that adds a note for that line, and a drag that selects a line range and opens the add dialog with it. The range bar (PR 2) and the hover preview (PR 3) add their own sections to this ADR.
