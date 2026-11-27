@@ -108,7 +108,7 @@ class TagRepositoryTest {
     }
 
     @Test
-    fun renameIsAConflictWhenAnotherWriterTakesTheNameAfterTheCheck() {
+    fun renameIsAConflictWhenAnotherWriterTakesTheNameDuringTheUpdate() {
         val a = tag("a")
         db.submit { c ->
             c.createStatement().use {

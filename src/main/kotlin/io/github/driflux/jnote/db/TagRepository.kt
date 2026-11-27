@@ -134,7 +134,8 @@ class TagRepository(private val database: Database) {
             s.setLong(1, tagId)
             s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.toNote() else null }.toList() }
         }
-    }}
+    }
+}
 
 internal fun cleanTagNames(names: List<String>): List<String> {
     val cleaned = names.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
