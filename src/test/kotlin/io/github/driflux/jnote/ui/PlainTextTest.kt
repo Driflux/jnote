@@ -15,7 +15,6 @@ import javax.swing.JComponent
 import javax.swing.JList
 import javax.swing.plaf.basic.BasicHTML
 
-/** html 태그로 시작하는 노트 텍스트가 Swing의 HTML 뷰로 그려지지 않는지 면마다 확인한다. */
 class PlainTextTest : BasePlatformTestCase() {
     private val markup = "<html><b>bold</b>"
 
