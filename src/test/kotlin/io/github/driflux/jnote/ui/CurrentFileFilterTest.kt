@@ -19,7 +19,6 @@ import io.github.driflux.jnote.project.ProjectKeyService
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** "현재 파일" 보기: 켜면 편집기에서 선택한 파일의 노트만 보이고, 파일을 바꾸면 따라간다. */
 class CurrentFileFilterTest : BasePlatformTestCase() {
     private lateinit var dir: Path
     private val dbService get() = DatabaseService.getInstance()
