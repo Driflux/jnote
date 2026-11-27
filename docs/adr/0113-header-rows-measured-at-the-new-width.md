@@ -20,8 +20,9 @@ A headless test that lays out the panel once from the top, as one Swing validati
 
 ## Consequences
 - Pros
-  - The rows never show a clipped state, also on the first frame after a resize.
+  - The rows are no longer cut off at the bottom because their height was measured at the old width, also on the first frame after a resize.
 - Cons and what we accept
+  - Only the vertical clipping from the stale width is fixed. A single control wider than the whole row is still cut off horizontally, as before.
   - `doLayout` knows the header structure (filter bar, header, spinner). A change to that structure must update the width calculation. The test fails when they disagree.
 - Tests
-  - `HeaderLayoutTest`: narrowing from 2000 to 160 pixels wraps the filter row and the tag bar, and every component in the filter bar fits inside its parent after one layout pass. Both failed before the change.
+  - `HeaderLayoutTest`: narrowing from 2000 to 160 pixels wraps the filter row and the tag bar, and every component in the filter bar fits vertically inside its parent after one layout pass. Both failed before the change. A sweep from 120 to 700 pixels with the spinner shown and then hidden checks the spinner width; it fails when the spinner is not subtracted.

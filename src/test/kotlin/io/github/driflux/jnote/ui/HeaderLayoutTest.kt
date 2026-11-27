@@ -89,6 +89,21 @@ class HeaderLayoutTest : BasePlatformTestCase() {
         assertFitsInItsParent(panel.filterBar)
     }
 
+    fun testTheVisibleSpinnerIsLeftOutOfTheFilterRowWidth() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        for (width in 120..700 step 2) {
+            panel.spinnerIcon.isVisible = false
+            resize(panel, 2000)
+            panel.spinnerIcon.isVisible = true
+            resize(panel, width)
+            assertFitsInItsParent(panel.filterBar)
+            panel.spinnerIcon.isVisible = false
+            resize(panel, width)
+            assertFitsInItsParent(panel.filterBar)
+        }
+    }
+
     fun testNarrowingWrapsTheTagBarWithoutClippingIt() {
         val repo = NoteRepository(dbService.database)
         val tags = TagRepository(dbService.database)
