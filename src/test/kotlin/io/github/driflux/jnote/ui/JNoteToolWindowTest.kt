@@ -322,6 +322,61 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         assertEquals(note.id, panel.list.selectedValue.summary.id)
     }
 
+    // DB 실행기를 막아 두고 읽기를 일부러 늦춘다. 풀면 막아 둔 순서대로 끝난다
+    private fun blockDatabase(): java.util.concurrent.CountDownLatch {
+        val release = java.util.concurrent.CountDownLatch(1)
+        dbService.database.submit { release.await(10, java.util.concurrent.TimeUnit.SECONDS) }
+        return release
+    }
+
+    fun testSwitchingTheSelectionHidesTheOldDetailWhileTheNewOneLoads() {
+        repo.create(NewNote.free("first")).get()
+        repo.create(NewNote.free("second")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel).size == 2 }
+        panel.list.selectedIndex = 0
+        awaitUntil("row 0 shown") { panel.detail.titleLabel.text == "second" }
+
+        val release = blockDatabase()
+        panel.list.selectedIndex = 1
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertFalse("the old note's buttons must not stay on screen", panel.detail.isVisible)
+        release.countDown()
+        awaitUntil("row 1 loaded") { panel.detail.isVisible && panel.detail.titleLabel.text == "first" }
+    }
+
+    fun testALateDetailReadIsDroppedWhenTheSelectionWasCleared() {
+        repo.create(NewNote.free("only")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel) == listOf("only") }
+
+        val release = blockDatabase()
+        panel.list.selectedIndex = 0
+        panel.list.clearSelection()
+        release.countDown()
+        awaitUntil("reads drained") { panel.isIdle }
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertFalse(panel.detail.isVisible)
+    }
+
+    fun testDetailIsNotFilledFromAnotherNoteThatReusedTheId() {
+        val old = repo.create(NewNote.free("old")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel) == listOf("old") }
+        // 가장 큰 id의 행을 지우고 새로 만들면 같은 id가 다른 노트(다른 uid)에 쓰인다. 패널은 알림을 받지 않아 옛 목록을 들고 있다
+        repo.delete(old.id).get()
+        val reused = repo.create(NewNote.free("new")).get()
+        assertEquals(old.id, reused.id)
+
+        panel.list.selectedIndex = 0
+        awaitUntil("read done") { panel.isIdle }
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertFalse(panel.detail.isVisible)
+    }
+
     fun testFilteringOutTheSelectedNoteClearsTheDetail() {
         repo.create(NewNote.free("free")).get()
         val panel = newPanel()

@@ -146,6 +146,9 @@ class JNotePanel internal constructor(
     // 선택이 빠르게 바뀔 때 늦게 도착한 옛 노트가 상세를 덮지 않도록 번호를 매긴다
     private val detailGeneration = AtomicInteger()
 
+    // 상세에 지금 보이는 노트의 id. EDT에서만 쓴다
+    private var shownDetailId: Long? = null
+
     // render()가 목록을 갈아 끼우며 선택이 흔들리는 동안에는 상세를 비우지 않는다. EDT에서만 쓴다
     private var renderingSelection = false
 
@@ -154,7 +157,7 @@ class JNotePanel internal constructor(
 
     init {
         Disposer.register(this, spinnerIcon)
-        list.addListSelectionListener { if (!it.valueIsAdjusting && !renderingSelection) showDetailOf(list.selectedValue?.summary?.id) }
+        list.addListSelectionListener { if (!it.valueIsAdjusting && !renderingSelection) showDetailOf(list.selectedValue?.summary) }
         val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(2, 8)
             add(JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
@@ -386,7 +389,7 @@ class JNotePanel internal constructor(
             renderingSelection = false
         }
         // 다시 읽어도 보던 노트를 유지하고(최신 내용으로 다시 읽는다), 그 사이 지워졌다면 상세를 비운다
-        showDetailOf(list.selectedValue?.summary?.id)
+        showDetailOf(list.selectedValue?.summary)
         project.service<PendingNoteSelection>().peek()?.let { selectAndClear(it) }
     }
 
@@ -408,18 +411,31 @@ class JNotePanel internal constructor(
     }
 
     // 목록은 요약만 들고 있으므로 전체 노트는 선택된 한 건만 읽는다
-    private fun showDetailOf(id: Long?) {
+    private fun showDetailOf(summary: NoteSummary?) {
         val ticket = detailGeneration.incrementAndGet()
-        if (id == null) {
+        // 다른 노트로 바뀌면 읽는 동안 이전 노트의 버튼이 남아 엉뚱한 노트를 지우지 않도록 먼저 비운다. 같은 노트를 다시 읽을 때만 유지한다
+        if (summary == null || summary.id != shownDetailId) {
+            shownDetailId = null
             detail.show(null)
-            return
         }
+        if (summary == null) return
         pendingLoads.incrementAndGet()
-        NoteRepository(DatabaseService.getInstance().database).get(id).whenComplete { note, error ->
+        NoteRepository(DatabaseService.getInstance().database).get(summary.id).whenComplete { note, error ->
             pendingLoads.decrementAndGet()
             onEdt {
                 if (disposed || ticket != detailGeneration.get()) return@onEdt
-                if (error == null) detail.show(note) else ToolWindowNotifier.loadFailed(project, error.cause ?: error)
+                when {
+                    error != null -> ToolWindowNotifier.loadFailed(project, error.cause ?: error)
+                    // 목록을 읽은 뒤 DB가 바뀌었거나 id가 다른 노트에 다시 쓰였다면 행과 다른 노트이므로 보이지 않는다
+                    note?.uid != summary.uid -> {
+                        shownDetailId = null
+                        detail.show(null)
+                    }
+                    else -> {
+                        shownDetailId = note.id
+                        detail.show(note)
+                    }
+                }
             }
         }
     }
