@@ -189,18 +189,6 @@ class GutterAddNoteListenerTest : BasePlatformTestCase() {
         assertTrue(added.isEmpty())
     }
 
-    fun testTheDragMarkLastsUntilTheRangeReleaseIsHandled() {
-        val editor = openFile("GutterAddMark.txt", lines(10))
-        val l = listener(editor)
-        l.mouseMoved(mouse(editor, MouseEvent.MOUSE_MOVED, 3))
-
-        l.mousePressed(mouse(editor, MouseEvent.MOUSE_PRESSED, 3))
-        assertTrue(GutterDragging.active(mouse(editor, MouseEvent.MOUSE_RELEASED, 6)))
-        l.mouseReleased(mouse(editor, MouseEvent.MOUSE_RELEASED, 6))
-
-        assertFalse(GutterDragging.active(mouse(editor, MouseEvent.MOUSE_RELEASED, 6)))
-    }
-
     fun testTheIconAreaCoversLineNumbersAndAnEmptyIconColumn() {
         val editor = openFile("GutterAddZone.txt", lines(5))
         val geometry = GutterGeometry.of(editor)

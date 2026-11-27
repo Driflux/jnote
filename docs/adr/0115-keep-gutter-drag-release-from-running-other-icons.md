@@ -1,0 +1,48 @@
+# 0115. Keep a gutter drag release from running other gutter icons
+
+- Status: Proposed
+- Date: 2026-11-27
+- Issue: #115
+- PR: TBD
+
+## Context
+ADR 0023 (Drag) lets a drag that starts on the "+" select a line range and open the add dialog on release. The gutter runs the click action of the icon under the pointer on release, so a drag released over another icon also ran that icon. ADR 0023 blocked only JNote's note icon: the listener set a client property on the gutter component while a drag was active (`GutterDragging`), and the note icon's navigation handler returned early while it was set. A run or debug icon was not blocked, so a range drag released over it ran its click action and then opened the add dialog. ADR 0023 split this into issue #115 because a fix needs the release to be stopped before the gutter dispatches it.
+
+What the platform does, read with `javap -c -p` from `app-client.jar` of IC-242.20224.300 (the build this plugin compiles against) and compared with IC-252.23892.409, where every step below is the same:
+- `EditorGutterComponentImpl` does not listen to the mouse itself. The `EditorImpl` constructor adds its `MyMouseAdapter` to the gutter, so it runs before any listener a plugin adds later, including `GutterAddNoteListener`.
+- `MyMouseAdapter.mouseReleased` calls `runMouseReleasedCommand`. That method first resets the multi-selection flag and `myDragOnGutterSelectionStartLine` and stops the scrolling timer. Then it returns if the AWT event is already consumed. Then it calls `mouseReleased` of every `EditorMouseListener` in order and returns as soon as the `EditorMouseEvent` is consumed. Then it runs `invokePopupIfNeeded`, and then `EditorImpl.processMouseReleased`, which calls `EditorGutterComponentImpl.mouseReleased` for a gutter event.
+- `EditorGutterComponentImpl.mouseReleased` calls `invokeGutterAction`, which takes the renderer at the release point (`getPointInfo`) and runs its click action. It does not compare the point with the press, and it checks `isConsumed` only on the fallback path for an `ActiveGutterRenderer`, after the click action was ruled out. Its `mousePressed` ignores `isConsumed` too. A listener added to the gutter after `EditorImpl` cannot stop the click action by consuming the event, because the click action has already run when it is called.
+- `EditorMouseEvent.consume()` consumes the wrapped AWT event.
+- `EditorGutterComponentEx.getGutterRenderer(Point)`, which `GutterGeometry.onAddIcon` uses, is the same `getPointInfo` lookup that `invokeGutterAction` uses.
+- `Editor.addEditorMouseListener`, `Editor.removeEditorMouseListener`, `EditorMouseListener` and `EditorMouseEvent.consume` are public API with no `ApiStatus` annotation. `EditorImpl` keeps the listeners in a lock-free copy-on-write list, and `add` appends.
+
+## Decision
+- **A release guard that exists only during a drag.** When a press on the "+" starts a drag, `GutterAddNoteListener` adds one `EditorMouseListener` to the editor. Its `mouseReleased` consumes a gutter release unless the pointer is on the "+" (`GutterGeometry.onAddIcon`). `EditorImpl` then returns before its own release handling, so the gutter never runs the click action of the icon under the pointer: a run or debug icon, a JNote note icon, or anything else in the icon column. The reset at the top of `runMouseReleasedCommand` has already run.
+- **The "+" click keeps its path.** A release on the "+" is not consumed, so the gutter runs the "+" click action as before and it adds the single-line note. AWT calls every component listener whatever the consumption, so the `mouseReleased` of `GutterAddNoteListener` still runs after `EditorImpl`'s adapter, adds the range note, and ends the drag.
+- **The drag owns the guard's lifetime.** `GutterDrag` stays the only drag state. `press(line, onEnd)` keeps the end callback with the press line, and the drag ends, running the callback once, on `release`, on `cancel`, or when a new `press` replaces a drag whose release never arrived. The listener passes `removeEditorMouseListener` as the callback, so the guard is registered exactly while a drag is active. `dispose` (editor closed, plugin unloaded) cancels the drag, which removes the guard.
+- The guard is added at press time, so it is the last entry in the editor's listener list and every other `EditorMouseListener` still receives the release.
+- The guard acts only on events whose component is this editor's gutter. A drag whose release never reached the gutter therefore cannot consume releases in the text area.
+- **Removed.** The `GutterDragging` client property and the check in `NoteLineMarkerProvider`'s navigation handler. The note icon's click action is one of the actions the consumed release no longer reaches. This replaces the drag mark described in ADR 0023 (Drag).
+- **Behavior change.** A drag released on the press line but not on the "+" (over a note icon or a run icon on the same line) now runs nothing. Before, the mark blocked only the note icon there.
+
+## Alternatives considered
+- **An `IdeEventQueue` dispatcher or preprocessor, or an `IdeGlassPane` mouse preprocessor, registered for the drag (candidate A in the issue).** `addDispatcher` and `addPreprocessor` are public and not `@ApiStatus.Internal` in 242. They see the window-level event before Swing retargets it to the gutter, so the only way to stop the click action there is to swallow the whole release. That skips `EditorImpl`'s release reset (the scrolling timer is not stopped and the gutter drag selection start line stays set) and every `EditorMouseListener`, and it needs a window-to-gutter coordinate conversion to find our releases. Rejected.
+- **Consume the press on the "+" (candidate B).** The gutter's `mousePressed` ignores consumption. A consumed press matters only because `processMouseReleased` skips the gutter when `myMousePressedEvent.isConsumed()`, a private field that happens to hold the same event object. That is private behavior with no API contract. It would also stop the "+" click action, so JNote would have to handle the click itself. Rejected.
+- **Reorder the gutter's mouse listeners so ours runs first (candidate C).** Consuming the AWT event before `EditorImpl`'s adapter would stop the click action, because `runMouseReleasedCommand` returns on a consumed event. It needs removing and re-adding the platform's own listener object, changes the order for every other plugin, and has to be undone on unload. Rejected as fragile.
+- **Register the guard once per editor at attach time and check `drag.active`.** It adds a listener call to every mouse release in every project editor for a state that lasts only during a drag. Rejected for the per-drag registration.
+- **Consume every release of a drag, including on the "+", and add the single-line note in our own handler.** It replaces the renderer's click action path that ADR 0023 chose for clicks, with no visible gain. Rejected.
+- **Keep the drag mark and add the same check elsewhere.** Only JNote's own icons can read the mark. Rejected.
+
+## Consequences
+- Pros
+  - A range drag from the "+" no longer runs a run, debug, or any other gutter icon, and the add dialog opens with the range as before.
+  - No startup work, no new dependency, no I/O. The cost exists only during a drag: one listener add and remove per drag, and one hit test per release while the drag is active. This is read from the code, not measured.
+  - The client property and the provider-side check are gone, so only the listener knows about drags.
+- Cons and what we accept
+  - The fix depends on the order inside `EditorImpl` (editor mouse listeners before the gutter's release handling) and on the gutter's release-time hit test. The calls used are public API, but the order is observed behavior read from the bytecode of IC-242.20224.300 and IC-252.23892.409, not a documented contract. The plugin has no upper build limit, so a later platform that runs the gutter's release handling first would bring the bug back. `GutterDragReleaseTest` dispatches real events through `EditorImpl` and the real gutter, so such a change fails that test.
+  - A consumed release also skips `invokePopupIfNeeded` and the click that `EditorImpl` synthesizes for a release within one space width and one line height of the press (`runMouseClickedCommand`). A release after a press on the "+" should trigger neither, so this is intended.
+  - If a release never reaches the gutter (for example, a modal dialog opens during the drag), the guard stays until the next gutter release, the next press on the "+", or dispose. That next gutter release ends the drag, as it did before this change, and it is consumed unless it is on the "+".
+  - The tests use `DumbAware` icons, because the gutter skips icons that are not `DumbAware` while the project is indexing (`checkDumbAware` in `processIconsRowForY`), and the shared test project can be indexing when the suite reaches these tests.
+  - Not checked in runIde. This session had no way to drive the IDE window. The check: in a file with a run icon (a `main` function or a test method), hover the gutter on another line, press the "+", drag to the line with the run icon, and release over the run icon. Expected: the add dialog opens for the range, and no run menu appears and nothing runs. Also check that a plain click on the "+" still opens the dialog for that line.
+- Follow-up work
+  - The runIde check above.

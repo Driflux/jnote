@@ -167,21 +167,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         return requested
     }
 
-    fun testClickingAnIconWhileAPlusDragIsInProgressSelectsNothing() {
-        openFile("GutterDragGuard.txt", lines(10))
-        note("GutterDragGuard.txt", 3, 5, "guarded")
-        val info = loadedMarkers().single()
-        val requested = recordSelectionRequests()
-        val gutterComponent = JPanel()
-        GutterDragging.mark(MouseEvent(gutterComponent, MouseEvent.MOUSE_PRESSED, 0L, 0, 0, 0, 1, false), true)
-
-        @Suppress("UNCHECKED_CAST")
-        val handler = info.navigationHandler as GutterIconNavigationHandler<PsiElement>
-        handler.navigate(MouseEvent(gutterComponent, MouseEvent.MOUSE_RELEASED, 0L, 0, 0, 0, 1, false), info.element!!)
-
-        assertTrue(requested.isEmpty())
-    }
-
     private fun barHighlighters() = com.intellij.openapi.editor.impl.DocumentMarkupModel
         .forDocument(myFixture.editor.document, project, true).allHighlighters.filter { it.lineMarkerRenderer === RangeBarRenderer }
 
