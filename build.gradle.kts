@@ -32,6 +32,8 @@ tasks.processResources {
 }
 
 tasks.test {
+    // 테스트가 -PpluginVersion 같은 덮어쓰기까지 반영한 실제 버전을 보게 한다
+    systemProperty("jnote.pluginVersion", version.toString())
     inputs.file("docs/ai-format.md")
     inputs.dir("claude-plugin")
     inputs.dir(".claude-plugin")
@@ -41,10 +43,10 @@ tasks.test {
 }
 
 // 개발용 버전(-SNAPSHOT)이 Marketplace에 올라가는 일을 막는다
-val releaseVersion = version.toString()
 tasks.named("publishPlugin") {
+    val releaseVersion = version.toString()
     doFirst {
-        check(!releaseVersion.endsWith("-SNAPSHOT")) { "pluginVersion in gradle.properties is $releaseVersion; set the release version first (docs/release.md)" }
+        check(!releaseVersion.endsWith("-SNAPSHOT")) { "pluginVersion is $releaseVersion; set the release version first (docs/release.md)" }
     }
 }
 

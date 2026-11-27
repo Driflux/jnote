@@ -70,7 +70,7 @@ class MarketplaceMetadataTest {
 
     @Test
     fun aReleaseVersionHasItsOwnHeadingInTheChangeNotes() {
-        val version = Files.readAllLines(Path.of("gradle.properties")).first { it.startsWith("pluginVersion=") }.substringAfter('=')
+        val version = System.getProperty("jnote.pluginVersion")
 
         // 개발 중(-SNAPSHOT)에는 확인할 것이 없고, 릴리스 버전으로 올리면 변경 사항 제목도 같이 올려야 통과한다
         if (!version.endsWith("-SNAPSHOT")) assertTrue(element("change-notes").contains("<h4>$version</h4>"))
