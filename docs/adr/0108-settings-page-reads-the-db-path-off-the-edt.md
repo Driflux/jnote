@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-27
 - Issue: #108
-- PR: (this PR)
+- PR: #127
 
 ## Context
 ADR 0060 moved the DB path lookup in `DatabaseService` onto the DB thread, so the first use of the database no longer loads `DbPathSettings` (`jnote.xml`) on the EDT. The settings page (`JNoteConfigurable`) still bound its field to `DatabasePaths.default()`, which the platform calls on the EDT from `reset()` and `isModified()`. When the settings page is the first thing to touch `DbPathSettings`, the service is created there and `jnote.xml` is read from disk on the EDT. ADR 0060 kept this as an accepted exception and left the decision to this issue.
