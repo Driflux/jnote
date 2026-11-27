@@ -94,21 +94,21 @@ class TagRepositoryTest {
     @Test
     fun renameChangesTheName() {
         val t = tag("old")
-        assertEquals(TagRenameResult.Renamed(Tag(t.id, "new")), tags.rename(t.id, " new ").get())
+        assertEquals(TagRenameResult.Renamed(Tag(t.id, "new")), tags.rename(t, " new ").get())
         assertEquals(listOf("new"), tags.list().get().map { it.name })
-        assertEquals(TagRenameResult.Renamed(Tag(t.id, "new")), tags.rename(t.id, "new").get())
+        assertEquals(TagRenameResult.Renamed(Tag(t.id, "new")), tags.rename(Tag(t.id, "new"), "new").get())
     }
 
     @Test
     fun renameConflictIsAValueAndChangesNothing() {
         val a = tag("a")
         tag("b")
-        assertEquals(TagRenameResult.Conflict, tags.rename(a.id, "b").get())
+        assertEquals(TagRenameResult.Conflict, tags.rename(a, "b").get())
         assertEquals(listOf("a", "b"), tags.list().get().map { it.name })
     }
 
     @Test
-    fun renameIsAConflictWhenAnotherWriterTakesTheNameAfterTheCheck() {
+    fun renameIsAConflictWhenAnotherWriterTakesTheNameDuringTheUpdate() {
         val a = tag("a")
         db.submit { c ->
             c.createStatement().use {
@@ -116,28 +116,61 @@ class TagRepositoryTest {
             }
         }.get()
 
-        assertEquals(TagRenameResult.Conflict, tags.rename(a.id, "b").get())
+        assertEquals(TagRenameResult.Conflict, tags.rename(a, "b").get())
         assertEquals("a", tags.list().get().single { it.id == a.id }.name)
     }
 
     @Test
     fun renameReportsMissingAndBlank() {
         val a = tag("a")
-        assertEquals(TagRenameResult.NotFound, tags.rename(999, "x").get())
-        assertEquals(TagRenameResult.InvalidName, tags.rename(a.id, " ").get())
+        assertEquals(TagRenameResult.Stale, tags.rename(Tag(999, "a"), "x").get())
+        assertEquals(TagRenameResult.InvalidName, tags.rename(a, " ").get())
     }
 
     @Test
     fun renameRejectsCommaAndChangesNothing() {
         val a = tag("a")
-        assertEquals(TagRenameResult.InvalidName, tags.rename(a.id, "x,y").get())
+        assertEquals(TagRenameResult.InvalidName, tags.rename(a, "x,y").get())
         assertEquals(listOf("a"), tags.list().get().map { it.name })
     }
 
     @Test
-    fun renameOfMissingIdToExistingNameIsNotFound() {
+    fun renameOfMissingIdToExistingNameIsStale() {
         tag("taken")
-        assertEquals(TagRenameResult.NotFound, tags.rename(999, "taken").get())
+        assertEquals(TagRenameResult.Stale, tags.rename(Tag(999, "gone"), "taken").get())
+    }
+
+    @Test
+    fun renameAndDeleteOfAnIdReusedByAnotherConnectionLeaveTheNewTagAlone() {
+        val other = Database(tmp.root.toPath().resolve("jnote.db"))
+        try {
+            val otherTags = TagRepository(other)
+            val seen = tag("old")
+            assertTrue(otherTags.delete(seen).get())
+            val reused = otherTags.getOrCreate("new").get()
+            assertEquals(seen.id, reused.id)
+
+            assertEquals(TagRenameResult.Stale, tags.rename(seen, "renamed").get())
+            assertFalse(tags.delete(seen).get())
+            assertEquals(listOf(reused), tags.list().get())
+        } finally {
+            other.close()
+        }
+    }
+
+    @Test
+    fun renameAndDeleteOfATagRenamedByAnotherConnectionAreStale() {
+        val other = Database(tmp.root.toPath().resolve("jnote.db"))
+        try {
+            val seen = tag("old")
+            assertEquals(TagRenameResult.Renamed(Tag(seen.id, "theirs")), TagRepository(other).rename(seen, "theirs").get())
+
+            assertEquals(TagRenameResult.Stale, tags.rename(seen, "mine").get())
+            assertFalse(tags.delete(seen).get())
+            assertEquals(listOf(Tag(seen.id, "theirs")), tags.list().get())
+        } finally {
+            other.close()
+        }
     }
 
     @Test
@@ -145,8 +178,8 @@ class TagRepositoryTest {
         val n = note()
         val t = tag("x")
         tags.attach(n.id, t.id).get()
-        assertTrue(tags.delete(t.id).get())
-        assertFalse(tags.delete(t.id).get())
+        assertTrue(tags.delete(t).get())
+        assertFalse(tags.delete(t).get())
         assertTrue(tags.list().get().isEmpty())
         assertTrue(tags.tagsOf(n.id).get().isEmpty())
         assertNotNull(notes.get(n.id).get())

@@ -358,7 +358,7 @@ class NoteRepositoryTest {
         val kept = tags.getOrCreate("kept").get()
         val created = repo.create(code()).get()
         repo.delete(created.id).get()
-        tags.delete(gone.id).get()
+        tags.delete(gone).get()
 
         repo.restore(created, listOf(gone.id, kept.id)).get()
 

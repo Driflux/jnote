@@ -506,7 +506,7 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         chip(panel, "todo").doClick()
         assertEquals(listOf("a"), titles(panel))
 
-        tagRepo.delete(tagRepo.list().get().single { it.name == "todo" }.id).get()
+        tagRepo.delete(tagRepo.list().get().single { it.name == "todo" }).get()
         panel.reload()
 
         awaitUntil("filter dropped") { titles(panel).size == 3 && !chipTexts(panel).contains("todo") }
@@ -630,6 +630,38 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
 
         assertEquals(1, asked.size)
         assertEquals(listOf("sql", "todo", "unused"), tagRepo.list().get().map { it.name })
+    }
+
+    private fun reuseTheLastTagId(panel: JNotePanel): Pair<Tag, Tag> {
+        awaitUntil("chips") { chipTexts(panel).size == 3 }
+        val seen = panel.state.tags.maxBy { it.id }
+        tagRepo.delete(seen).get()
+        val reused = tagRepo.getOrCreate("reused").get()
+        assertEquals(seen.id, reused.id)
+        return seen to reused
+    }
+
+    fun testRenameOfATagWhoseIdWasReusedLeavesTheNewTagAndRefreshes() {
+        taggedNotes()
+        val panel = tagPanel(askName = answeringName("renamed", mutableListOf()))
+        val (seen, reused) = reuseTheLastTagId(panel)
+
+        panel.renameTag(seen).get()
+
+        awaitUntil("refreshed") { "reused" in chipTexts(panel) }
+        assertEquals(reused, tagRepo.list().get().single { it.id == seen.id })
+        assertFalse(tagRepo.list().get().any { it.name == "renamed" })
+    }
+
+    fun testDeleteOfATagWhoseIdWasReusedLeavesTheNewTagAndRefreshes() {
+        taggedNotes()
+        val panel = tagPanel(confirm = confirming(true, mutableListOf()))
+        val (seen, reused) = reuseTheLastTagId(panel)
+
+        panel.deleteTag(seen).get()
+
+        awaitUntil("refreshed") { "reused" in chipTexts(panel) }
+        assertEquals(reused, tagRepo.list().get().single { it.id == seen.id })
     }
 
     private fun search(panel: JNotePanel, text: String) {

@@ -11,7 +11,7 @@ import java.util.concurrent.CompletableFuture
 sealed interface TagRenameResult {
     data class Renamed(val tag: Tag) : TagRenameResult
     data object Conflict : TagRenameResult
-    data object NotFound : TagRenameResult
+    data object Stale : TagRenameResult
     data object InvalidName : TagRenameResult
 }
 
@@ -33,30 +33,27 @@ class TagRepository(private val database: Database) {
         }
     }
 
-    fun rename(id: Long, newName: String): CompletableFuture<TagRenameResult> = database.submit { c ->
+    fun rename(seen: Tag, newName: String): CompletableFuture<TagRenameResult> = database.submit { c ->
         val trimmed = newName.trim()
         if (trimmed.isEmpty() || ',' in trimmed) return@submit TagRenameResult.InvalidName
-        if (!exists(c, id)) return@submit TagRenameResult.NotFound
-        val clash = findByName(c, trimmed)
-        when {
-            clash != null && clash.id != id -> TagRenameResult.Conflict
-            else -> try {
-                val changed = c.prepareStatement("UPDATE tag SET name = ? WHERE id = ?").use { s ->
-                    s.setString(1, trimmed)
-                    s.setLong(2, id)
-                    s.executeUpdate()
-                }
-                if (changed == 0) TagRenameResult.NotFound else TagRenameResult.Renamed(Tag(id, trimmed))
-            } catch (e: SQLiteException) {
-                if (e.resultCode != SQLiteErrorCode.SQLITE_CONSTRAINT_UNIQUE) throw e
-                TagRenameResult.Conflict
+        try {
+            val changed = c.prepareStatement("UPDATE tag SET name = ? WHERE id = ? AND name = ?").use { s ->
+                s.setString(1, trimmed)
+                s.setLong(2, seen.id)
+                s.setString(3, seen.name)
+                s.executeUpdate()
             }
+            if (changed == 0) TagRenameResult.Stale else TagRenameResult.Renamed(Tag(seen.id, trimmed))
+        } catch (e: SQLiteException) {
+            if (e.resultCode != SQLiteErrorCode.SQLITE_CONSTRAINT_UNIQUE) throw e
+            TagRenameResult.Conflict
         }
     }
 
-    fun delete(id: Long): CompletableFuture<Boolean> = database.submit { c ->
-        c.prepareStatement("DELETE FROM tag WHERE id = ?").use { s ->
-            s.setLong(1, id)
+    fun delete(seen: Tag): CompletableFuture<Boolean> = database.submit { c ->
+        c.prepareStatement("DELETE FROM tag WHERE id = ? AND name = ?").use { s ->
+            s.setLong(1, seen.id)
+            s.setString(2, seen.name)
             s.executeUpdate() > 0
         }
     }
@@ -138,12 +135,6 @@ class TagRepository(private val database: Database) {
             s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.toNote() else null }.toList() }
         }
     }
-
-    private fun exists(c: java.sql.Connection, id: Long): Boolean =
-        c.prepareStatement("SELECT 1 FROM tag WHERE id = ?").use { s ->
-            s.setLong(1, id)
-            s.executeQuery().use { it.next() }
-        }
 }
 
 internal fun cleanTagNames(names: List<String>): List<String> {
