@@ -202,6 +202,45 @@ class ToolWindowCopyTest : BasePlatformTestCase() {
         assertEquals("newer copy", clipboard())
     }
 
+    fun testACopyThatFinishesAfterTheUserCopiedSomethingElseLeavesTheClipboardAlone() {
+        val panel = threeNotes()
+        panel.list.selectedIndex = 0
+        val gate = CountDownLatch(1)
+
+        val copy = panel.copySelected(blockingFormatter(gate))
+        CopyPasteManager.getInstance().setContents(StringSelection("copied in the editor"))
+        gate.countDown()
+        copy.get(10, TimeUnit.SECONDS)
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertEquals("copied in the editor", clipboard())
+    }
+
+    fun testACopyThatFinishesAfterThePanelClosedLeavesTheClipboardAlone() {
+        val panel = threeNotes()
+        panel.list.selectedIndex = 0
+        val gate = CountDownLatch(1)
+
+        val copy = panel.copySelected(blockingFormatter(gate))
+        Disposer.dispose(panel)
+        CopyPasteManager.getInstance().setContents(StringSelection("copied after closing"))
+        gate.countDown()
+        copy.get(10, TimeUnit.SECONDS)
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertEquals("copied after closing", clipboard())
+    }
+
+    fun testACopyStartedAfterTheUserCopiedIsWritten() {
+        val panel = threeNotes()
+        panel.list.selectedIndex = 0
+        CopyPasteManager.getInstance().setContents(StringSelection("copied in the editor"))
+
+        panel.copySelected(constantFormatter("from JNote")).get(10, TimeUnit.SECONDS)
+
+        awaitUntil("JNote copy written") { clipboard() == "from JNote" }
+    }
+
     fun testCopyFormatInstructionsWorksWithoutASelection() {
         val panel = loadedPanel(0)
         val item = menuItem(panel, "toolWindow.copy.instructions")
