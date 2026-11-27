@@ -20,6 +20,7 @@ import io.github.driflux.jnote.db.Database
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.Note
+import io.github.driflux.jnote.model.NoteSummary
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
@@ -50,14 +51,14 @@ class ExportNotesActionTest : BasePlatformTestCase() {
         }
     }
 
-    private fun event(action: AnAction, selected: List<Note>?): AnActionEvent {
+    private fun event(action: AnAction, selected: List<NoteSummary>?): AnActionEvent {
         val builder = SimpleDataContext.builder().add(CommonDataKeys.PROJECT, project)
         if (selected != null) builder.add(SELECTED_NOTES, selected)
         return AnActionEvent.createFromDataContext(ActionPlaces.MAIN_MENU, Presentation(), builder.build())
     }
 
-    private fun note(id: Long) = Note(id, "uid-$id", io.github.driflux.jnote.model.NoteKind.FREE, null, null, null, null, null, null,
-        io.github.driflux.jnote.model.NoteStatus.OK, "t", "", null, null, null, 0, 0)
+    private fun note(id: Long) = NoteSummary(id, "uid-$id", io.github.driflux.jnote.model.NoteKind.FREE, null, null, null, null, null,
+        io.github.driflux.jnote.model.NoteStatus.OK, "t", null, 0)
 
     private fun recorder(target: Path?, calls: MutableList<Pair<Path, Set<String>?>>) =
         Triple<(Project) -> Path?, (Project, Path, Set<String>?) -> Unit, Unit>({ target }, { _, path, ids -> calls += path to ids }, Unit)
@@ -71,7 +72,7 @@ class ExportNotesActionTest : BasePlatformTestCase() {
 
     fun testSelectedExportIsDisabledWithoutSelection() {
         val action = ExportSelectedNotesAction()
-        for (selected in listOf(null, emptyList<Note>())) {
+        for (selected in listOf(null, emptyList<NoteSummary>())) {
             val e = event(action, selected)
             action.update(e)
             assertFalse(e.presentation.isEnabled)

@@ -102,7 +102,6 @@ class NoteExporterTest {
         var checks = 0
 
         try {
-            // 마지막 확인(파일을 바꿔 끼우기 직전)에서 취소한다
             exporter.export(target, null) { if (++checks == 3) throw CancellationException() }
             fail("expected cancellation")
         } catch (_: CancellationException) {
@@ -110,6 +109,20 @@ class NoteExporterTest {
 
         assertEquals("previous", Files.readString(target))
         assertEquals(listOf("out.json"), otherFiles())
+    }
+
+    @Test fun refusesToOverwriteTheActiveDatabase() {
+        val note = notes.create(NewNote.free("keep me")).get()
+        val target = dir.resolve("jnote.db")
+
+        try {
+            exporter.export(target, null) {}
+            fail("expected refusal")
+        } catch (_: ExportTargetIsDatabaseException) {
+        }
+
+        assertEquals(note.uid, notes.getByUid(note.uid).get()?.uid)
+        assertEquals(emptyList<String>(), otherFiles())
     }
 
     @Test fun databaseFailureWritesNothing() {
