@@ -16,10 +16,31 @@ class NoteRepository(
     private val database: Database,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    fun create(draft: NewNote): CompletableFuture<Note> = database.submit { c ->
+    /**
+     * 노트를 만들고 [tagNames]를 붙인다. 한 트랜잭션이라 태그 단계가 실패하면 노트도 남지 않는다.
+     * 쉼표가 든 태그 이름이면 아무것도 쓰지 않고 IllegalArgumentException으로 끝난다.
+     */
+    fun create(draft: NewNote, tagNames: List<String> = emptyList()): CompletableFuture<Note> = database.submit { c ->
+        val names = cleanTagNames(tagNames)
         val now = clock()
         val uid = UUID.randomUUID().toString()
-        val id = c.prepareStatement(INSERT, Statement.RETURN_GENERATED_KEYS).use { s ->
+        c.autoCommit = false
+        val id = try {
+            val id = insert(c, draft, uid, now)
+            if (names.isNotEmpty()) setNoteTags(c, id, names)
+            c.commit()
+            id
+        } catch (e: Throwable) {
+            c.rollback()
+            throw e
+        } finally {
+            c.autoCommit = true
+        }
+        requireNotNull(findById(c, id))
+    }
+
+    private fun insert(c: Connection, draft: NewNote, uid: String, now: Long): Long =
+        c.prepareStatement(INSERT, Statement.RETURN_GENERATED_KEYS).use { s ->
             var i = 1
             s.setString(i++, uid)
             s.setString(i++, draft.kind.name)
@@ -40,8 +61,6 @@ class NoteRepository(
             s.executeUpdate()
             s.generatedKeys.use { it.next(); it.getLong(1) }
         }
-        requireNotNull(findById(c, id))
-    }
 
     fun get(id: Long): CompletableFuture<Note?> = database.submit { c -> findById(c, id) }
 

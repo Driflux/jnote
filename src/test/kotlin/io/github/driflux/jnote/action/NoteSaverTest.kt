@@ -137,6 +137,24 @@ class NoteSaverTest : BasePlatformTestCase() {
         assertEquals(1, published.get())
     }
 
+    fun testSaveThatFailsWhileAttachingTagsLeavesNoNoteAndDoesNotPublish() {
+        val repo = NoteRepository(db)
+        db.submit { c ->
+            c.createStatement().use { it.execute("CREATE TEMP TRIGGER fail_link BEFORE INSERT ON note_tag BEGIN SELECT RAISE(ABORT, 'link failed'); END") }
+        }.get()
+        val saver = NoteSaver(repository = { repo }, projectKey = { "k" })
+
+        val code = saver.save(project, anchor, NoteDraft("T", tags = listOf("x")))
+        val free = saver.saveFree(NoteDraft("q", tags = listOf("x")))
+        await(code)
+        await(free)
+
+        assertTrue(code.isCompletedExceptionally)
+        assertTrue(free.isCompletedExceptionally)
+        assertTrue(repo.list(null, true).get().isEmpty())
+        assertEquals(0, published.get())
+    }
+
     fun testSaveFreeAttachesTags() {
         val repo = NoteRepository(db)
         val tags = TagRepository(db)
