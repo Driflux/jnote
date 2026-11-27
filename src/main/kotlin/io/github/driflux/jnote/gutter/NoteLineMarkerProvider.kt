@@ -100,6 +100,7 @@ class NoteLineMarkerProvider : LineMarkerProviderDescriptor(), DumbAware {
             if (group.approxOnly) GutterIcons.APPROX else GutterIcons.NOTE,
             { tooltip },
             GutterIconNavigationHandler { event, _ ->
+                if (GutterDragging.active(event)) return@GutterIconNavigationHandler
                 val single = group.notes.singleOrNull()
                 if (single != null) NoteSelection.request(project, single.id) else NoteChooser.show(event, project, group.notes)
             },

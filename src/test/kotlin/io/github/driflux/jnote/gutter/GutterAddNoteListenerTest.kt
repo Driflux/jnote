@@ -175,6 +175,44 @@ class GutterAddNoteListenerTest : BasePlatformTestCase() {
         assertNull(editor.selectionModel.selectedText)
     }
 
+    fun testReturningToTheStartLineClearsTheSelectionTheDragMade() {
+        val editor = openFile("GutterAddBack.txt", lines(10))
+        val l = listener(editor)
+        l.mouseMoved(mouse(editor, MouseEvent.MOUSE_MOVED, 3))
+
+        l.mousePressed(mouse(editor, MouseEvent.MOUSE_PRESSED, 3))
+        l.mouseDragged(mouse(editor, MouseEvent.MOUSE_DRAGGED, 6))
+        l.mouseDragged(mouse(editor, MouseEvent.MOUSE_DRAGGED, 3))
+        assertNull(editor.selectionModel.selectedText)
+        l.mouseReleased(mouse(editor, MouseEvent.MOUSE_RELEASED, 3))
+
+        assertTrue(added.isEmpty())
+    }
+
+    fun testTheDragMarkLastsUntilTheRangeReleaseIsHandled() {
+        val editor = openFile("GutterAddMark.txt", lines(10))
+        val l = listener(editor)
+        l.mouseMoved(mouse(editor, MouseEvent.MOUSE_MOVED, 3))
+
+        l.mousePressed(mouse(editor, MouseEvent.MOUSE_PRESSED, 3))
+        assertTrue(GutterDragging.active(mouse(editor, MouseEvent.MOUSE_RELEASED, 6)))
+        l.mouseReleased(mouse(editor, MouseEvent.MOUSE_RELEASED, 6))
+
+        assertFalse(GutterDragging.active(mouse(editor, MouseEvent.MOUSE_RELEASED, 6)))
+    }
+
+    fun testTheIconAreaCoversLineNumbersAndAnEmptyIconColumn() {
+        val editor = openFile("GutterAddZone.txt", lines(5))
+        val geometry = GutterGeometry.of(editor)
+        val gutter = editor.gutterComponentEx
+        val first = gutter.annotationsAreaOffset + gutter.annotationsAreaWidth
+        val end = gutter.iconAreaOffset + maxOf(gutter.iconsAreaWidth, GutterGeometry.ICON_COLUMN_WIDTH)
+
+        assertTrue(geometry.inIconArea(mouse(editor, MouseEvent.MOUSE_MOVED, 1, x = first)))
+        assertTrue(geometry.inIconArea(mouse(editor, MouseEvent.MOUSE_MOVED, 1, x = end - 1)))
+        assertFalse(geometry.inIconArea(mouse(editor, MouseEvent.MOUSE_MOVED, 1, x = end)))
+    }
+
     fun testOnlyTheLeftButtonStartsADrag() {
         val editor = openFile("GutterAddButton.txt", lines(10))
         val l = listener(editor)

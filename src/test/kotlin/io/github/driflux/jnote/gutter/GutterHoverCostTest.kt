@@ -55,6 +55,12 @@ class GutterHoverCostTest : BasePlatformTestCase() {
 
         println("JNOTE-PERF 5000 lines, mouseMoved on the same line: " + measure(9, 20_000) { move(2_500 * lineHeight + 1) })
         println("JNOTE-PERF 5000 lines, mouseMoved onto a new line every event (worst case): " + measure(9, 5_000) { move((it % 4_000) * lineHeight + 1) })
+        repeat(500) { editor.markupModel.addRangeHighlighter(null, it * 100, it * 100 + 5, 0, com.intellij.openapi.editor.markup.HighlighterTargetArea.EXACT_RANGE) }
+        println("JNOTE-PERF 5000 lines + 500 other highlighters, new line every event incl. gutter update on the EDT queue: " + measure(9, 500) {
+            move((it % 4_000) * lineHeight + 1)
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            editor.gutterComponentEx.preferredSize
+        })
         val outside = GutterAddNoteListener(editor, project, GutterGeometry(base.lineAt, { false }, base.onAddIcon)) { _, _ -> }
         println("JNOTE-PERF 5000 lines, mouseMoved outside the icon area: " + measure(9, 20_000) {
             outside.mouseMoved(MouseEvent(editor.gutterComponentEx, MouseEvent.MOUSE_MOVED, 0L, 0, 50, 10, 0, false))

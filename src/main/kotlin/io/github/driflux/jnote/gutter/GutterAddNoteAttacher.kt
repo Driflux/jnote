@@ -36,7 +36,7 @@ internal object GutterAddNoteAttacher {
         if (editor.isDisposed || isParentDisposed()) return
         val gutter = editor.gutterComponentEx
         val listener = GutterAddNoteListener(editor, project, GutterGeometry.of(editor))
-        val installed = Disposer.newDisposable(parent, "jnote.gutter.addNote")
+        val installed = Disposer.newDisposable("jnote.gutter.addNote")
         gutter.addMouseListener(listener)
         gutter.addMouseMotionListener(listener)
         Disposer.register(installed, Disposable {
@@ -44,7 +44,12 @@ internal object GutterAddNoteAttacher {
             gutter.removeMouseMotionListener(listener)
             listener.dispose()
         })
-        // 편집기가 먼저 닫히면 리스너도 함께 정리한다
-        EditorUtil.disposeWithEditor(editor, Disposable { Disposer.dispose(installed) })
+        // 편집기가 먼저 닫히면 편집기가 정리하고, 서비스가 먼저 정리되면 아래 콜백이 정리하면서 편집기 쪽 등록도 사라진다.
+        // 서비스의 자식은 이 콜백뿐이라 편집기가 살아 있어도 플러그인 클래스를 붙잡는 것은 없다
+        EditorUtil.disposeWithEditor(editor, installed)
+        Disposer.register(parent, Disposable { Disposer.dispose(installed) })
+        // New UI는 아이콘이 없는 파일의 아이콘 칸 폭이 0이라, 첫 "+"가 뜰 때 코드가 밀리지 않도록 처음부터 "+" 폭만큼 잡아 둔다
+        gutter.setInitialIconAreaWidth(GutterGeometry.ICON_COLUMN_WIDTH)
+        gutter.revalidateMarkup()
     }
 }
