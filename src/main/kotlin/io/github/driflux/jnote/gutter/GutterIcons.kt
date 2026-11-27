@@ -5,5 +5,6 @@ import javax.swing.Icon
 
 internal object GutterIcons {
     val NOTE: Icon = IconLoader.getIcon("/icons/gutterNote.svg", GutterIcons::class.java)
+    val ADD: Icon = IconLoader.getIcon("/icons/gutterAdd.svg", GutterIcons::class.java)
     val APPROX: Icon = IconLoader.getIcon("/icons/gutterNoteApprox.svg", GutterIcons::class.java)
 }
