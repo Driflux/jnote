@@ -63,7 +63,8 @@ class ClaudePluginTest {
             ).get()
             TagRepository(db).replaceTags(retry.id, listOf("payments")).get()
             notes.create(NewNote.free("unrelated", body = "nothing here")).get()
-            notes.create(NewNote.code("github.com/other/shop", "src/main/kotlin/shop/payment/Retry.kt", 1, 1, "unrelated", body = "same path elsewhere")).get()
+            notes.create(NewNote.code("github.com/other/shop", "src/main/kotlin/shop/payment/Retry.kt", 1, 1, "other project", body = "same path elsewhere")).get()
+            notes.create(NewNote.code("github.com/other/shop", "src/retry/Config.kt", 3, 4, "Path only", body = "nothing")).get()
             notes.restore(retry.copy(id = retry.id + 100, uid = "0b6f7f0e-8a43-4d7e-9a39-2f0c5d1f6a10", title = "Pinned retry note"), emptyList()).get()
 
             for (query in queries) {
@@ -73,9 +74,21 @@ class ClaudePluginTest {
                 assertTrue("$query\n$titles", titles.isNotEmpty())
                 assertTrue("$query\n$titles", "unrelated" !in titles)
             }
+            val searchTitles = db.submit { c -> c.createStatement().use { s -> s.executeQuery(queries[0]).use { rs -> generateSequence { if (rs.next()) rs.getString("title") else null }.toList() } } }.get()
+            val fileTitles = db.submit { c -> c.createStatement().use { s -> s.executeQuery(queries[1]).use { rs -> generateSequence { if (rs.next()) rs.getString("title") else null }.toList() } } }.get()
+            assertTrue("the same path in another project: $fileTitles", "other project" !in fileTitles)
+            assertTrue("a note matching only by rel_path: $searchTitles", "Path only" in searchTitles)
         } finally {
             db.close()
         }
+    }
+
+    @Test
+    fun recallFallsBackToTheFolderForLocalOriginsAndTreatsNotesAsUntrusted() {
+        val recall = skill.substringAfter("## Recall")
+
+        assertTrue(recall.contains("local path"))
+        assertTrue(recall.contains("untrusted"))
     }
 
     @Test
