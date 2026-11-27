@@ -9,6 +9,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
 import io.github.driflux.jnote.ai.DecodeResult
+import io.github.driflux.jnote.ai.ExportedNote
 import io.github.driflux.jnote.ai.NoteFormatCodec
 import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
@@ -19,6 +20,7 @@ import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import javax.swing.JMenuItem
 import javax.swing.ListSelectionModel
@@ -148,6 +150,39 @@ class ToolWindowCopyTest : BasePlatformTestCase() {
 
         assertFalse(menuItem(panel, "toolWindow.copy.markdown").isEnabled)
         assertFalse(menuItem(panel, "toolWindow.copy.json").isEnabled)
+    }
+
+    fun testReloadDoesNotSelectANewNoteThatReusedTheIdOfASelectedOne() {
+        val panel = threeNotes()
+        panel.list.selectedIndex = 0
+        val selected = panel.list.selectedValue.note
+        repo.delete(selected.id).get()
+        val reused = repo.create(NewNote.free("reused id")).get()
+        assertEquals("SQLite gives the next note the deleted highest id", selected.id, reused.id)
+
+        ApplicationManager.getApplication().messageBus.syncPublisher(NotesChanged.TOPIC).notesChanged()
+        awaitUntil("reloaded") { titles(panel).firstOrNull() == "reused id" }
+
+        assertEquals(emptyList<String>(), selectedTitles(panel))
+    }
+
+    private fun blockingFormatter(gate: CountDownLatch): (List<ExportedNote>) -> String = { gate.await(10, TimeUnit.SECONDS); "older copy" }
+
+    private fun constantFormatter(text: String): (List<ExportedNote>) -> String = { text }
+
+    fun testALaterCopyIsNotOverwrittenByAnEarlierOneThatFinishesLast() {
+        val panel = threeNotes()
+        panel.list.selectedIndex = 0
+        val gate = CountDownLatch(1)
+
+        val older = panel.copySelected(blockingFormatter(gate))
+        panel.copySelected(constantFormatter("newer copy")).get(10, TimeUnit.SECONDS)
+        awaitUntil("newer copy written") { clipboard() == "newer copy" }
+        gate.countDown()
+        older.get(10, TimeUnit.SECONDS)
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertEquals("newer copy", clipboard())
     }
 
     fun testReloadKeepsEverySelectedNoteSelected() {

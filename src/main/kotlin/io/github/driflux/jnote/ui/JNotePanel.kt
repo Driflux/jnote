@@ -168,6 +168,8 @@ class JNotePanel internal constructor(
 
     private var renderingSelection = false
 
+    private val copyGeneration = AtomicInteger()
+
     @Volatile
     private var disposed = false
     internal val focusSearchAction = DumbAwareAction.create { focusSearch() }
@@ -413,11 +415,14 @@ class JNotePanel internal constructor(
     internal fun copySelected(format: (List<ExportedNote>) -> String): CompletableFuture<*> {
         val uids = list.selectedValuesList.map { it.summary.uid }
         if (uids.isEmpty()) return CompletableFuture.completedFuture(null)
+        val ticket = copyGeneration.incrementAndGet()
         return NoteCopy.read(DatabaseService.getInstance().database, uids)
             .thenApplyAsync({ notes -> notes.takeIf { it.isNotEmpty() }?.let(format) }, AppExecutorUtil.getAppExecutorService())
             .whenComplete { text, error ->
                 onEdt {
                     when {
+                        // 나중에 누른 복사가 먼저 끝났다면 늦게 끝난 앞의 복사가 그 결과를 덮지 않는다
+                        ticket != copyGeneration.get() -> Unit
                         error != null -> ToolWindowNotifier.copyFailed(project, (error as? CompletionException)?.cause ?: error)
                         // 그 사이 모두 지워졌다면 클립보드를 건드리지 않는다
                         text != null -> CopyPasteManager.getInstance().setContents(StringSelection(text))

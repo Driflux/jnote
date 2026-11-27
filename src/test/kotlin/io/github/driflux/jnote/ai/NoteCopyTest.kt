@@ -111,6 +111,13 @@ class NoteCopyTest {
     }
 
     @Test
+    fun aPathWithBackticksGetsALongerInlineDelimiter() {
+        val note = FormatNote(uid = "u", title = "t", anchor = FormatAnchor("p", "src/a`b.kt", 1, 1))
+
+        assertEquals("## t\n\n``src/a`b.kt:L1``", NoteCopy.markdown(listOf(note)))
+    }
+
+    @Test
     fun aSnippetWithBackticksGetsALongerFence() {
         val note = FormatNote(uid = "u", title = "t", anchor = FormatAnchor("p", "README.md", 1, 3, snapshot = "```kotlin\nx\n```"))
 

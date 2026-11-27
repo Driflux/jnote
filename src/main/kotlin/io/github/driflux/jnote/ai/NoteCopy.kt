@@ -32,20 +32,28 @@ object NoteCopy {
         buildList {
             add("## " + note.title)
             note.anchor?.let { anchor ->
-                add("`" + anchor.relPath + ":" + NoteRows.lineRange(anchor.startLine, anchor.endLine) + "`")
+                add(inlineCode(anchor.relPath + ":" + NoteRows.lineRange(anchor.startLine, anchor.endLine)))
                 anchor.snapshot?.takeIf { it.isNotEmpty() }?.let { add(codeBlock(it, anchor.relPath)) }
             }
             note.body.takeIf { it.isNotBlank() }?.let { add(it) }
         }.joinToString("\n\n")
     }
 
+    // 경로에도 백틱이 들어갈 수 있다. 끝의 백틱이 구분자와 붙지 않도록 그때만 공백을 둔다
+    private fun inlineCode(text: String): String {
+        val tick = "`".repeat(longestBacktickRun(text) + 1)
+        val pad = if (text.startsWith('`') || text.endsWith('`')) " " else ""
+        return tick + pad + text + pad + tick
+    }
+
     // 스니펫 안의 백틱 묶음보다 길게 펜스를 잡아야 코드 블록이 중간에 닫히지 않는다
     private fun codeBlock(snippet: String, relPath: String): String {
-        val longestRun = Regex("`+").findAll(snippet).maxOfOrNull { it.value.length } ?: 0
-        val fence = "`".repeat(maxOf(3, longestRun + 1))
+        val fence = "`".repeat(maxOf(3, longestBacktickRun(snippet) + 1))
         val language = relPath.substringAfterLast('/').substringAfterLast('.', "").lowercase().takeIf { it.all(Char::isLetterOrDigit) }.orEmpty()
         return fence + language + "\n" + snippet.trimEnd('\n') + "\n" + fence
     }
+
+    private fun longestBacktickRun(text: String): Int = Regex("`+").findAll(text).maxOfOrNull { it.value.length } ?: 0
 
     private const val VIEW_COLUMNS = "uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, status, " +
         "title, body, ai_source, source_url, prompt, created_at, updated_at, tags"
