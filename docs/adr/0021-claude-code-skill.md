@@ -1,0 +1,39 @@
+# 0021. Claude Code skill instead of MCP; the inbox and the view as the contract
+
+- Status: Proposed
+- Date: 2026-11-27
+- Issue: #21
+- PR: (plugin directory and capture), (recall), (organize), (marketplace manifest and install docs)
+
+## Context
+intent.md section 10.5 asks for a Claude Code skill `jnote` that captures, recalls, and organizes notes, distributed from this repository through a Claude Code plugin marketplace. The skill must write only into `~/.jnote/inbox/`, read only through the read-only view `v_notes_export`, and use `docs/ai-format.md` (ADR 0016) as its single spec. The JetBrains plugin never calls an AI and runs no server (intent.md section 2), so the skill must work with files alone.
+
+Claude Code installs a marketplace plugin by copying the plugin directory into its cache. An installed skill can read files inside its plugin directory through `${CLAUDE_PLUGIN_ROOT}`, but nothing outside it, and the marketplace validator warns that local sources reached through symlinks are not read.
+
+## Decision
+- **A skill, not an MCP server.** The skill is instructions that the agent follows with its own shell and file tools. It adds no process, no port, and no dependency, and the IDE plugin stays unaware of it.
+- **Contract.** Writes are JSON format v1 documents saved as new files in `~/.jnote/inbox/`; every one passes the import preview (#17, #18) before anything reaches the DB. Reads go through `v_notes_export` with `sqlite3 -readonly` (recall PR). The skill never opens `jnote.db` for writing and never overwrites an inbox file.
+- **Layout (intent.md 10.5, unchanged).** `claude-plugin/.claude-plugin/plugin.json` and `claude-plugin/skills/jnote/SKILL.md`; the root `.claude-plugin/marketplace.json` comes in the last PR.
+- **Spec inside the plugin.** `claude-plugin/skills/jnote/ai-format.md` is a committed copy of `docs/ai-format.md` with one marker line on top ("Copy of docs/ai-format.md. Do not edit"). `./gradlew syncSkillSpec` regenerates it. `ClaudePluginTest` compares the copy without its marker line to the original, after normalizing CRLF to LF, so `./gradlew test` fails whenever the two drift. SKILL.md keeps only the flows and points to `${CLAUDE_PLUGIN_ROOT}/skills/jnote/ai-format.md` for every field rule, so the field rules live in one document.
+- **Capture flow.** The agent collects anchors from the files and git, not from memory: `repo_url` from `git remote get-url origin` (falling back to `project_path` when there is no remote), the path relative to the IDE project folder, 1-based lines, and `snapshot` read verbatim from the file. Notes are new, so `uid` is left out. One document per request, named `<date>-<topic>.json`.
+- **No `version` in plugin.json.** Without it Claude Code takes the commit SHA as the version, so users get skill fixes with the repository instead of staying on a pinned copy.
+- **Tests.** `ClaudePluginTest` checks the spec copy, the manifest name, the skill frontmatter and its pointer to the spec, and decodes every JSON example in SKILL.md with the real codec (no skipped items, snapshot covers the anchored lines).
+
+## Alternatives considered
+- MCP server: a long-running process per agent session, against the lightweight principle (intent.md section 2), and intent.md already rejects it. Rejected.
+- Let the skill write the DB directly: bypasses the preview, the backup, and uid validation, and races the IDE's single DB executor. Rejected by intent.md 10.2.
+- Link to `docs/ai-format.md` on GitHub: no copy, but needs network and can be newer than the installed IDE plugin. Rejected.
+- Make the repository root the plugin root (`source: "."`) so the skill reads `docs/ai-format.md` directly: changes the agreed layout and copies the whole repository into the plugin cache. Rejected.
+- A symlink from the plugin folder to `docs/ai-format.md`: not read for local sources and fragile on Windows checkouts. Rejected.
+
+## Consequences
+- Pros
+  - No process, no dependency, nothing in the IDE plugin zip.
+  - Every agent write is reviewed by a person in the IDE.
+  - The spec copy cannot drift silently.
+- Cons and what we accept
+  - A spec change needs `./gradlew syncSkillSpec` and commits two files.
+  - The skill depends on the agent following instructions; the preview and the codec's validation catch what it gets wrong.
+  - The DB path is configurable in the IDE, and the skill cannot read IDE settings. Recall uses `~/.jnote/jnote.db` unless the user names another path.
+- Follow-up work
+  - Recall, organize, marketplace manifest and install docs (later PRs of #21).

@@ -1,0 +1,10 @@
+{
+  "name": "jnote",
+  "description": "Capture, recall, and organize JNote notes from Claude Code. Writes only into ~/.jnote/inbox/ and reads only the v_notes_export view.",
+  "author": {
+    "name": "Driflux"
+  },
+  "repository": "https://github.com/Driflux/jnote",
+  "license": "MIT",
+  "keywords": ["notes", "intellij", "jnote"]
+}
