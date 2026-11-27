@@ -249,7 +249,7 @@ class JNotePanel internal constructor(
     }
 
     private fun currentRelPath(): String? =
-        FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.let { AnchorLines.relativePath(project.basePath, it.path) }
+        FileEditorManager.getInstance(project).selectedEditor?.file?.let { AnchorLines.relativePath(project.basePath, it.path) }
 
     private fun onEditorSelectionChanged() {
         if (disposed || !state.currentFileOnly) return
