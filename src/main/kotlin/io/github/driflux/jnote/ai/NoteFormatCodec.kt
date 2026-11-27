@@ -47,17 +47,21 @@ object NoteFormatCodec {
             ?.takeIf { it.isJsonArray }
             ?.asJsonArray
             ?: return DecodeResult.Rejected(DocumentError.MISSING_NOTES)
-        val notes = mutableListOf<FormatNote>()
+        val parsed = mutableListOf<IndexedValue<FormatNote>>()
         val skipped = mutableListOf<SkippedItem>()
         items.forEachIndexed { index, item ->
             try {
-                notes += readNote(item)
+                parsed += IndexedValue(index, readNote(item))
             } catch (e: ItemProblem) {
                 val uid = (item as? JsonObject)?.get("uid")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
                 skipped += SkippedItem(index, uid, e.field, e.problem)
             }
         }
-        return DecodeResult.Decoded(notes, skipped)
+        // 같은 uid가 둘 이상이면 어느 쪽이 맞는지 알 수 없으므로 마지막 것을 고르지 않고 모두 건너뛴다
+        val duplicated = parsed.mapNotNull { it.value.uid }.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        val (dropped, kept) = parsed.partition { it.value.uid in duplicated }
+        skipped += dropped.map { SkippedItem(it.index, it.value.uid, "uid", FieldProblem.DUPLICATE) }
+        return DecodeResult.Decoded(kept.map { it.value }, skipped.sortedBy { it.index })
     }
 
     private fun writeNote(json: JsonWriter, exported: ExportedNote) {
