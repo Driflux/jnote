@@ -23,23 +23,24 @@ val SELECTED_NOTES: DataKey<List<Note>> = DataKey.create("JNote.SelectedNotes")
 abstract class ExportNotesAction(
     private val selectedOnly: Boolean,
     private val askTarget: (Project) -> Path?,
-    private val start: (Project, Path, Set<Long>?) -> Unit,
+    private val start: (Project, Path, Set<String>?) -> Unit,
 ) : AnAction(), DumbAware {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun update(e: AnActionEvent) {
         e.presentation.isVisible = e.project != null
-        e.presentation.isEnabled = e.project != null && (!selectedOnly || selectedIds(e).isNotEmpty())
+        e.presentation.isEnabled = e.project != null && (!selectedOnly || selectedUids(e).isNotEmpty())
     }
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val ids = if (selectedOnly) selectedIds(e).takeIf { it.isNotEmpty() } ?: return else null
+        // 대화상자가 열린 사이 다른 IDE가 노트를 지우고 같은 id로 새 노트를 만들 수 있어, 재사용되지 않는 uid로 넘긴다
+        val uids = if (selectedOnly) selectedUids(e).takeIf { it.isNotEmpty() } ?: return else null
         val target = askTarget(project) ?: return
-        start(project, target, ids)
+        start(project, target, uids)
     }
 
-    private fun selectedIds(e: AnActionEvent): Set<Long> = e.getData(SELECTED_NOTES).orEmpty().mapTo(LinkedHashSet()) { it.id }
+    private fun selectedUids(e: AnActionEvent): Set<String> = e.getData(SELECTED_NOTES).orEmpty().mapTo(LinkedHashSet()) { it.uid }
 
     internal companion object {
         fun askTarget(project: Project): Path? {
@@ -54,13 +55,13 @@ abstract class ExportNotesAction(
                 ?.toPath()
         }
 
-        fun startTask(project: Project, target: Path, ids: Set<Long>?) = ExportNotesTask(project, target, ids).queue()
+        fun startTask(project: Project, target: Path, uids: Set<String>?) = ExportNotesTask(project, target, uids).queue()
     }
 }
 
 class ExportAllNotesAction(
     askTarget: (Project) -> Path? = ::askTarget,
-    start: (Project, Path, Set<Long>?) -> Unit = ::startTask,
+    start: (Project, Path, Set<String>?) -> Unit = ::startTask,
 ) : ExportNotesAction(false, askTarget, start) {
     init {
         templatePresentation.text = JNoteBundle.message("action.exportAllNotes.text")
@@ -70,7 +71,7 @@ class ExportAllNotesAction(
 
 class ExportSelectedNotesAction(
     askTarget: (Project) -> Path? = ::askTarget,
-    start: (Project, Path, Set<Long>?) -> Unit = ::startTask,
+    start: (Project, Path, Set<String>?) -> Unit = ::startTask,
 ) : ExportNotesAction(true, askTarget, start) {
     init {
         templatePresentation.text = JNoteBundle.message("action.exportSelectedNotes.text")

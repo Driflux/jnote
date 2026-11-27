@@ -34,7 +34,7 @@ class NoteExporterTest {
         dir.toFile().deleteRecursively()
     }
 
-    private val exporter get() = NoteExporter(notes, tags)
+    private val exporter get() = NoteExporter(db)
 
     private fun decode(path: Path): List<FormatNote> =
         (NoteFormatCodec.decode(Files.readString(path)) as DecodeResult.Decoded).also { assertEquals(emptyList<SkippedItem>(), it.skipped) }.notes
@@ -73,9 +73,26 @@ class NoteExporterTest {
         notes.create(NewNote.free("second")).get()
         val target = dir.resolve("out.json")
 
-        assertEquals(1, exporter.export(target, setOf(first.id, 9_999)) {})
+        assertEquals(1, exporter.export(target, setOf(first.uid, "gone")) {})
 
         assertEquals(listOf(first.uid), decode(target).map { it.uid })
+    }
+
+    @Test fun selectedNoteDeletedAndItsIdReusedIsNotExported() {
+        val selected = notes.create(NewNote.free("selected")).get()
+        notes.delete(selected.id).get()
+        val reused = notes.create(NewNote.free("newcomer")).get()
+        assertEquals("SQLite reuses the last id", selected.id, reused.id)
+        val target = dir.resolve("out.json")
+
+        assertEquals(0, exporter.export(target, setOf(selected.uid)) {})
+    }
+
+    @Test fun longTargetNameStillWorks() {
+        notes.create(NewNote.free("note")).get()
+        val target = dir.resolve("n".repeat(250) + ".json")
+
+        assertEquals(1, exporter.export(target, null) {})
     }
 
     @Test fun cancelLeavesThePreviousFileAndNoTempFile() {
