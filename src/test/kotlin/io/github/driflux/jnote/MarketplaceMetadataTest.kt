@@ -69,6 +69,20 @@ class MarketplaceMetadataTest {
     }
 
     @Test
+    fun aReleaseVersionHasItsOwnHeadingInTheChangeNotes() {
+        val version = System.getProperty("jnote.pluginVersion")
+
+        if (!version.endsWith("-SNAPSHOT")) assertTrue(element("change-notes").contains("<h4>$version</h4>"))
+    }
+
+    @Test
+    fun verifierAlwaysChecksTheLowerBoundIdeIndependentOfThePlatformVersion() {
+        val build = Files.readString(Path.of("build.gradle.kts"))
+
+        assertTrue(build.contains("IntellijIdeaCommunity, \"2024.2\")"))
+    }
+
+    @Test
     fun lightAndDarkIconsAre40pxSvgs() {
         for (file in listOf("pluginIcon.svg", "pluginIcon_dark.svg")) {
             val svg = DocumentBuilderFactory.newInstance().newDocumentBuilder()

@@ -17,6 +17,7 @@ dependencies {
     intellijPlatform {
         intellijIdeaCommunity(providers.gradleProperty("platformVersion"))
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
+        pluginVerifier()
     }
     implementation("org.xerial:sqlite-jdbc:3.54.1.0")
     testImplementation("junit:junit:4.13.2")
@@ -31,11 +32,21 @@ tasks.processResources {
 }
 
 tasks.test {
+    systemProperty("jnote.pluginVersion", version.toString())
     inputs.file("docs/ai-format.md")
     inputs.dir("claude-plugin")
     inputs.dir(".claude-plugin")
     inputs.file("src/main/resources/META-INF/plugin.xml")
     inputs.file("LICENSE")
+    inputs.file("gradle.properties")
+    inputs.file("build.gradle.kts")
+}
+
+tasks.named("publishPlugin") {
+    val releaseVersion = version.toString()
+    doFirst {
+        check(!releaseVersion.endsWith("-SNAPSHOT")) { "pluginVersion is $releaseVersion; set the release version first (docs/release.md)" }
+    }
 }
 
 tasks.register("syncSkillSpec") {
@@ -53,6 +64,16 @@ intellijPlatform {
         ideaVersion {
             sinceBuild = "242"
             untilBuild = provider { null }
+        }
+    }
+    publishing {
+        token = providers.environmentVariable("PUBLISH_TOKEN")
+    }
+    pluginVerification {
+        ides {
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity, "2024.2")
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity, "2025.2")
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdea, "2026.1")
         }
     }
 }
