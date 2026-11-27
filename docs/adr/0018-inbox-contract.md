@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #18
-- PR: (scan on focus and notification), (review through the import preview and move to done)
+- PR: #99 (scan on focus and notification), #103 (review through the import preview and move to done)
 
 ## Context
 AI agents, the Claude Code skill (#21) above all, write notes by dropping JSON format v1 files (ADR 0016) into `~/.jnote/inbox/` (intent.md section 10.3). JNote must notice them without watching or polling (intent.md section 2), every write must pass the import preview (ADR 0017), and processed files must move to `inbox/done/`. Several IDE windows, possibly several IDE processes, look at the same inbox.
