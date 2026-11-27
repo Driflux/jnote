@@ -33,7 +33,6 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         dbService.switchTo(dir.resolve("jnote.db"))
     }
 
-    // 테스트가 만든 패널. 닫고 읽기가 끝나야 DB 경로를 바꿔도 늦은 읽기가 엉뚱한 DB를 열지 않는다
     private val panels = mutableListOf<JNotePanel>()
 
     override fun tearDown() {
@@ -71,7 +70,6 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
 
     private fun newPanel(): JNotePanel = track(JNotePanel(project))
 
-    // JUnit3 러너가 test로 시작하는 메서드 안의 람다를 테스트로 오인하므로 람다는 도우미 함수에서 만든다
     private fun neverFiringScheduler() = DelayScheduler { _, _ -> Cancellable { } }
 
     private fun recordingScheduler(into: MutableList<() -> Unit>) = DelayScheduler { _, task ->
@@ -98,17 +96,14 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
     }
 
     fun testRegistrationDoesNotOpenTheDatabase() {
-        // setUp이 이미 한 번 전환했으므로, 여기서 새 경로로 다시 전환해 "아무것도 열리지 않은" 상태를 이 테스트가 직접 만든다
         dbService.switchTo(dir.resolve("fresh.db"))
         assertNull(dbService.openDatabaseOrNull())
 
-        // 등록 정보를 읽고 팩토리를 만드는 것까지가 등록이다. 패널은 만들지 않는다
         ToolWindowEP.EP_NAME.extensionList.single { it.id == "JNote" }
         JNoteToolWindowFactory()
         PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
         assertNull("registration must not open the database", dbService.openDatabaseOrNull())
 
-        // 같은 단언이 실패할 수 있음을 보이는 대조: 패널이 처음 읽으면 열린다
         newPanel()
         awaitUntil("db opened by first load") { dbService.openDatabaseOrNull() != null }
     }
@@ -146,7 +141,6 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         repo.create(NewNote.code(key, "src/A.kt", 1, 2, "late")).get()
         ApplicationManager.getApplication().messageBus.syncPublisher(NotesChanged.TOPIC).notesChanged()
 
-        // 닫지 않은 대조 패널이 갱신되는 것을 먼저 확인한 뒤에야 닫힌 패널이 그대로인지 본다
         awaitUntil("control panel updated") { titles(control) == listOf("late") }
         PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
         assertEquals(0, closed.list.model.size)
@@ -178,7 +172,6 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
 
         assertEquals(JNoteBundle.message("toolWindow.empty.title"), panel.list.emptyText.text)
 
-        // 실제로 등록된 액션의 메뉴 문구와 키맵의 단축키에서 기대값을 만들어, 화면의 두 번째 줄과 비교한다
         val menuText = ActionManager.getInstance().getAction("JNote.AddNote").templatePresentation.text
         val shortcut = KeymapUtil.getShortcutText(KeymapManager.getInstance().activeKeymap.getShortcuts("JNote.AddNote").first())
         val expectedHint = JNoteBundle.message("toolWindow.empty.hint", menuText, shortcut)
@@ -202,7 +195,6 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
     fun testSpinnerShowsOnlyWhenTheLoadIsSlow() {
         val scheduled = mutableListOf<() -> Unit>()
         val scheduler = recordingScheduler(scheduled)
-        // DB 스레드를 막아 첫 읽기를 붙잡아 둔다
         val gate = java.util.concurrent.CountDownLatch(1)
         val blocker = dbService.database.submit { gate.await(10, java.util.concurrent.TimeUnit.SECONDS) }
 
@@ -218,7 +210,6 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         awaitUntil("load finished and spinner hidden") { panel.state.notes != null && !panel.spinner.visible }
     }
 
-    // 아이콘의 자식으로 건 표식은 아이콘이 정리될 때만 불린다
     private fun markWhenDisposed(parent: com.intellij.openapi.Disposable, flag: java.util.concurrent.atomic.AtomicBoolean) =
         Disposer.register(parent, com.intellij.openapi.Disposable { flag.set(true) })
 
@@ -240,7 +231,6 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         val late = scheduled.single()
 
         Disposer.dispose(panel)
-        // 취소가 늦어 이미 대기열에 들어간 타이머가 지금 도착한 상황
         late.invoke()
 
         assertFalse(panel.spinner.visible)
@@ -322,7 +312,6 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         assertEquals(note.id, panel.list.selectedValue.summary.id)
     }
 
-    // DB 실행기를 막아 두고 읽기를 일부러 늦춘다. 풀면 막아 둔 순서대로 끝난다
     private fun blockDatabase(): java.util.concurrent.CountDownLatch {
         val release = java.util.concurrent.CountDownLatch(1)
         dbService.database.submit { release.await(10, java.util.concurrent.TimeUnit.SECONDS) }
@@ -365,7 +354,6 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         val old = repo.create(NewNote.free("old")).get()
         val panel = newPanel()
         awaitUntil("listed") { titles(panel) == listOf("old") }
-        // 가장 큰 id의 행을 지우고 새로 만들면 같은 id가 다른 노트(다른 uid)에 쓰인다. 패널은 알림을 받지 않아 옛 목록을 들고 있다
         repo.delete(old.id).get()
         val reused = repo.create(NewNote.free("new")).get()
         assertEquals(old.id, reused.id)
@@ -375,6 +363,38 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
 
         assertFalse(panel.detail.isVisible)
+    }
+
+    private fun blockDatabaseOnNextListChange(panel: JNotePanel, release: java.util.concurrent.CountDownLatch) {
+        val armed = java.util.concurrent.atomic.AtomicBoolean(true)
+        panel.list.model.addListDataListener(object : javax.swing.event.ListDataListener {
+            override fun intervalAdded(e: javax.swing.event.ListDataEvent) = block()
+            override fun intervalRemoved(e: javax.swing.event.ListDataEvent) = block()
+            override fun contentsChanged(e: javax.swing.event.ListDataEvent) = block()
+            private fun block() {
+                if (armed.compareAndSet(true, false)) dbService.database.submit { release.await(10, java.util.concurrent.TimeUnit.SECONDS) }
+            }
+        })
+    }
+
+    fun testReloadClearsTheDetailWhenTheSelectedIdWasReusedByAnotherNote() {
+        val old = repo.create(NewNote.free("old")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel) == listOf("old") }
+        panel.list.selectedIndex = 0
+        awaitUntil("detail shown") { panel.detail.isVisible && panel.detail.titleLabel.text == "old" }
+        repo.delete(old.id).get()
+        val reused = repo.create(NewNote.free("new")).get()
+        assertEquals(old.id, reused.id)
+        val release = java.util.concurrent.CountDownLatch(1)
+        blockDatabaseOnNextListChange(panel, release)
+
+        panel.reload()
+        awaitUntil("list replaced") { titles(panel) == listOf("new") }
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertFalse("the old note's buttons must not act on the replacement note", panel.detail.isVisible)
+        release.countDown()
     }
 
     fun testFilteringOutTheSelectedNoteClearsTheDetail() {

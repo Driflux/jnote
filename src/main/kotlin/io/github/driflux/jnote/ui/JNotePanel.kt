@@ -83,10 +83,8 @@ class JNotePanel internal constructor(
         onConfirm = { confirmLocation(it) },
     )
 
-    // 다시 찾기는 지금 프로젝트의 파일과 노트로만 하므로, "모든 프로젝트" 보기의 다른 프로젝트 노트에는 버튼을 숨긴다. EDT에서만 쓴다
     private var shownProjectKey: String? = null
 
-    // reload()가 어느 스레드에서든 불리므로 Swing 부품 대신 이 값을 읽는다
     @Volatile
     private var allProjects = false
 
@@ -98,15 +96,12 @@ class JNotePanel internal constructor(
     }
     internal val filterCombo = ComboBox(NoteFilter.entries.toTypedArray()).apply {
         renderer = SimpleListCellRenderer.create("") { JNoteBundle.message(it.labelKey) }
-        // 필터는 이미 읽은 행에만 걸리므로 다시 읽지 않는다
         addActionListener {
             state = state.copy(filter = selectedItem as NoteFilter)
             render()
         }
     }
-    // 사전이 다시 읽힐 때마다 칩을 새로 만든다. 켜고 끄는 것은 이 줄이 아니라 state가 기억한다
     internal val tagBar = JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 2)).apply { isVisible = false }
-    // 검색창. 입력이 멈춘 뒤에 한 번만 검색하고, 검색은 EDT 밖에서 한다
     internal val searchField = SearchTextField(false).apply {
         textEditor.emptyText.text = JNoteBundle.message("toolWindow.search.placeholder")
         addDocumentListener(object : DocumentAdapter() {
@@ -115,16 +110,13 @@ class JNotePanel internal constructor(
     }
     private var searchTimer: Cancellable? = null
 
-    // reload()가 어느 스레드에서든 불리므로 state 대신 이 값을 읽는다
     @Volatile
     private var query = ""
 
-    // 늦게 끝난 옛 검색이 새 결과를 덮지 않도록 번호를 매긴다
     private val searchGeneration = AtomicInteger()
 
     internal val spinnerIcon = AsyncProcessIcon("JNote").apply { isVisible = false }
 
-    // 닫힌 뒤에 늦게 도착한 타이머가 이미 정리된 아이콘을 다시 돌리지 못하게 한다
     internal val spinner = DelayedSpinner(scheduler, onVisibleChanged = {
         if (!disposed) {
             spinnerIcon.isVisible = it
@@ -132,24 +124,18 @@ class JNotePanel internal constructor(
         }
     })
 
-    // 아직 끝나지 않은 읽기 수. 테스트가 DB 경로를 바꾸기 전에 읽기가 끝났는지 확인하는 데 쓴다
     private val pendingLoads = AtomicInteger()
     internal val isIdle: Boolean get() = pendingLoads.get() == 0
 
-    // EDT에서만 바꾼다
     internal var state = ToolWindowState()
         private set
 
-    // 늦게 끝난 옛 읽기가 새 결과를 덮지 않도록 번호를 매긴다
     private val generation = AtomicInteger()
 
-    // 선택이 빠르게 바뀔 때 늦게 도착한 옛 노트가 상세를 덮지 않도록 번호를 매긴다
     private val detailGeneration = AtomicInteger()
 
-    // 상세에 지금 보이는 노트의 id. EDT에서만 쓴다
-    private var shownDetailId: Long? = null
+    private var shownDetailUid: String? = null
 
-    // render()가 목록을 갈아 끼우며 선택이 흔들리는 동안에는 상세를 비우지 않는다. EDT에서만 쓴다
     private var renderingSelection = false
 
     @Volatile
@@ -176,7 +162,6 @@ class JNotePanel internal constructor(
             firstComponent = JBScrollPane(list)
             secondComponent = detail
         }, BorderLayout.CENTER)
-        // 구독을 먼저 걸어 첫 읽기 사이에 오는 알림을 놓치지 않는다
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(NotesChanged.TOPIC, NotesChangedListener { reload() })
         ApplicationManager.getApplication().messageBus.connect(this)
@@ -184,7 +169,6 @@ class JNotePanel internal constructor(
         reload()
     }
 
-    /** 어느 스레드에서 불러도 된다. 읽기는 EDT 밖에서, 화면 갱신은 EDT에서 한다. */
     fun reload() {
         val ticket = generation.incrementAndGet()
         val allProjects = allProjects
@@ -204,7 +188,6 @@ class JNotePanel internal constructor(
     internal fun delete(note: Note): CompletableFuture<*> =
         deleteOn(NoteDeletion.onCurrentDatabase(), note)
 
-    // 되돌리기는 지운 그 DB로 가야 하므로 같은 NoteDeletion을 알림 동작까지 들고 간다
     private fun deleteOn(deletion: NoteDeletion, note: Note): CompletableFuture<*> =
         deletion.delete(note.id).whenComplete { deleted, error ->
             onEdt {
@@ -214,7 +197,6 @@ class JNotePanel internal constructor(
                         publishChanged()
                         ToolWindowNotifier.deleted(project) { undo(deletion, deleted) }
                     }
-                    // 이미 지워진 노트라면 목록만 새로 고친다
                     else -> publishChanged()
                 }
             }
@@ -234,7 +216,6 @@ class JNotePanel internal constructor(
                     done.complete(Unit)
                     return@onEdt
                 }
-                // 저장소가 알림을 UI 스레드로 옮겨 보내므로 여기서는 실패만 알린다
                 saver.update(project, note, draft).whenComplete { _, error ->
                     if (error != null) onEdt { ToolWindowNotifier.editFailed(project, (error as? CompletionException)?.cause ?: error) }
                     done.complete(Unit)
@@ -262,7 +243,6 @@ class JNotePanel internal constructor(
         ApplicationManager.getApplication().invokeLater({ block() }, project.disposed)
     }
 
-    // 프로젝트 키는 git 설정 파일을 읽으므로 DB 스레드가 아니라 풀 스레드에서 구한다
     private fun resolveKey(): CompletableFuture<String> =
         CompletableFuture.supplyAsync({ project.service<ProjectKeyService>().resolve().key }, AppExecutorUtil.getAppExecutorService())
 
@@ -273,7 +253,6 @@ class JNotePanel internal constructor(
             val notes = NoteRepository(database).listSummaries(key, allProjects)
             val dictionary = tags.list()
             val assignments = tags.assignments()
-            // 노트가 바뀌어 다시 읽을 때도 일치 여부를 새로 구해야 새로 생긴 노트가 결과에 들어온다
             val match: CompletableFuture<SearchMatch?> =
                 if (SearchQuery.isSearchable(query)) searchIds(key, query, allProjects).thenApply { it } else CompletableFuture.completedFuture(null)
             CompletableFuture.allOf(notes, dictionary, assignments, match)
@@ -289,7 +268,6 @@ class JNotePanel internal constructor(
         searchTimer = scheduler.schedule(SEARCH_DEBOUNCE_MS) { applyQuery(searchField.text) }
     }
 
-    /** EDT에서만 부른다. 입력이 최소 길이보다 짧으면 검색 없이 목록으로 돌아간다. */
     internal fun applyQuery(text: String) {
         searchTimer = null
         val normalized = SearchQuery.normalize(text)
@@ -303,7 +281,6 @@ class JNotePanel internal constructor(
         }
         val allProjects = allProjects
         pendingLoads.incrementAndGet()
-        // 노트 목록은 이미 읽어 두었으므로 일치하는 id만 새로 구한다
         resolveKey().thenCompose { searchIds(it, normalized, allProjects) }.whenComplete { match, error ->
             pendingLoads.decrementAndGet()
             onEdt {
@@ -322,7 +299,6 @@ class JNotePanel internal constructor(
         val free = JNoteBundle.message("toolWindow.subtitle.free")
         val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free, loaded.noteTags[it.id].orEmpty()) }
         shownProjectKey = loaded.projectKey
-        // 검색 없이 읽은 결과가 그 사이 도착한 검색 결과를 지우지 않게 한다
         state = state.copy(notes = rows, allProjects = allProjects, match = loaded.match ?: state.match).withTags(loaded.dictionary)
         rebuildTagBar()
         render()
@@ -340,7 +316,6 @@ class JNotePanel internal constructor(
                 when {
                     error != null -> ToolWindowNotifier.renameTagFailed(project, error.cause ?: error)
                     result is TagRenameResult.Conflict -> ToolWindowNotifier.tagExists(project, name.trim())
-                    // 입력 검사를 지났다면 일어나지 않지만, 다른 프로세스가 사이에 바꿨을 수 있다. 어느 쪽이든 목록은 새로 읽는다
                     else -> publishChanged()
                 }
             }
@@ -361,7 +336,6 @@ class JNotePanel internal constructor(
                 state = state.toggleTag(tag.id)
                 render()
             }
-            // 오른쪽 클릭은 켜고 끄는 동작이 아니라 이름 바꾸기와 삭제 메뉴를 연다
             chip.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent) = showMenu(e)
                 override fun mouseReleased(e: MouseEvent) = showMenu(e)
@@ -378,17 +352,16 @@ class JNotePanel internal constructor(
     }
 
     private fun render() {
-        val selectedId = list.selectedValue?.summary?.id
+        val selectedUid = list.selectedValue?.summary?.uid
         renderingSelection = true
         try {
             model.replaceAll(state.visibleNotes)
             showEmptyText()
-            val index = model.items.indexOfFirst { it.summary.id == selectedId }
+            val index = model.items.indexOfFirst { it.summary.uid == selectedUid }
             if (index >= 0) list.selectedIndex = index
         } finally {
             renderingSelection = false
         }
-        // 다시 읽어도 보던 노트를 유지하고(최신 내용으로 다시 읽는다), 그 사이 지워졌다면 상세를 비운다
         showDetailOf(list.selectedValue?.summary)
         project.service<PendingNoteSelection>().peek()?.let { selectAndClear(it) }
     }
@@ -396,12 +369,10 @@ class JNotePanel internal constructor(
     private fun onSelectRequested(requested: Project, noteId: Long) {
         if (requested !== project) return
         onEdt {
-            // 첫 읽기 전이면 요청을 남겨 두고, 읽기가 끝나는 show()가 처리한다
             if (state.notes != null) selectAndClear(noteId)
         }
     }
 
-    /** 목록에 없는 노트(다른 프로젝트 등)는 선택을 바꾸지 않고, 요청도 지우지 않는다. */
     private fun selectAndClear(noteId: Long) {
         val index = model.items.indexOfFirst { it.summary.id == noteId }
         if (index < 0) return
@@ -410,12 +381,10 @@ class JNotePanel internal constructor(
         project.service<PendingNoteSelection>().clear(noteId)
     }
 
-    // 목록은 요약만 들고 있으므로 전체 노트는 선택된 한 건만 읽는다
     private fun showDetailOf(summary: NoteSummary?) {
         val ticket = detailGeneration.incrementAndGet()
-        // 다른 노트로 바뀌면 읽는 동안 이전 노트의 버튼이 남아 엉뚱한 노트를 지우지 않도록 먼저 비운다. 같은 노트를 다시 읽을 때만 유지한다
-        if (summary == null || summary.id != shownDetailId) {
-            shownDetailId = null
+        if (summary == null || summary.uid != shownDetailUid) {
+            shownDetailUid = null
             detail.show(null)
         }
         if (summary == null) return
@@ -426,13 +395,12 @@ class JNotePanel internal constructor(
                 if (disposed || ticket != detailGeneration.get()) return@onEdt
                 when {
                     error != null -> ToolWindowNotifier.loadFailed(project, error.cause ?: error)
-                    // 목록을 읽은 뒤 DB가 바뀌었거나 id가 다른 노트에 다시 쓰였다면 행과 다른 노트이므로 보이지 않는다
                     note?.uid != summary.uid -> {
-                        shownDetailId = null
+                        shownDetailUid = null
                         detail.show(null)
                     }
                     else -> {
-                        shownDetailId = note.id
+                        shownDetailUid = note.uid
                         detail.show(note)
                     }
                 }
@@ -442,7 +410,6 @@ class JNotePanel internal constructor(
 
     private fun showEmptyText() {
         val text = list.emptyText
-        // 태그 칩이 켜져 있으면 검색어보다 칩이 목록을 비운 것일 수 있으므로 칩 안내를 먼저 보인다
         if (state.showEmptyState && state.tagFilterActive) {
             text.text = JNoteBundle.message("toolWindow.empty.tags.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.tags.hint"))
@@ -457,7 +424,6 @@ class JNotePanel internal constructor(
         }
     }
 
-    // 단축키는 사용자가 바꿀 수 있고 메뉴 이름은 액션의 문구이므로, 둘 다 실제 값에서 가져온다
     private fun emptyHint(): String {
         val action = JNoteBundle.message("action.addNote.text")
         val shortcut = KeymapUtil.getFirstKeyboardShortcutText(ADD_NOTE_ACTION_ID)
@@ -471,7 +437,6 @@ class JNotePanel internal constructor(
     override fun dispose() {
         disposed = true
         searchTimer?.cancel()
-        // 대기 중인 타이머를 취소하고 보이는 상태를 끈다. DelayedSpinner는 EDT에서만 쓴다
         UIUtil.invokeLaterIfNeeded { spinner.stop() }
     }
 

@@ -26,7 +26,6 @@ class NoteSelectionTest : BasePlatformTestCase() {
         dbService.switchTo(dir.resolve("jnote.db"))
     }
 
-    // 테스트가 만든 패널. 닫고 읽기가 끝나야 DB 경로를 바꿔도 늦은 읽기가 엉뚱한 DB를 열지 않는다
     private val panels = mutableListOf<JNotePanel>()
 
     override fun tearDown() {

@@ -8,10 +8,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
-/**
- * 시간은 기계마다 달라 단정하지 않고 출력만 하며, JNOTE_PERF=1일 때만 돈다.
- * 실행: JNOTE_PERF=1 ./gradlew test --tests '*NoteListBenchmarkTest*' -i | grep JNOTE-PERF
- */
 class NoteListBenchmarkTest {
     @get:Rule
     val tmp = TemporaryFolder()
