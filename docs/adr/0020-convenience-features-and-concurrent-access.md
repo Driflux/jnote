@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #20
-- PRs: #79 copy snippet and keyboard control, #84 current file toggle, #90 syntax highlighting, then refresh on focus, AI notes filter (stacked)
+- PRs: #79 copy snippet and keyboard control, #84 current file toggle, #90 syntax highlighting, #91 refresh on focus, then AI notes filter (stacked)
 
 ## Context
 The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011, 0062). The 1.0 usability list in intent.md section 7 still lacks copying a snippet, keyboard control, a current-file view, highlighted snippets, a refresh for multi-window use, and an AI filter. Every one of them must keep the top principle: no startup work, no DB or file I/O on the EDT, no new dependency.
@@ -27,14 +27,16 @@ The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011,
   - The created editor is recorded before it is configured. If configuration throws, `release()` can still free it, so no editor leaks.
   - A long line makes the horizontal scrollbar take room, so its height is added to the preferred height. The height is capped at 12 lines.
   - The editor is released on the EDT when the panel is disposed, so an open snippet editor never outlives a closed panel. `NoteDetailPanel.show(null)` also releases it.
-- **Refresh on focus.** One reload when keyboard focus moves into the panel from outside it, to see changes other IDE windows wrote. A focus listener lives only as long as the panel and compares the old and new focus owner. Moving focus between the list and the search box does not reload. There is no timer and no polling.
+- **Refresh on focus.** One reload when keyboard focus moves into the panel from outside it, to see changes other IDE windows wrote. A `permanentFocusOwner` listener lives only as long as the panel and compares the old and new owner. Moving focus between the list and the search box does not reload, which `FocusEntry.entered` decides from the old and new owner (an owner is inside when it descends from the panel). When the IDE is activated again while focus is still inside the panel, the owner has not changed, so a second trigger (`ApplicationActivationListener`, connected to the panel's own disposable) reloads once in that case. The subscriptions are made before the first load so a notification that arrives during it is not missed. There is no timer and no polling (PR #91).
+- Refresh tests write through the repository without publishing `NotesChanged`, which is what another IDE process looks like to this window, so only the focus trigger can make the new note appear.
 - **AI notes only.** A check box that keeps rows with an AI source, filtered in memory like the kind filter. It combines with the kind, tag, search, and current-file filters.
 
 ## Alternatives considered
 - Copy from the DB at click time: the detail already holds the note, so a read adds a thread hop for nothing. Rejected.
 - Bind Enter and Delete to new code paths in the panel: it duplicates navigation and deletion and lets a key act on a stale selection. Rejected.
 - Rely only on the detail being cleared when the selection changes: it is not cleared while a drag is adjusting the selection, so the uid comparison is also needed. Rejected as insufficient.
-- A `ToolWindowManagerListener` or `ApplicationActivationListener` for refresh: the first misses focus changes inside the window, and the second would have to be registered in plugin.xml, which is startup work. A listener created with the panel is not. Rejected.
+- Only a `ToolWindowManagerListener`: it reports the tool window being activated, not focus entering it by a click on the list. Rejected.
+- Only the application activation listener: it misses switching from the editor to the Tool Window inside one window. It is used for the narrower case it covers, connected from the panel (a dynamic subscription) and not declared in plugin.xml, so it adds no startup work. Rejected as the only trigger.
 - Polling or a file watcher on the DB: violates "no polling" and costs idle CPU. Rejected.
 - A read-only text area with no coloring: it needs no editor but gives no syntax colors. Rejected for the highlighting feature.
 - Always keep one editor for the snippet: an editor is expensive and the intent is "created only on selection". Rejected.
@@ -48,6 +50,7 @@ The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011,
 - Cons and what we accept
   - A key pressed before the new detail has loaded, or during a mouse drag on the list, is ignored.
   - With split editors the filter uses the first selected file of `selectedFiles`, which may not be the active split. Tracked as a follow-up issue because the light test fixture has no split windows to reproduce it.
+  - Two focus edge cases are not handled and are tracked as follow-up issues. `applicationActivated` can arrive before AWT restores the focus owner, so the reload is skipped until focus re-enters. A `list -> null` then `null -> search field` pair of events counts as an entry and reads once more. Both are suspected from the AWT contract, not reproduced, since the light test fixture cannot drive real focus transfers.
   - Focusing the panel from the editor reloads each time. The reload is a summary query (ADR 0062), so the cost is small, and it is measured in the refresh PR.
   - Highlighting needs the editor machinery, so selecting a note with a snippet does a little more EDT work than a text area. It is measured in the highlighting PR.
 - Follow-up work

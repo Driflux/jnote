@@ -1,6 +1,8 @@
 package io.github.driflux.jnote.ui
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationActivationListener
+import com.intellij.openapi.wm.IdeFrame
 import com.intellij.openapi.actionSystem.CommonShortcuts
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.wm.IdeFocusManager
@@ -46,6 +48,9 @@ import io.github.driflux.jnote.model.NoteSummary
 import io.github.driflux.jnote.model.Tag
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.awt.BorderLayout
+import java.awt.Component
+import java.awt.KeyboardFocusManager
+import java.beans.PropertyChangeListener
 import java.awt.FlowLayout
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
@@ -191,6 +196,14 @@ class JNotePanel internal constructor(
         project.messageBus.connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
             override fun selectionChanged(event: FileEditorManagerEvent) = onEditorSelectionChanged()
         })
+        val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+        val focusListener = PropertyChangeListener { onFocusOwnerChanged(it.oldValue as? Component, it.newValue as? Component) }
+        focusManager.addPropertyChangeListener(FOCUS_OWNER_PROPERTY, focusListener)
+        Disposer.register(this) { focusManager.removePropertyChangeListener(FOCUS_OWNER_PROPERTY, focusListener) }
+        ApplicationManager.getApplication().messageBus.connect(this)
+            .subscribe(ApplicationActivationListener.TOPIC, object : ApplicationActivationListener {
+                override fun applicationActivated(ideFrame: IdeFrame) = onApplicationActivated()
+            })
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(NotesChanged.TOPIC, NotesChangedListener { reload() })
         ApplicationManager.getApplication().messageBus.connect(this)
@@ -207,6 +220,14 @@ class JNotePanel internal constructor(
         if (relPath == state.currentRelPath) return
         state = state.copy(currentRelPath = relPath)
         render()
+    }
+
+    internal fun onFocusOwnerChanged(oldOwner: Component?, newOwner: Component?) {
+        if (!disposed && FocusEntry.entered(this, oldOwner, newOwner)) reload()
+    }
+
+    internal fun onApplicationActivated(focusOwner: Component? = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner) {
+        if (!disposed && FocusEntry.inside(this, focusOwner)) reload()
     }
 
     internal fun focusSearch() {
@@ -506,6 +527,7 @@ class JNotePanel internal constructor(
 
     companion object {
         internal const val ADD_NOTE_ACTION_ID = "JNote.AddNote"
+        internal const val FOCUS_OWNER_PROPERTY = "permanentFocusOwner"
         private const val SEARCH_DEBOUNCE_MS = 250L
     }
 }
