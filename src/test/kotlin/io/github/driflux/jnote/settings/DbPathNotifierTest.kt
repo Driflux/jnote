@@ -10,7 +10,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 class DbPathNotifierTest : BasePlatformTestCase() {
     private val notifications = CopyOnWriteArrayList<Notification>()
-    // Path로 만들 경로에는 Windows가 허용하지 않는 <, >를 넣지 않는다
     private val ampersandPath = Paths.get("notes & more", "jnote.db")
     private val escapedAmpersandPath = Paths.get("notes &amp; more", "jnote.db").toString()
 
