@@ -109,6 +109,20 @@ class TagRepositoryTest {
     }
 
     @Test
+    fun renameIsAConflictWhenAnotherWriterTakesTheNameAfterTheCheck() {
+        val a = tag("a")
+        // 다른 IDE 프로세스가 중복 확인과 UPDATE 사이에 같은 이름을 넣는 순간을, UPDATE 직전에 도는 트리거로 재현한다
+        db.submit { c ->
+            c.createStatement().use {
+                it.execute("CREATE TEMP TRIGGER race BEFORE UPDATE OF name ON tag BEGIN INSERT INTO tag (name) VALUES (NEW.name); END")
+            }
+        }.get()
+
+        assertEquals(TagRenameResult.Conflict, tags.rename(a.id, "b").get())
+        assertEquals("a", tags.list().get().single { it.id == a.id }.name)
+    }
+
+    @Test
     fun renameReportsMissingAndBlank() {
         val a = tag("a")
         assertEquals(TagRenameResult.NotFound, tags.rename(999, "x").get())

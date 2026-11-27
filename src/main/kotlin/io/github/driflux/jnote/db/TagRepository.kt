@@ -2,6 +2,8 @@ package io.github.driflux.jnote.db
 
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.Tag
+import org.sqlite.SQLiteErrorCode
+import org.sqlite.SQLiteException
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.util.concurrent.CompletableFuture
@@ -47,13 +49,17 @@ class TagRepository(private val database: Database) {
         val clash = findByName(c, trimmed)
         when {
             clash != null && clash.id != id -> TagRenameResult.Conflict
-            else -> {
+            else -> try {
                 val changed = c.prepareStatement("UPDATE tag SET name = ? WHERE id = ?").use { s ->
                     s.setString(1, trimmed)
                     s.setLong(2, id)
                     s.executeUpdate()
                 }
                 if (changed == 0) TagRenameResult.NotFound else TagRenameResult.Renamed(Tag(id, trimmed))
+            } catch (e: SQLiteException) {
+                // 확인과 UPDATE 사이에 다른 IDE 프로세스가 같은 이름을 넣으면 여기서 UNIQUE로 실패한다
+                if (e.resultCode != SQLiteErrorCode.SQLITE_CONSTRAINT_UNIQUE) throw e
+                TagRenameResult.Conflict
             }
         }
     }
