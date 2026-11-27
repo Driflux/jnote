@@ -80,7 +80,7 @@ Export writes `repo_url` as `https://` plus the project key, such as `https://gi
 
 ## Where to put a document
 
-- **Inbox (agents).** Save the document as a `.json` file in `~/.jnote/inbox/`. When the JNote Tool Window gains focus, JNote offers to review waiting files and moves processed files to `~/.jnote/inbox/done/`. Use a new file name per batch, such as `2026-11-27-retry-notes.json`.
+- **Inbox (agents).** Save the document as a `.json` file in `~/.jnote/inbox/`. Write it under another name first (for example `batch.json.tmp`) and rename it to `.json` when it is complete, so JNote never reads a half-written file. Use a new file name per batch, such as `2026-11-27-retry-notes.json`. When the JNote tool window is activated, JNote says how many files are waiting; Review opens the import preview. While a file is being reviewed it sits in `~/.jnote/inbox/processing/`. After the import (or when nothing in it was new), it moves to `~/.jnote/inbox/done/`; a file that is not valid JSON format v1, or whose review was cancelled, goes back to the inbox. Files are never overwritten: a taken name gets `-1`, `-2`, and so on.
 - **Clipboard (web AIs).** Copy the JSON the AI produced and import it from the clipboard.
 - **File.** Import any `.json` file from Tools > JNote.
 

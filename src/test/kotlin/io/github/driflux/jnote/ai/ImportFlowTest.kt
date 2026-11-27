@@ -29,6 +29,7 @@ class ImportFlowTest : BasePlatformTestCase() {
     private val published = AtomicInteger()
     private val asked = CopyOnWriteArrayList<ImportPlan>()
     private val applied = CopyOnWriteArrayList<ImportResult>()
+    private val outcomes = CopyOnWriteArrayList<ImportOutcome>()
 
     override fun setUp() {
         super.setUp()
@@ -62,7 +63,7 @@ class ImportFlowTest : BasePlatformTestCase() {
     )
 
     private fun run(flow: ImportFlow, vararg texts: String) {
-        flow.start(texts.mapIndexed { i, text -> ImportSource("doc$i.json") { text } }) { applied += it }
+        flow.start(texts.mapIndexed { i, text -> ImportSource("doc$i.json") { text } }) { outcomes += it; (it as? ImportOutcome.Finished)?.let { f -> applied += f.result } }
         PlatformTestUtil.waitWithEventsDispatching("no notification", { notifications.isNotEmpty() }, 20)
     }
 
@@ -75,6 +76,7 @@ class ImportFlowTest : BasePlatformTestCase() {
         assertEquals(1, asked.size)
         assertEquals(1, published.get())
         assertEquals(listOf(ImportResult(2, 0, 0)), applied)
+        assertEquals(setOf(0), (outcomes.single() as ImportOutcome.Finished).decodedSources)
         val shown = notifications.single()
         assertEquals(NotificationType.WARNING, shown.type)
         assertTrue(shown.content, shown.content.startsWith(JNoteBundle.message("notification.import.done.content", 2, 0, 0)))
@@ -82,9 +84,9 @@ class ImportFlowTest : BasePlatformTestCase() {
     }
 
     fun testDeclinedPreviewWritesNothing() {
-        flow { false }.start(listOf(ImportSource("d.json") { doc("""{"kind":"FREE","title":"a"}""") }))
-        PlatformTestUtil.waitWithEventsDispatching("not asked", { asked.isNotEmpty() }, 20)
-        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+        flow { false }.start(listOf(ImportSource("d.json") { doc("""{"kind":"FREE","title":"a"}""") })) { outcomes += it }
+        PlatformTestUtil.waitWithEventsDispatching("not finished", { outcomes.isNotEmpty() }, 20)
+        assertEquals(listOf(ImportOutcome.NotApplied), outcomes)
 
         assertEquals(emptyList<String>(), titles())
         assertEquals(0, published.get())
@@ -109,6 +111,7 @@ class ImportFlowTest : BasePlatformTestCase() {
         assertEquals(NotificationType.ERROR, notifications.single().type)
         assertTrue(notifications.single().content.contains("doc0.json"))
         assertTrue(applied.isEmpty())
+        assertEquals(listOf(ImportOutcome.NotApplied), outcomes)
     }
 
     fun testChangeAfterThePreviewShowsANewPreview() {

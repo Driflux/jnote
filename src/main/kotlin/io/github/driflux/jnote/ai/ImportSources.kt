@@ -16,8 +16,15 @@ sealed interface ImportProblem {
     data class DuplicateAcrossDocuments(override val document: String, val uid: String) : ImportProblem
 }
 
-/** 읽어서 형식 검사까지 마친 결과. 계획과 반영은 [NoteImporter]가 한다. */
-data class PreparedImport(val notes: List<FormatNote>, val problems: List<ImportProblem>)
+/** 읽어서 형식 검사까지 마친 결과. [decodedSources]는 읽고 해석까지 된 원본의 순번이다. 계획과 반영은 [NoteImporter]가 한다. */
+data class PreparedImport(val notes: List<FormatNote>, val problems: List<ImportProblem>, val decodedSources: Set<Int> = emptySet())
+
+sealed interface ImportOutcome {
+    /** 반영했거나 반영할 것이 없었다. [decodedSources]의 원본은 처리된 것으로 보아도 된다. */
+    data class Finished(val result: ImportResult, val decodedSources: Set<Int>) : ImportOutcome
+
+    data object NotApplied : ImportOutcome
+}
 
 internal object ImportPreparation {
     /**
@@ -28,6 +35,7 @@ internal object ImportPreparation {
         val problems = mutableListOf<ImportProblem>()
         val decoded = mutableListOf<Pair<Int, FormatNote>>()
         val uidsByDocument = mutableMapOf<String, MutableSet<Int>>()
+        val decodedSources = mutableSetOf<Int>()
         sources.forEachIndexed { index, source ->
             checkCanceled()
             val text = try {
@@ -41,6 +49,7 @@ internal object ImportPreparation {
             when (val result = NoteFormatCodec.decode(text)) {
                 is DecodeResult.Rejected -> problems += ImportProblem.Rejected(source.name, result.error)
                 is DecodeResult.Decoded -> {
+                    decodedSources += index
                     problems += result.skipped.map { ImportProblem.Skipped(source.name, it) }
                     decoded += result.notes.map { index to it }
                     (result.notes.mapNotNull { it.uid } + result.skipped.mapNotNull { it.uid })
@@ -52,6 +61,6 @@ internal object ImportPreparation {
         problems += shared.map { (uid, documents) ->
             ImportProblem.DuplicateAcrossDocuments(documents.sorted().joinToString(", ") { sources[it].name }, uid)
         }
-        return PreparedImport(decoded.map { it.second }.filter { it.uid !in shared }, problems)
+        return PreparedImport(decoded.map { it.second }.filter { it.uid !in shared }, problems, decodedSources)
     }
 }
