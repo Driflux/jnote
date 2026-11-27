@@ -249,6 +249,7 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         assertEquals(listOf(3 to 7), barLines())
         val settings = LineMarkerSettings.getSettings()
         val provider = NoteLineMarkerProvider()
+        val wasEnabled = settings.isEnabled(provider)
         try {
             settings.setEnabled(provider, false)
             DaemonCodeAnalyzer.getInstance(project).restart()
@@ -263,7 +264,38 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
             PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
             assertEquals(listOf(3 to 7), barLines())
         } finally {
+            settings.setEnabled(provider, wasEnabled)
+        }
+    }
+
+    fun testABarRequestThatArrivesAfterTheOptionIsTurnedOffIsNotDrawnUntilTheOptionIsBackOn() {
+        openFile("GutterBarsLateRequest.txt", lines(20))
+        val created = note("GutterBarsLateRequest.txt", 3, 7, "range")
+        loadedMarkers()
+        settle()
+        assertEquals(listOf(3 to 7), barLines())
+        val settings = LineMarkerSettings.getSettings()
+        val provider = NoteLineMarkerProvider()
+        val wasEnabled = settings.isEnabled(provider)
+        try {
+            settings.setEnabled(provider, false)
+            DaemonCodeAnalyzer.getInstance(project).restart()
+            assertTrue(markers().isEmpty())
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            assertTrue(barLines().isEmpty())
+
+            gutter.rangeBars.update(myFixture.editor.document, listOf(RangeBar(created.id, 3, 7)))
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            assertTrue(barLines().isEmpty())
+
             settings.setEnabled(provider, true)
+            DaemonCodeAnalyzer.getInstance(project).restart()
+            assertEquals(1, markers().size)
+            settle()
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            assertEquals(listOf(3 to 7), barLines())
+        } finally {
+            settings.setEnabled(provider, wasEnabled)
         }
     }
 

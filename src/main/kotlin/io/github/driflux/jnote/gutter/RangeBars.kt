@@ -1,5 +1,6 @@
 package io.github.driflux.jnote.gutter
 
+import com.intellij.codeInsight.daemon.LineMarkerSettings
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.editor.Document
@@ -34,6 +35,7 @@ internal class RangeBars(private val project: Project) {
     private class Applied(val bar: RangeBar, val highlighter: RangeHighlighter)
 
     private val requested = ConcurrentHashMap<Document, List<RangeBar>>()
+    private val markerProvider = NoteLineMarkerProvider()
 
     @Volatile
     private var disposed = false
@@ -53,7 +55,11 @@ internal class RangeBars(private val project: Project) {
         runOnEdt { removeAll(document) }
     }
 
-    fun clear() {
+    fun clearIfIconsOff() {
+        if (!iconsOn()) clear()
+    }
+
+    private fun clear() {
         requested.clear()
         runOnEdt { applied.keys.toList().forEach(::removeAll) }
     }
@@ -65,7 +71,8 @@ internal class RangeBars(private val project: Project) {
 
     private fun apply(document: Document, bars: List<RangeBar>, stamp: Long) {
         if (disposed || requested[document].orEmpty() != bars) return
-        if (bars.isNotEmpty() && (document.modificationStamp != stamp || EditorFactory.getInstance().editors(document, project).findAny().isEmpty)) {
+        // 옵션을 끄기 전에 시작한 패스가 정리 뒤에 요청을 남길 수 있다
+        if (bars.isNotEmpty() && (!iconsOn() || document.modificationStamp != stamp || EditorFactory.getInstance().editors(document, project).findAny().isEmpty)) {
             requested.remove(document, bars)
             return
         }
@@ -93,6 +100,8 @@ internal class RangeBars(private val project: Project) {
         }
         if (current.isEmpty()) applied.remove(document)
     }
+
+    private fun iconsOn(): Boolean = LineMarkerSettings.getSettings().isEnabled(markerProvider)
 
     private fun removeAll(document: Document) {
         val current = applied.remove(document) ?: return
