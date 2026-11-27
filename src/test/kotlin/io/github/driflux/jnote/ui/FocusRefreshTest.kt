@@ -116,6 +116,59 @@ class FocusRefreshTest : BasePlatformTestCase() {
         awaitUntil("refreshed") { titles(panel) == listOf("seen after activation") }
     }
 
+    fun testReturningToTheIdeBeforeFocusIsRestoredToThePanelReloads() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        writeFromAnotherWindow("seen before focus came back")
+
+        panel.onApplicationActivated(null, focusOwner = null, restoredOwner = panel.list, permanentOwner = null)
+
+        awaitUntil("refreshed") { titles(panel) == listOf("seen before focus came back") }
+    }
+
+    fun testReturningToTheIdeWhileTheWindowHasNoFocusOwnerYetUsesThePermanentOwner() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        writeFromAnotherWindow("seen through the permanent owner")
+
+        panel.onApplicationActivated(null, focusOwner = null, restoredOwner = null, permanentOwner = panel.list)
+
+        awaitUntil("refreshed") { titles(panel) == listOf("seen through the permanent owner") }
+    }
+
+    fun testTheRestoredOwnerWinsOverThePermanentOne() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        writeFromAnotherWindow("unseen")
+
+        panel.onApplicationActivated(null, focusOwner = null, restoredOwner = outside, permanentOwner = panel.list)
+        settle(panel)
+
+        assertTrue(titles(panel).isEmpty())
+    }
+
+    fun testReturningToTheIdeBeforeFocusIsRestoredToTheEditorDoesNotReload() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        writeFromAnotherWindow("unseen")
+
+        panel.onApplicationActivated(null, focusOwner = null, restoredOwner = outside, permanentOwner = null)
+        settle(panel)
+
+        assertTrue(titles(panel).isEmpty())
+    }
+
+    fun testAFocusOwnerOutsideThePanelWinsOverTheRestoredOne() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        writeFromAnotherWindow("unseen")
+
+        panel.onApplicationActivated(null, focusOwner = outside, restoredOwner = panel.list, permanentOwner = panel.list)
+        settle(panel)
+
+        assertTrue(titles(panel).isEmpty())
+    }
+
     fun testReturningToTheIdeWithFocusInTheEditorDoesNotReload() {
         val panel = newPanel()
         awaitUntil("first load") { panel.state.notes != null }
