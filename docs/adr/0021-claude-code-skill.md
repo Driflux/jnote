@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #21
-- PR: #98 (plugin directory and capture), #102 (recall), #104 (organize), (marketplace manifest and install docs)
+- PR: #98 (plugin directory and capture), #102 (recall), #104 (organize), #105 (marketplace manifest and install docs)
 
 ## Context
 intent.md section 10.5 asks for a Claude Code skill `jnote` that captures, recalls, and organizes notes, distributed from this repository through a Claude Code plugin marketplace. The skill must write only into `~/.jnote/inbox/`, read only through the read-only view `v_notes_export`, and use `docs/ai-format.md` (ADR 0016) as its single spec. The JetBrains plugin never calls an AI and runs no server (intent.md section 2), so the skill must work with files alone.
@@ -13,7 +13,7 @@ Claude Code installs a marketplace plugin by copying the plugin directory into i
 ## Decision
 - **A skill, not an MCP server.** The skill is instructions that the agent follows with its own shell and file tools. It adds no process, no port, and no dependency, and the IDE plugin stays unaware of it.
 - **Contract.** Writes are JSON format v1 documents saved as new files in `~/.jnote/inbox/`; every one passes the import preview (#17, #18) before anything reaches the DB. Reads go through `v_notes_export` with `sqlite3 -readonly` (recall PR). The skill never opens `jnote.db` for writing and never overwrites an inbox file.
-- **Layout (intent.md 10.5, unchanged).** `claude-plugin/.claude-plugin/plugin.json` and `claude-plugin/skills/jnote/SKILL.md`; the root `.claude-plugin/marketplace.json` comes in the last PR.
+- **Layout (intent.md 10.5, unchanged).** `claude-plugin/.claude-plugin/plugin.json` and `claude-plugin/skills/jnote/SKILL.md`; the root `.claude-plugin/marketplace.json` comes in the last PR (#105).
 - **Recall flow (#102).** Reads go only through `v_notes_export` with `sqlite3 -readonly`, one statement per call, with the query passed through a quoted heredoc so `$`, backticks, and `\` in search terms reach SQLite verbatim; if a query line equals the delimiter, the agent picks another delimiter. User words go only inside single-quoted SQL strings with `'` doubled. The skill gives three example queries (text search over every text column including `rel_path`, notes on one file scoped by project key, whole note by `uid`). `ClaudePluginTest` runs every `sql` example against a real migrated DB.
 - **Organize flow (#104).** The agent proposes retitles, tags, and merges of duplicates as uid-upsert updates, and writes nothing until the user agrees. Each update is built from the whole `v_notes_export` row (spec section "Turning a view row into a note"), because an update clears every field it leaves out; `project` goes into `anchor.project_path` and the anchor fields stay as stored, so the location status is kept. The proposal names each note by `uid` and location, since titles can be identical. A merge updates only the kept note, and the user deletes the others in the IDE because import never deletes.
 - **Re-read before publishing (#104).** Right before the file is written, the agent reads the whole row of every note in the proposal again, duplicates included, and asks again when a row changed or is gone. Whole rows are compared because a tag rename changes `tags` without touching `updated_at`. An update built from an old row would undo the newer edit, and one for a deleted note would recreate it.
@@ -28,6 +28,9 @@ Claude Code installs a marketplace plugin by copying the plugin directory into i
 - **Raw origin URL.** `git remote get-url origin` applies `url.*.insteadOf` rewrites, while the IDE's `GitConfigReader` reads the URL as written in the config. Using the rewritten URL would anchor a note to a different project key than the open project, so the skill reads the configured value, as docs/ai-format.md specifies.
 - **Publish needs a validator.** The document is written to a hidden temp file, checked with `python3 -m json.tool` or `jq empty`, and published with `ln`. When neither tool exists the check fails and nothing is published; an unchecked publish could expose a truncated file (a failed write) to the inbox reader.
 - **No `version` in plugin.json.** Without it Claude Code takes the commit SHA as the version, so users get skill fixes with the repository instead of staying on a pinned copy.
+- **Marketplace manifest (#105).** `.claude-plugin/marketplace.json` at the repository root names the marketplace `jnote` (owner Driflux) and lists one plugin `jnote` with source `./claude-plugin`, so users run `/plugin marketplace add Driflux/jnote` and `/plugin install jnote@jnote`. The entry has no `version`, for the same reason as plugin.json. `ClaudePluginTest` checks the marketplace name and owner, the source, and that the entry name equals the plugin manifest name, because install by `jnote@jnote` fails when they differ.
+- **Manual update is two steps (#105).** `/plugin marketplace update jnote` refreshes only the marketplace; the installed plugin stays on its old revision until `claude plugin update jnote@jnote` runs. The README says both, and mentions marketplace auto-update as the alternative. Codex verified this with a Git-backed marketplace.
+- **Test task inputs (#105).** The tests read `docs/ai-format.md`, `claude-plugin/`, and `.claude-plugin/` straight from the working tree, not from the classpath, so Gradle would reuse a cached test result after a change there. `tasks.test` in build.gradle.kts declares the three as inputs, so a doc or manifest change re-runs the tests.
 - **Why `syncSkillSpec` exists.** An installed skill cannot read outside its plugin folder, so the copy is needed. A spec change is made in docs/ai-format.md, then `./gradlew syncSkillSpec` is run; `ClaudePluginTest` catches a stale copy.
 - **Tests.** The tests normalize CRLF to LF before reading files, so a CRLF checkout compares equal. `ClaudePluginTest` checks the spec copy, the raw-origin and validator instructions, the manifest name, the skill frontmatter and its pointer to the spec, and decodes every JSON example in SKILL.md with the real codec (no skipped items, snapshot covers the anchored lines).
 
@@ -39,10 +42,13 @@ Claude Code installs a marketplace plugin by copying the plugin directory into i
 - Make the repository root the plugin root (`source: "."`) so the skill reads `docs/ai-format.md` directly: changes the agreed layout and copies the whole repository into the plugin cache. Rejected.
 - Open the DB with `immutable=1` or read-write when the read-only open fails: wrong results while the IDE writes, or a second writer. Rejected; ask the user to open the Tool Window instead.
 - An automated test that runs the `sqlite3` CLI: adds a binary dependency to the suite. Rejected; the examples run through the plugin's own JDBC driver against the real view.
+- Pin a `version` in the marketplace entry: users would stay on the pinned copy until a release bump. Rejected, same as plugin.json.
 - A symlink from the plugin folder to `docs/ai-format.md`: not read for local sources and fragile on Windows checkouts. Rejected.
 
 ## Consequences
 - The IDE side of the inbox (#17, #18) is not merged with this PR; the skill's "JNote shows it for review" text is true only once those land. Merge order is tracked as a follow-up.
+- Installing from GitHub (`Driflux/jnote`) works only after the marketplace file reaches the default branch; before that it was checked only against a local checkout.
+- The plugin is separate from the JetBrains Marketplace plugin and is not part of its zip.
 - Pros
   - No process, no dependency, nothing in the IDE plugin zip.
   - Every agent write is reviewed by a person in the IDE.
@@ -52,5 +58,4 @@ Claude Code installs a marketplace plugin by copying the plugin directory into i
   - The skill depends on the agent following instructions; the preview and the codec's validation catch what it gets wrong.
   - The DB path is configurable in the IDE, and the skill cannot read IDE settings. Recall uses `~/.jnote/jnote.db` unless the user names another path.
 - Follow-up work
-  - Marketplace manifest and install docs (last PR of #21).
   - A revision check on import, so a stale organize file cannot overwrite a newer edit.
