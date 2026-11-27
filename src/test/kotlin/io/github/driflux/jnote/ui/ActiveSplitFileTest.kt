@@ -106,6 +106,7 @@ class ActiveSplitFileTest : FileEditorManagerTestCase() {
         val panel = newPanel()
         awaitUntil("listed") { titles(panel).size == 2 }
         panel.currentFileBox.doClick(0)
+        assertEquals(listOf("in B"), titles(panel))
 
         activate(left)
 
