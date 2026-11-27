@@ -95,17 +95,21 @@ class DbPathChangeTest {
     }
 
     @Test
-    fun largeDatabaseWithAWalIsReadFromTheMainFileOnly() {
+    fun databaseWithAWalTooLargeToCopyIsInvalidEvenIfTheMainFileHasANoteTable() {
         val before = DbPathChange.maxCopyBytes
         DbPathChange.maxCopyBytes = 0
         try {
-            val walOnly = crashedWithWal("wal-only.db", "create table item(x)")
-            assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), walOnly))
-            val checkpointed = crashedWithWal("checkpointed.db", "create table note(x)", "PRAGMA wal_checkpoint", "create table extra(x)")
-            assertEquals(Plan.SwitchToExisting(checkpointed), DbPathChange.plan(path("cur.db"), checkpointed))
+            val renamed = crashedWithWal("renamed.db", "create table note(x)", "PRAGMA wal_checkpoint", "alter table note rename to item")
+            assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), renamed))
         } finally {
             DbPathChange.maxCopyBytes = before
         }
+    }
+
+    @Test
+    fun noteTableRemovedInTheWalIsSeen() {
+        val renamed = crashedWithWal("renamed.db", "create table note(x)", "PRAGMA wal_checkpoint", "alter table note rename to item")
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), renamed))
     }
 
     @Test

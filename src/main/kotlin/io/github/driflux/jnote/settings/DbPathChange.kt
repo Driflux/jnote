@@ -1,5 +1,6 @@
 package io.github.driflux.jnote.settings
 
+import com.intellij.openapi.diagnostic.thisLogger
 import org.sqlite.JDBC
 import java.nio.file.Files
 import java.nio.file.Path
@@ -66,21 +67,27 @@ object DbPathChange {
         val wal = sidecar(file, "-wal")
         // -wal이 없으면 본 파일이 내용의 전부라 immutable로 연다. 잠금을 잡지 않고 -wal/-shm 파일도 만들지 않는다
         if (!Files.exists(wal)) return querySchema(immutable(file))
-        if (Files.size(file) + Files.size(wal) > maxCopyBytes) {
-            // 크면 복사하지 않고 본 파일만 읽는다. 본 파일에 테이블이 없으면 -wal에 무엇이 있는지 모르므로 통과시키지 않는다
-            return querySchema(immutable(file)).takeIf { it.tables.isNotEmpty() } ?: Schema(emptySet(), UNKNOWN_VERSION)
+        // -wal에만 있는 내용까지 읽어야 하지만 원본에 잠금이나 -shm을 남기지 않도록 사본을 읽는다.
+        // 너무 커서 복사하지 않으면 -wal에 무엇이 있는지 모르므로 통과시키지 않는다
+        if (Files.size(file) + Files.size(wal) > maxCopyBytes) return UNKNOWN
+        repeat(COPY_ATTEMPTS) {
+            val dir = Files.createTempDirectory("jnote-check")
+            try {
+                val before = stamps(file, wal)
+                val copy = dir.resolve("check.db")
+                Files.copy(file, copy)
+                Files.copy(wal, sidecar(copy, "-wal"))
+                // 두 파일을 따로 복사하는 사이 다른 연결이 쓰거나 체크포인트하면 서로 다른 시점의 사본이 되므로 다시 한다
+                if (stamps(file, wal) == before) return querySchema("jdbc:sqlite:" + copy.toUri())
+            } finally {
+                if (!dir.toFile().deleteRecursively()) thisLogger().warn("Cannot delete the temporary copy in $dir")
+            }
         }
-        // -wal에만 있는 내용까지 읽어야 하지만 원본에 잠금이나 -shm을 남기지 않도록 사본을 읽는다
-        val dir = Files.createTempDirectory("jnote-check")
-        try {
-            val copy = dir.resolve("check.db")
-            Files.copy(file, copy)
-            Files.copy(wal, sidecar(copy, "-wal"))
-            return querySchema("jdbc:sqlite:" + copy.toUri())
-        } finally {
-            dir.toFile().deleteRecursively()
-        }
+        throw IllegalStateException("$file kept changing while it was being checked")
     }
+
+    private fun stamps(vararg files: Path): List<Pair<Long, java.nio.file.attribute.FileTime>> =
+        files.map { Files.size(it) to Files.getLastModifiedTime(it) }
 
     private fun immutable(file: Path): String = "jdbc:sqlite:" + file.toUri() + "?mode=ro&immutable=1"
 
@@ -114,7 +121,8 @@ object DbPathChange {
 
     private val SQLITE_HEADER = "SQLite format 3".toByteArray(Charsets.US_ASCII) + 0.toByte()
     private const val NOTE_TABLE = "note"
-    private const val UNKNOWN_VERSION = -1
+    private const val COPY_ATTEMPTS = 3
+    private val UNKNOWN = Schema(emptySet(), -1)
 
     /** -wal이 있는 DB를 사본으로 읽을 때 복사할 최대 크기(본 파일 + -wal). */
     internal var maxCopyBytes: Long = 64L shl 20

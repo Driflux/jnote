@@ -16,8 +16,8 @@ When the new DB path points to an existing file, `DbPathChange.plan` returned `S
 - Then the table names and `user_version` are read. Allowed: a database with no tables and `user_version = 0`, or a database with a `note` table. Anything else is `Invalid(NOT_JNOTE)`.
 - How it reads without touching the file:
   - No `-wal` file: the main file holds all of its content, so the connection uses `mode=ro&immutable=1`. No lock is taken and no `-wal` or `-shm` file is created. Measured: a plain `mode=ro` connection on a WAL-mode file without sidecars created `-wal` and `-shm` and left them behind.
-  - A `-wal` file exists (the DB is in use, or a writer crashed): the main file and its `-wal` are copied into a temp folder and the copy is read, so tables that exist only in the WAL are seen. The temp folder is deleted in `finally`.
-  - A `-wal` file exists and the main file plus `-wal` exceed 64 MiB: no copy. The main file alone is read immutably. If it shows tables, the rule above applies; if it shows none, the content of the WAL is unknown and the file is refused (`NOT_JNOTE`). A JNote database that large has been checkpointed long ago, so its `note` table is in the main file.
+  - A `-wal` file exists (the DB is in use, or a writer crashed): the main file and its `-wal` are copied into a temp folder and the copy is read, so tables that exist only in the WAL are seen. Size and modification time of both files are compared before and after the copy; if either changed (a write or checkpoint happened between the two copies), the copy is retried, up to 3 times, and then the plan fails with the generic failure notification. The temp folder is deleted in `finally`; a failed delete is logged.
+  - A `-wal` file exists and the main file plus `-wal` exceed 64 MiB: nothing is copied and the file is refused (`NOT_JNOTE`). The main file alone cannot tell, because the WAL can rename or drop the `note` table.
 - The path is passed as a `file:` URI, so spaces, `#` and `%` in folder names are encoded.
 - Two new reasons with messages in both bundles: `settings.dbPath.invalid.notSqlite` and `settings.dbPath.invalid.notJNote`. A refusal in `requireUsable` uses the existing `UnusableTarget` notification.
 - This is an early refusal before asking plus a re-check right before opening. It is not a guarantee: a file replaced between the re-check and the open can still be migrated.
@@ -27,6 +27,7 @@ When the new DB path points to an existing file, `DbPathChange.plan` returned `S
 - Read a WAL database with a plain `mode=ro` connection: it takes part in SQLite locking and can create a missing `-shm` next to another application's file.
 - Copy any size when a `-wal` exists: a large foreign database would be copied in full on every Apply.
 - Treat an inconclusive large file as usable and leave it to `requireUsable`: `requireUsable` runs the same check, so nothing would stop the migrations.
+- Read only the main file of a large database with a `-wal`: the WAL can rename the `note` table, so the main file can say "JNote" for another application's database (found in review).
 - Allow only JNote databases and refuse empty files: an empty file is a natural way to start a new database at a chosen path.
 - Run the check in the switcher after the confirmation: the user would confirm a switch that then fails.
 - Parse page 1 of the file by hand instead of opening SQLite: does not see content that is still in a `-wal` file, and duplicates the file format.
@@ -38,7 +39,8 @@ When the new DB path points to an existing file, `DbPathChange.plan` returned `S
   - The check takes no lock and leaves no file behind next to the target.
 - Cons and what we accept
   - For a database with a `-wal` file, up to 64 MiB is copied into a temp folder in the background task.
-  - A large database whose tables are all still in the WAL is refused even if it is a JNote database. This needs a database over 64 MiB that was never checkpointed.
+  - A JNote database over 64 MiB that another process has open (so it has a `-wal`) is refused. Closing the other IDE first makes it pass. JNote databases are expected to stay far below that size.
+  - The size limit is checked before the copy; a file that grows during the copy is caught by the before/after comparison and retried.
   - A file whose header is valid but whose content is damaged fails the plan with the generic failure notification.
   - The window between the re-check and the open remains.
 - Follow-up work
