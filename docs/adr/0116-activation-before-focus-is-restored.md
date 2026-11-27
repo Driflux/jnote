@@ -22,7 +22,7 @@ AWT (`DefaultKeyboardFocusManager`) sets the focused window first and then asks 
 
 ## Consequences
 - Pros
-  - The refresh no longer depends on whether the activation callback runs before or after AWT restores the component focus.
+  - When focus returns to the window's last focused component, the refresh no longer depends on whether the activation callback runs before or after AWT restores it.
 - Cons and what we accept
   - If the restored component differs from `mostRecentFocusOwner` (for example a focus request queued during activation), the decision follows `mostRecentFocusOwner`. The next focus entry into the panel reloads anyway.
   - With two project frames, if the user last focused frame B and then activates frame A in the gap described above, step 3 names a component of frame B and frame A's JNote does not reload. The next focus entry into the panel reloads.
