@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #21
-- PR: #98 (plugin directory and capture), #102 (recall), (organize), (marketplace manifest and install docs)
+- PR: #98 (plugin directory and capture), #102 (recall), #104 (organize), (marketplace manifest and install docs)
 
 ## Context
 intent.md section 10.5 asks for a Claude Code skill `jnote` that captures, recalls, and organizes notes, distributed from this repository through a Claude Code plugin marketplace. The skill must write only into `~/.jnote/inbox/`, read only through the read-only view `v_notes_export`, and use `docs/ai-format.md` (ADR 0016) as its single spec. The JetBrains plugin never calls an AI and runs no server (intent.md section 2), so the skill must work with files alone.
@@ -15,6 +15,9 @@ Claude Code installs a marketplace plugin by copying the plugin directory into i
 - **Contract.** Writes are JSON format v1 documents saved as new files in `~/.jnote/inbox/`; every one passes the import preview (#17, #18) before anything reaches the DB. Reads go through `v_notes_export` with `sqlite3 -readonly` (recall PR). The skill never opens `jnote.db` for writing and never overwrites an inbox file.
 - **Layout (intent.md 10.5, unchanged).** `claude-plugin/.claude-plugin/plugin.json` and `claude-plugin/skills/jnote/SKILL.md`; the root `.claude-plugin/marketplace.json` comes in the last PR.
 - **Recall flow (#102).** Reads go only through `v_notes_export` with `sqlite3 -readonly`, one statement per call, with the query passed through a quoted heredoc so `$`, backticks, and `\` in search terms reach SQLite verbatim; if a query line equals the delimiter, the agent picks another delimiter. User words go only inside single-quoted SQL strings with `'` doubled. The skill gives three example queries (text search over every text column including `rel_path`, notes on one file scoped by project key, whole note by `uid`). `ClaudePluginTest` runs every `sql` example against a real migrated DB.
+- **Organize flow (#104).** The agent proposes retitles, tags, and merges of duplicates as uid-upsert updates, and writes nothing until the user agrees. Each update is built from the whole `v_notes_export` row (spec section "Turning a view row into a note"), because an update clears every field it leaves out; `project` goes into `anchor.project_path` and the anchor fields stay as stored, so the location status is kept. The proposal names each note by `uid` and location, since titles can be identical. A merge updates only the kept note, and the user deletes the others in the IDE because import never deletes.
+- **Re-read before publishing (#104).** Right before the file is written, the agent reads the whole row of every note in the proposal again, duplicates included, and asks again when a row changed or is gone. Whole rows are compared because a tag rename changes `tags` without touching `updated_at`. An update built from an old row would undo the newer edit, and one for a deleted note would recreate it.
+- **Stale file and skipped items (#104).** Format v1 has no revision precondition, so a note edited after publishing is still overwritten on Apply. The skill tells the user to discard the pending file and ask again if any note in it changes before Apply. JNote skips an invalid item and applies the rest, so the skill tells the user to check that the kept note holds the approved text and tags before deleting a duplicate.
 - **Project key for recall.** The key is the origin URL with a lower-case host, without scheme, user, port, and trailing `.git`, matching `RepoUrl.normalize`. A project with no origin, or whose origin is a local path, is keyed by the absolute folder path, the same fallback as capture. The same relative path can exist in other projects, so file queries always filter by project.
 - **Read-only open and WAL.** The DB uses WAL mode. With no open connection and no `-wal`/`-shm` files, a read-only open fails with "unable to open database file". The skill asks the user to open the JNote Tool Window and retry. It forbids `immutable=1` and a read-write open: immutable skips locking and can return wrong results while the IDE writes, and a read-write open breaks the single-writer contract.
 - **SQLite version.** The view uses `group_concat(... ORDER BY ...)`, which needs SQLite 3.44 or newer; older versions cannot parse the schema. The skill checks `sqlite3 --version` and stops with a message.
@@ -32,6 +35,7 @@ Claude Code installs a marketplace plugin by copying the plugin directory into i
 - MCP server: a long-running process per agent session, against the lightweight principle (intent.md section 2), and intent.md already rejects it. Rejected.
 - Let the skill write the DB directly: bypasses the preview, the backup, and uid validation, and races the IDE's single DB executor. Rejected by intent.md 10.2.
 - Link to `docs/ai-format.md` on GitHub: no copy, but needs network and can be newer than the installed IDE plugin. Rejected.
+- A revision precondition in format v1 (reject an update whose row changed): the right fix for stale files, but it changes the format and the importer. Rejected for this PR; the skill instructs the user instead.
 - Make the repository root the plugin root (`source: "."`) so the skill reads `docs/ai-format.md` directly: changes the agreed layout and copies the whole repository into the plugin cache. Rejected.
 - Open the DB with `immutable=1` or read-write when the read-only open fails: wrong results while the IDE writes, or a second writer. Rejected; ask the user to open the Tool Window instead.
 - An automated test that runs the `sqlite3` CLI: adds a binary dependency to the suite. Rejected; the examples run through the plugin's own JDBC driver against the real view.
@@ -48,4 +52,5 @@ Claude Code installs a marketplace plugin by copying the plugin directory into i
   - The skill depends on the agent following instructions; the preview and the codec's validation catch what it gets wrong.
   - The DB path is configurable in the IDE, and the skill cannot read IDE settings. Recall uses `~/.jnote/jnote.db` unless the user names another path.
 - Follow-up work
-  - Organize, marketplace manifest and install docs (later PRs of #21).
+  - Marketplace manifest and install docs (last PR of #21).
+  - A revision check on import, so a stale organize file cannot overwrite a newer edit.
