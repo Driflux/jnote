@@ -189,6 +189,59 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         (document.getLineNumber(it.startOffset) + 1) to (document.getLineNumber(it.endOffset) + 1)
     }.sortedBy { it.first }
 
+    fun testNotesCoveringReturnsTheNotesWhoseRangeHoldsTheLineFromTheCacheOnly() {
+        openFile("GutterCovering.txt", lines(20))
+        note("GutterCovering.txt", 3, 6, "range")
+        note("GutterCovering.txt", 6, 6, "single")
+        note("GutterCovering.txt", 9, 9, "lost", NoteStatus.ORPHAN)
+        loadedMarkers()
+        val document = myFixture.editor.document
+
+        fun titles(line1: Int) = gutter.notesCovering(document, line1 - 1).map { it.title }
+
+        assertEquals(emptyList<String>(), titles(2))
+        assertEquals(listOf("range"), titles(3))
+        assertEquals(listOf("range"), titles(5))
+        assertEquals(listOf("range", "single"), titles(6))
+        assertEquals(emptyList<String>(), titles(7))
+        assertEquals(emptyList<String>(), titles(9))
+    }
+
+    fun testNotesCoveringFollowsEditsLikeTheIconDoes() {
+        openFile("GutterCoveringEdit.txt", lines(20))
+        note("GutterCoveringEdit.txt", 5, 8, "range")
+        loadedMarkers()
+        val document = myFixture.editor.document
+
+        com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project) { document.insertString(0, "x\ny\n") }
+
+        assertEquals(emptyList<String>(), gutter.notesCovering(document, 4).map { it.title })
+        assertEquals(listOf("range"), gutter.notesCovering(document, 6).map { it.title })
+    }
+
+    fun testNotesCoveringIsEmptyForAFileTheCacheHasNotLoadedYet() {
+        openFile("GutterCoveringCold.txt", lines(10))
+        note("GutterCoveringCold.txt", 2, 4, "range")
+
+        assertEquals(emptyList<String>(), gutter.notesCovering(myFixture.editor.document, 2).map { it.title })
+        assertTrue("hovering must not start a load", gutter.isIdle)
+        loadedMarkers()
+        assertEquals(listOf("range"), gutter.notesCovering(myFixture.editor.document, 2).map { it.title })
+    }
+
+    fun testNotesCoveringIsEmptyOnceTheDatabaseWasSwitchedUntilThePassRefillsTheCache() {
+        openFile("GutterCoveringSwitch.txt", lines(10))
+        note("GutterCoveringSwitch.txt", 2, 4, "range")
+        loadedMarkers()
+        val document = myFixture.editor.document
+        assertEquals(1, gutter.notesCovering(document, 2).size)
+
+        dbService.switchTo(dir.resolve("switched.db"))
+
+        assertEquals(emptyList<String>(), gutter.notesCovering(document, 2).map { it.title })
+        assertTrue(gutter.isIdle)
+    }
+
     fun testAMultiLineNoteDrawsABarOverItsRangeAndASingleLineNoteDoesNot() {
         openFile("GutterBars.txt", lines(20))
         note("GutterBars.txt", 3, 7, "range")

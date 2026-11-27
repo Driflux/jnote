@@ -283,6 +283,44 @@ class GutterAddNoteListenerTest : BasePlatformTestCase() {
         assertEquals(0, plusCount(editor))
     }
 
+    private class Hovers {
+        val lines = mutableListOf<Int?>()
+        val scheduler = io.github.driflux.jnote.ui.DelayScheduler { _, _ -> io.github.driflux.jnote.ui.Cancellable { } }
+    }
+
+    private fun previewListener(editor: EditorEx, hovers: Hovers): GutterAddNoteListener {
+        val geometry = GutterGeometry(lineAt = { it.y }, inIconArea = { it.x in 0..15 }, onAddIcon = { false }, inPreviewArea = { it.x in 10..30 })
+        val controller = GutterPreviewController(
+            hovers.scheduler,
+            { line -> hovers.lines += line; emptyList() },
+            { _, _, _, _ -> null },
+        )
+        return GutterAddNoteListener(editor, project, geometry, controller) { _, _ -> }
+    }
+
+    fun testHoveringTheNoteColumnAsksForNotesOnlyWhenTheLineChanges() {
+        val editor = openFile("GutterAddPreviewLines.txt", lines(10))
+        val hovers = Hovers()
+        val l = previewListener(editor, hovers)
+
+        repeat(5) { l.mouseMoved(mouse(editor, MouseEvent.MOUSE_MOVED, 4, x = 12)) }
+        l.mouseMoved(mouse(editor, MouseEvent.MOUSE_MOVED, 6, x = 12))
+
+        assertEquals(listOf<Int?>(4, 6), hovers.lines)
+    }
+
+    fun testHoveringOutsideTheNoteColumnOrBelowTheLastLineAsksForNothing() {
+        val editor = openFile("GutterAddPreviewOutside.txt", lines(5))
+        val hovers = Hovers()
+        val l = previewListener(editor, hovers)
+
+        l.mouseMoved(mouse(editor, MouseEvent.MOUSE_MOVED, 2, x = 3))
+        l.mouseMoved(mouse(editor, MouseEvent.MOUSE_MOVED, 9, x = 12))
+        l.mouseExited(mouse(editor, MouseEvent.MOUSE_EXITED, 2, x = 12))
+
+        assertTrue(hovers.lines.isEmpty())
+    }
+
     fun testRealGeometryReadsTheLineFromTheYCoordinate() {
         val editor = openFile("GutterAddGeometry.txt", lines(20))
         val geometry = GutterGeometry.of(editor)
@@ -292,6 +330,7 @@ class GutterAddNoteListenerTest : BasePlatformTestCase() {
             assertEquals(line, geometry.lineAt(mouse(editor, MouseEvent.MOUSE_MOVED, y)))
         }
     }
+
 
     private fun plusCount(editor: EditorEx) = editor.markupModel.allHighlighters.count { it.gutterIconRenderer is AddNoteGutterRenderer }
 }

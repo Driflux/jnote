@@ -18,6 +18,7 @@ import com.intellij.util.concurrency.AppExecutorUtil
 import io.github.driflux.jnote.NotesChanged
 import io.github.driflux.jnote.NotesChangedListener
 import io.github.driflux.jnote.anchor.AnchorLines
+import io.github.driflux.jnote.db.Database
 import io.github.driflux.jnote.db.DatabaseClosedException
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
@@ -29,7 +30,7 @@ import java.util.concurrent.CompletionException
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Service(Service.Level.PROJECT)
-internal class GutterNoteService(private val project: Project) : Disposable {
+internal class GutterNoteService(private val project: Project) : Disposable, PreviewSource {
     private val cache = FileNoteCache(::load)
     private val positions = NotePositions()
     private val bars = RangeBars(project)
@@ -68,7 +69,27 @@ internal class GutterNoteService(private val project: Project) : Disposable {
     internal val rangeBars: RangeBars get() = bars
 
     internal fun attachGutterInteraction(document: Document) {
-        if (!disposed) GutterAddNoteAttacher.attach(project, document, this) { disposed }
+        if (!disposed) GutterAddNoteAttacher.attach(project, document, this, { disposed }, this)
+    }
+
+    internal fun notesCovering(document: Document, line: Int): List<CachedNote> {
+        if (disposed) return emptyList()
+        val file = FileDocumentManager.getInstance().getFile(document) ?: return emptyList()
+        val relPath = AnchorLines.relativePath(project.basePath, file.path) ?: return emptyList()
+        if (!cacheMatchesCurrentDatabase()) return emptyList()
+        val notes = cache.peek(relPath)
+        if (notes.isNullOrEmpty()) return emptyList()
+        return NotePreviewText.covering(track(document, relPath, notes), line + 1)
+    }
+
+    override fun notesAt(document: Document, line: Int): List<CachedNote> = notesCovering(document, line)
+
+    override fun database(): Database? = synchronized(this) { seenDatabase?.database }
+
+    private fun cacheMatchesCurrentDatabase(): Boolean {
+        val seen = synchronized(this) { seenDatabase } ?: return false
+        val now = DatabaseService.getInstance().current()
+        return seen.path == now.path && (seen.database == null || seen.database === now.database)
     }
 
     internal fun isTracking(document: Document): Boolean = positions.isTracking(document)

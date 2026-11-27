@@ -18,6 +18,7 @@ internal class GutterGeometry(
     val lineAt: (MouseEvent) -> Int,
     val inIconArea: (MouseEvent) -> Boolean,
     val onAddIcon: (MouseEvent) -> Boolean,
+    val inPreviewArea: (MouseEvent) -> Boolean = { false },
 ) {
     companion object {
         val ICON_COLUMN_WIDTH: Int get() = GutterIcons.ADD.iconWidth + 2
@@ -31,6 +32,10 @@ internal class GutterGeometry(
                         e.x < gutter.iconAreaOffset + maxOf(gutter.iconsAreaWidth, ICON_COLUMN_WIDTH)
                 },
                 onAddIcon = { e -> gutter.getGutterRenderer(e.point) is AddNoteGutterRenderer },
+                inPreviewArea = { e ->
+                    e.x >= gutter.lineNumberAreaOffset + gutter.lineNumberAreaWidth &&
+                        e.x < gutter.iconAreaOffset + maxOf(gutter.iconsAreaWidth, ICON_COLUMN_WIDTH)
+                },
             )
         }
     }
@@ -40,6 +45,7 @@ internal class GutterAddNoteListener(
     private val editor: Editor,
     private val project: Project,
     private val geometry: GutterGeometry,
+    private val preview: GutterPreviewController? = null,
     private val addNote: (Project, AnchorDraft) -> Unit = { target, draft -> AddNoteAction().addNote(target, draft) },
 ) : MouseAdapter() {
     private val drag = GutterDrag()
@@ -51,7 +57,9 @@ internal class GutterAddNoteListener(
     override fun mouseMoved(e: MouseEvent) {
         if (drag.active || editor.isDisposed) return
         val line = geometry.lineAt(e)
-        if (!geometry.inIconArea(e) || line < 0 || line >= editor.document.lineCount) {
+        val inDocument = line >= 0 && line < editor.document.lineCount
+        preview?.hover(if (inDocument && geometry.inPreviewArea(e)) line else null, e.y)
+        if (!geometry.inIconArea(e) || !inDocument) {
             hide()
             return
         }
@@ -59,12 +67,15 @@ internal class GutterAddNoteListener(
     }
 
     override fun mouseExited(e: MouseEvent) {
-        if (!drag.active) hide()
+        if (drag.active) return
+        preview?.hover(null, 0)
+        hide()
     }
 
     override fun mousePressed(e: MouseEvent) {
         if (e.button != MouseEvent.BUTTON1 || e.isPopupTrigger || editor.isDisposed) return
         if (!geometry.onAddIcon(e)) return
+        preview?.hover(null, 0)
         drag.press(clamp(geometry.lineAt(e)))
         GutterDragging.mark(e, true)
     }
@@ -93,6 +104,7 @@ internal class GutterAddNoteListener(
     }
 
     fun dispose() {
+        preview?.dispose()
         drag.cancel()
         selecting = false
         hide()
