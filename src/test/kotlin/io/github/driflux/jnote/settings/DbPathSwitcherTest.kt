@@ -168,6 +168,19 @@ class DbPathSwitcherTest : BasePlatformTestCase() {
         assertEquals(current.toString(), settings.state.dbPath)
     }
 
+    fun testExistingFileReplacedByAnotherApplicationsDatabaseAfterThePlanIsLeftUntouched() {
+        val other = dir.resolve("app.db")
+        org.sqlite.JDBC().connect("jdbc:sqlite:$other", java.util.Properties())!!.use { c ->
+            c.createStatement().use { it.execute("create table item(x)") }
+        }
+        val before = Files.readAllBytes(other)
+        org.junit.Assert.assertThrows(DbPathSwitcher.UnusableTarget::class.java) {
+            run(DbPathChange.Plan.SwitchToExisting(other))
+        }
+        assertTrue(before.contentEquals(Files.readAllBytes(other)))
+        assertEquals(current, service.currentPath())
+    }
+
     fun testCancelledCopyKeepsOldDatabaseActive() {
         writeProbe()
         val old = service.database

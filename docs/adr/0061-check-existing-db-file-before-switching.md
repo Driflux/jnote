@@ -9,27 +9,37 @@
 When the new DB path points to an existing file, `DbPathChange.plan` returned `SwitchToExisting` for any writable regular file (ADR 0015). After the confirmation dialog, `DbPathSwitcher.requireUsable` opens the file through `Database`, which switches it to WAL and runs the migrations. For another application's SQLite database this creates the JNote tables inside that file, and it does so even when a later step fails. Files that are not SQLite at all were only rejected after the user had confirmed the switch.
 
 ## Decision
-- `plan` inspects an existing target before returning `SwitchToExisting`. It runs in the background plan task, before the confirmation dialog, so a bad file is refused without asking.
+- `DbPathChange.existingFileProblem` inspects an existing target without writing to it. `plan` calls it in the background plan task before returning `SwitchToExisting`, so a bad file is refused before the confirmation dialog. `DbPathSwitcher.requireUsable` calls it again right before its open-and-migrate probe, because the file can change while the dialog is open.
+- The file is resolved to its real path first, so a symlink finds the `-wal` next to the real file.
 - A 0-byte file is allowed: SQLite opens it as an empty database.
 - Otherwise the first 16 bytes must be `SQLite format 3\0`; if not, `Invalid(NOT_SQLITE)`.
-- The table names are read from `sqlite_master` through a read-only connection. A database with no tables, or with a `note` table, is allowed. Any other database is `Invalid(NOT_JNOTE)`.
-- The check never writes. With no `-wal` file next to the target, the main file holds all of its content, so the connection uses `mode=ro&immutable=1`: no lock and no `-wal` or `-shm` file is created. Measured with a plain `mode=ro` connection: on a WAL-mode file without sidecars it created `-wal` and `-shm` and left them behind. With a `-wal` file present (the DB is in use or was not closed cleanly), the connection uses `mode=ro` so that it reads the WAL content too. The path is passed as a `file:` URI, so spaces, `#`, `%` and `?` in folder names are encoded.
-- Two new reasons with messages in both bundles: `settings.dbPath.invalid.notSqlite` and `settings.dbPath.invalid.notJNote`.
-- The check is an early refusal before the user is asked, not a guarantee. The file can change between the plan and the switch. `requireUsable` keeps its open-and-migrate probe and its `UnusableTarget` notification for that case and for a database from a newer JNote version.
+- Then the table names and `user_version` are read. Allowed: a database with no tables and `user_version = 0`, or a database with a `note` table. Anything else is `Invalid(NOT_JNOTE)`.
+- How it reads without touching the file:
+  - No `-wal` file: the main file holds all of its content, so the connection uses `mode=ro&immutable=1`. No lock is taken and no `-wal` or `-shm` file is created. Measured: a plain `mode=ro` connection on a WAL-mode file without sidecars created `-wal` and `-shm` and left them behind.
+  - A `-wal` file exists (the DB is in use, or a writer crashed): the main file and its `-wal` are copied into a temp folder and the copy is read, so tables that exist only in the WAL are seen. The temp folder is deleted in `finally`.
+  - A `-wal` file exists and the main file plus `-wal` exceed 64 MiB: no copy. The main file alone is read immutably. If it shows tables, the rule above applies; if it shows none, the content of the WAL is unknown and the file is refused (`NOT_JNOTE`). A JNote database that large has been checkpointed long ago, so its `note` table is in the main file.
+- The path is passed as a `file:` URI, so spaces, `#` and `%` in folder names are encoded.
+- Two new reasons with messages in both bundles: `settings.dbPath.invalid.notSqlite` and `settings.dbPath.invalid.notJNote`. A refusal in `requireUsable` uses the existing `UnusableTarget` notification.
+- This is an early refusal before asking plus a re-check right before opening. It is not a guarantee: a file replaced between the re-check and the open can still be migrated.
 
 ## Alternatives considered
-- Accept a database whose `user_version` is greater than 0 even without a `note` table (the issue's first wording): many applications set `user_version`, and the migrations would then treat that file as a JNote database at that version. Requiring the `note` table is stricter and costs nothing for real JNote files, which always have it.
+- Reject only when tables exist, `user_version = 0` and there is no `note` table (the issue's first wording): many applications set `user_version`, and the migrations would treat such a file as a JNote database at that version and skip the earlier steps. The same holds for an empty database with `user_version > 0`. Requiring the `note` table, or version 0 when there are no tables, costs nothing for real JNote files.
+- Read a WAL database with a plain `mode=ro` connection: it takes part in SQLite locking and can create a missing `-shm` next to another application's file.
+- Copy any size when a `-wal` exists: a large foreign database would be copied in full on every Apply.
+- Treat an inconclusive large file as usable and leave it to `requireUsable`: `requireUsable` runs the same check, so nothing would stop the migrations.
 - Allow only JNote databases and refuse empty files: an empty file is a natural way to start a new database at a chosen path.
 - Run the check in the switcher after the confirmation: the user would confirm a switch that then fails.
 - Parse page 1 of the file by hand instead of opening SQLite: does not see content that is still in a `-wal` file, and duplicates the file format.
 
 ## Consequences
 - Pros
-  - Another application's database is never modified by a path change.
+  - A path change refuses another application's database before asking, and checks again right before opening it.
   - Non-database files are refused with a specific message before the confirmation dialog.
+  - The check takes no lock and leaves no file behind next to the target.
 - Cons and what we accept
-  - A short read-only connection is opened in the background plan task. Only for an existing target.
-  - With a `-wal` file present, the read-only connection may create a missing `-shm` file. This only happens for a database that another connection is using or that crashed.
+  - For a database with a `-wal` file, up to 64 MiB is copied into a temp folder in the background task.
+  - A large database whose tables are all still in the WAL is refused even if it is a JNote database. This needs a database over 64 MiB that was never checkpointed.
   - A file whose header is valid but whose content is damaged fails the plan with the generic failure notification.
+  - The window between the re-check and the open remains.
 - Follow-up work
   - None.

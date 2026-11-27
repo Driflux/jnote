@@ -54,14 +54,64 @@ class DbPathChangeTest {
     fun emptyFileAndEmptySqliteDatabaseSwitchToExisting() {
         val empty = path("empty.db").also { Files.createFile(it) }
         assertEquals(Plan.SwitchToExisting(empty), DbPathChange.plan(path("cur.db"), empty))
-        val noTables = sqlite("blank.db", "PRAGMA user_version = 3")
+        val noTables = sqlite("blank.db", "create table t(x)", "drop table t")
         assertEquals(Plan.SwitchToExisting(noTables), DbPathChange.plan(path("cur.db"), noTables))
     }
 
     @Test
+    fun emptySqliteDatabaseWithAVersionIsInvalidBecauseMigrationsWouldSkipTheSchema() {
+        val target = sqlite("versioned.db", "PRAGMA user_version = 3")
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun anotherApplicationsTablesThatAreOnlyInTheWalAreSeenWithoutCreatingAShm() {
+        val crashed = crashedWithWal("crashed.db", "create table item(x)")
+        val link = Files.createSymbolicLink(path("link.db"), crashed)
+        val before = filesIn()
+        val bytes = listOf(crashed, path("crashed.db-wal")).map { Files.readAllBytes(it).toList() }
+
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), crashed))
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), link))
+
+        assertEquals(before, filesIn())
+        assertEquals(bytes, listOf(crashed, path("crashed.db-wal")).map { Files.readAllBytes(it).toList() })
+    }
+
+    private fun crashedWithWal(name: String, vararg statements: String): Path {
+        val live = path("live-$name")
+        val crashed = path(name)
+        JDBC().connect("jdbc:sqlite:$live", Properties())!!.use { c ->
+            c.createStatement().use { s ->
+                s.execute("PRAGMA journal_mode = WAL")
+                s.execute("PRAGMA wal_autocheckpoint = 0")
+                statements.forEach(s::execute)
+            }
+            // 쓰던 프로세스가 비정상 종료해 본 파일과 -wal만 남은 상황
+            Files.copy(live, crashed)
+            Files.copy(path("live-$name-wal"), path("$name-wal"))
+        }
+        return crashed
+    }
+
+    @Test
+    fun largeDatabaseWithAWalIsReadFromTheMainFileOnly() {
+        val before = DbPathChange.maxCopyBytes
+        DbPathChange.maxCopyBytes = 0
+        try {
+            val walOnly = crashedWithWal("wal-only.db", "create table item(x)")
+            assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), walOnly))
+            val checkpointed = crashedWithWal("checkpointed.db", "create table note(x)", "PRAGMA wal_checkpoint", "create table extra(x)")
+            assertEquals(Plan.SwitchToExisting(checkpointed), DbPathChange.plan(path("cur.db"), checkpointed))
+        } finally {
+            DbPathChange.maxCopyBytes = before
+        }
+    }
+
+    @Test
     fun pathWithCharactersSpecialInUrisIsRead() {
-        Files.createDirectories(path("a b#%?"))
-        val target = sqlite("a b#%?/app.db", "create table item(x)")
+        Files.createDirectories(path("a b#%"))
+        val target = sqlite("a b#%/app.db", "create table item(x)")
         assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), target))
     }
 

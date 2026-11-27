@@ -44,6 +44,8 @@ object DbPathSwitcher {
 
     // 설정에 남긴 뒤에 실패하면 다음 사용과 재시작마다 같은 오류가 나므로, 바꾸기 전에 한 번 열어 마이그레이션까지 해 본다
     private fun requireUsable(target: Path) {
+        // 확인창이 떠 있는 동안 파일이 바뀌었을 수 있어, 마이그레이션을 돌리기 전에 같은 검사를 다시 한다
+        DbPathChange.existingFileProblem(target)?.let { throw UnusableTarget(target, IllegalStateException("not a JNote database: $it")) }
         val probe = Database(target)
         try {
             probe.submit { }.get()

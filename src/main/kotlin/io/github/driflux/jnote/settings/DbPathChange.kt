@@ -45,27 +45,56 @@ object DbPathChange {
         }
     }
 
-    // 전환 때 여는 검사는 마이그레이션까지 돌려 다른 앱의 DB에 JNote 테이블을 만들므로, 확인창 전에 쓰기 없이 거른다
-    private fun existingFileProblem(target: Path): Reason? {
-        if (Files.size(target) == 0L) return null
+    /**
+     * 기존 파일이 JNote가 열어도 되는 DB인지 본다. 파일에는 쓰지 않는다. 0바이트, 테이블이 없고 user_version이 0인 DB, note 테이블이 있는 DB만 통과한다.
+     * 계획과 전환 직전 모두에서 부르지만, 그 사이 파일이 바뀌는 것까지 막지는 못한다.
+     */
+    internal fun existingFileProblem(target: Path): Reason? {
+        val file = target.toRealPath()
+        if (Files.size(file) == 0L) return null
         val header = ByteArray(SQLITE_HEADER.size)
-        val read = Files.newInputStream(target).use { it.readNBytes(header, 0, header.size) }
+        val read = Files.newInputStream(file).use { it.readNBytes(header, 0, header.size) }
         if (read < header.size || !header.contentEquals(SQLITE_HEADER)) return Reason.NOT_SQLITE
-        val tables = tableNames(target)
-        return if (tables.isEmpty() || NOTE_TABLE in tables) null else Reason.NOT_JNOTE
+        val schema = readSchema(file)
+        val usable = if (schema.tables.isEmpty()) schema.userVersion == 0 else NOTE_TABLE in schema.tables
+        return if (usable) null else Reason.NOT_JNOTE
     }
 
-    private fun tableNames(target: Path): Set<String> {
-        // -wal이 없으면 본 파일이 내용의 전부라 immutable로 연다. 그래야 잠금을 잡지 않고 -wal/-shm 파일도 만들지 않는다
-        val wal = target.resolveSibling(target.fileName.toString() + "-wal")
-        val query = if (Files.exists(wal)) "?mode=ro" else "?mode=ro&immutable=1"
-        val connection = JDBC().connect("jdbc:sqlite:" + target.toUri() + query, Properties())
-            ?: error("sqlite-jdbc rejected url for $target")
+    private class Schema(val tables: Set<String>, val userVersion: Int)
+
+    private fun readSchema(file: Path): Schema {
+        val wal = sidecar(file, "-wal")
+        // -wal이 없으면 본 파일이 내용의 전부라 immutable로 연다. 잠금을 잡지 않고 -wal/-shm 파일도 만들지 않는다
+        if (!Files.exists(wal)) return querySchema(immutable(file))
+        if (Files.size(file) + Files.size(wal) > maxCopyBytes) {
+            // 크면 복사하지 않고 본 파일만 읽는다. 본 파일에 테이블이 없으면 -wal에 무엇이 있는지 모르므로 통과시키지 않는다
+            return querySchema(immutable(file)).takeIf { it.tables.isNotEmpty() } ?: Schema(emptySet(), UNKNOWN_VERSION)
+        }
+        // -wal에만 있는 내용까지 읽어야 하지만 원본에 잠금이나 -shm을 남기지 않도록 사본을 읽는다
+        val dir = Files.createTempDirectory("jnote-check")
+        try {
+            val copy = dir.resolve("check.db")
+            Files.copy(file, copy)
+            Files.copy(wal, sidecar(copy, "-wal"))
+            return querySchema("jdbc:sqlite:" + copy.toUri())
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    private fun immutable(file: Path): String = "jdbc:sqlite:" + file.toUri() + "?mode=ro&immutable=1"
+
+    private fun sidecar(file: Path, suffix: String): Path = file.resolveSibling(file.fileName.toString() + suffix)
+
+    private fun querySchema(url: String): Schema {
+        val connection = JDBC().connect(url, Properties()) ?: error("sqlite-jdbc rejected url $url")
         return connection.use { c ->
             c.createStatement().use { s ->
-                s.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table'").use { rows ->
+                val tables = s.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table'").use { rows ->
                     buildSet { while (rows.next()) add(rows.getString(1)) }
                 }
+                val version = s.executeQuery("PRAGMA user_version").use { it.next(); it.getInt(1) }
+                Schema(tables, version)
             }
         }
     }
@@ -85,4 +114,8 @@ object DbPathChange {
 
     private val SQLITE_HEADER = "SQLite format 3".toByteArray(Charsets.US_ASCII) + 0.toByte()
     private const val NOTE_TABLE = "note"
+    private const val UNKNOWN_VERSION = -1
+
+    /** -wal이 있는 DB를 사본으로 읽을 때 복사할 최대 크기(본 파일 + -wal). */
+    internal var maxCopyBytes: Long = 64L shl 20
 }
