@@ -78,11 +78,14 @@ class DatabaseService : Disposable {
         fun getInstance(): DatabaseService = service()
 
         /** 플러그인 해제나 IDE 종료 중에는 알릴 곳이 없어, 닫기 실패(시간 초과 포함)를 던지지 않고 로그에만 남긴다. */
-        internal fun closeAndLog(database: AutoCloseable) {
+        internal fun closeAndLog(
+            database: AutoCloseable,
+            warn: (String, Throwable) -> Unit = { message, e -> logger<DatabaseService>().warn(message, e) },
+        ) {
             try {
                 database.close()
             } catch (e: Exception) {
-                logger<DatabaseService>().warn("Closing the JNote database failed", e)
+                warn("Closing the JNote database failed", e)
             }
         }
     }

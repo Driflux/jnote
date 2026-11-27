@@ -190,28 +190,28 @@ class DatabaseServiceTest : BasePlatformTestCase() {
         service.dispose()
     }
 
-    fun testCloseThatTimesOutBehindARunningJobIsLoggedNotThrownAndStillShutsDown() {
+    fun testCloseThatTimesOutBehindARunningJobIsLoggedNotThrownAndClosesTheConnectionLater() {
         val database = Database(dir.resolve("slow.db"), closeTimeoutMillis = 100)
         val gate = CountDownLatch(1)
-        val running = database.submit { gate.await() }
+        val running = database.submit { c -> gate.await(); c }
+        val warnings = mutableListOf<Throwable>()
         try {
             PlatformTestUtil.waitWithEventsDispatching("database did not open", { database.isOpen }, 10)
-            DatabaseService.closeAndLog(database)
-            assertFalse(database.isOpen)
+            DatabaseService.closeAndLog(database) { _, e -> warnings += e }
+            assertTrue(warnings.toString(), warnings.single() is java.util.concurrent.TimeoutException)
             assertThrows(java.util.concurrent.ExecutionException::class.java) { database.submit { 1 }.get(5, TimeUnit.SECONDS) }
         } finally {
             gate.countDown()
         }
-        running.get(5, TimeUnit.SECONDS)
+        val connection = running.get(5, TimeUnit.SECONDS)
+        PlatformTestUtil.waitWithEventsDispatching("connection was not closed", { connection.isClosed }, 10)
     }
 
     fun testFailingCloseIsLoggedNotThrown() {
-        var closed = false
-        DatabaseService.closeAndLog {
-            closed = true
-            throw java.util.concurrent.ExecutionException(java.sql.SQLException("close failed"))
-        }
-        assertTrue(closed)
+        val failure = java.util.concurrent.ExecutionException(java.sql.SQLException("close failed"))
+        val warnings = mutableListOf<Throwable>()
+        DatabaseService.closeAndLog({ throw failure }) { _, e -> warnings += e }
+        assertEquals(listOf<Throwable>(failure), warnings)
     }
 
     fun testDisposeDoesNotWaitForABusyDatabaseAndClosesItLater() {

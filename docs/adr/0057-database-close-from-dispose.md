@@ -10,7 +10,7 @@
 
 ## Decision
 - **Thread.** `dispose()` does not close on its calling thread. It hands the `Database` it detached to a pooled thread and returns at once, so the EDT never waits for the DB thread. This was already the case; this ADR records why.
-- **Wait limit.** `close()` keeps the 10 s limit. It only runs on background threads: the pooled thread from `dispose()`, the switch task (`DbPathSwitcher`), and the throwaway probe in `requireUsable`. After the limit the executor is shut down anyway, so the connection is closed when the running job ends, and new jobs fail as closed.
+- **Wait limit.** `close()` keeps the 10 s limit. In production it only runs on background threads: the pooled thread from `dispose()`, the switch task (`DbPathSwitcher`), and the throwaway probe in `requireUsable`. `DatabaseService.switchTo` also closes synchronously; it has no production caller today and its contract says background only. After the limit the executor is shut down anyway: the queued close job still runs when the running job ends, and new jobs fail as closed. If that late close job fails, `Database` logs it as a warning, because the caller has already stopped waiting.
 - **Failures.** On the dispose path a close failure (timeout or a failing `connection.close()`) is caught and logged as a warning by `DatabaseService.closeAndLog`. Nobody can act on it during unload or exit, and an error-level log would show an IDE error to the user. Before this change the failure was kept in an unobserved `Future` and lost silently.
 - **Other callers.** `DbPathSwitcher` still receives the exception from `close()` and reports it as `OldDatabaseNotClosed` (ADR 0015), because there the user is changing the path and can restart the IDE.
 
