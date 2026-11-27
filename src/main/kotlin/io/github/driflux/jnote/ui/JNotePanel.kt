@@ -56,6 +56,7 @@ import java.awt.Component
 import java.awt.KeyboardFocusManager
 import java.beans.PropertyChangeListener
 import java.awt.FlowLayout
+import java.awt.Insets
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import java.awt.datatransfer.StringSelection
@@ -141,6 +142,13 @@ class JNotePanel internal constructor(
         }
     }
 
+    internal val filterRow = JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 0)).apply {
+        add(allProjectsBox)
+        add(currentFileBox)
+        add(aiOnlyBox)
+        add(filterCombo)
+    }
+
     private var tagBarKey: Pair<List<Tag>, Set<Long>>? = null
     internal val tagBar = JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 2)).apply { isVisible = false }
     internal val searchField = SearchTextField(false).apply {
@@ -185,6 +193,19 @@ class JNotePanel internal constructor(
 
     private var renderingSelection = false
 
+    private val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+        border = JBUI.Borders.empty(2, 8)
+        add(filterRow, BorderLayout.CENTER)
+        add(spinnerIcon, BorderLayout.EAST)
+    }
+
+    internal val filterBar = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+        border = JBUI.Borders.empty(4, 8, 0, 8)
+        add(searchField, BorderLayout.NORTH)
+        add(header, BorderLayout.CENTER)
+        add(tagBar, BorderLayout.SOUTH)
+    }
+
     @Volatile
     private var disposed = false
     internal val focusSearchAction = DumbAwareAction.create { focusSearch() }
@@ -207,22 +228,7 @@ class JNotePanel internal constructor(
                 listMenu().show(e.component, e.x, e.y)
             }
         })
-        val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.empty(2, 8)
-            add(JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 0)).apply {
-                add(allProjectsBox)
-                add(currentFileBox)
-                add(aiOnlyBox)
-                add(filterCombo)
-            }, BorderLayout.CENTER)
-            add(spinnerIcon, BorderLayout.EAST)
-        }
-        add(JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.empty(4, 8, 0, 8)
-            add(searchField, BorderLayout.NORTH)
-            add(header, BorderLayout.CENTER)
-            add(tagBar, BorderLayout.SOUTH)
-        }, BorderLayout.NORTH)
+        add(filterBar, BorderLayout.NORTH)
         add(OnePixelSplitter(true, 0.5f).apply {
             firstComponent = JBScrollPane(list)
             secondComponent = detail
@@ -244,6 +250,17 @@ class JNotePanel internal constructor(
             .subscribe(NoteSelectRequested.TOPIC, NoteSelectRequestedListener { requested, noteId -> onSelectRequested(requested, noteId) })
         reload()
     }
+
+    // WrapLayout은 자기의 지금 너비로 높이를 잰다. BorderLayout이 높이를 묻기 전에 이번에 받을 너비를 먼저 줘야 줄바꿈된 줄이 잘리지 않는다.
+    override fun doLayout() {
+        val inside = width - horizontal(insets) - horizontal(filterBar.insets)
+        tagBar.setSize(inside, tagBar.height)
+        val spinnerWidth = if (spinnerIcon.isVisible) spinnerIcon.preferredSize.width else 0
+        filterRow.setSize(inside - horizontal(header.insets) - spinnerWidth, filterRow.height)
+        super.doLayout()
+    }
+
+    private fun horizontal(insets: Insets) = insets.left + insets.right
 
     private fun currentFile(): CurrentFile {
         val file = FileEditorManager.getInstance(project).selectedEditor?.file ?: return CurrentFile.None
