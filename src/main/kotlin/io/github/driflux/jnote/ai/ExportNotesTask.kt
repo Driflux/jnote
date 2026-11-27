@@ -12,14 +12,12 @@ import io.github.driflux.jnote.settings.DbPathNotifier
 import java.nio.file.Path
 import java.util.concurrent.ExecutionException
 
-/** 취소 가능한 백그라운드 내보내기. 인자 [exporter]는 테스트에서 DB를 바꿔 끼우기 위한 것이다. */
 class ExportNotesTask(
     project: Project,
     private val target: Path,
     private val selectedUids: Set<String>?,
     private val exporter: () -> NoteExporter = { NoteExporter(DatabaseService.getInstance().database) },
 ) : Task.Backgroundable(project, JNoteBundle.message("task.export.title"), true) {
-    // run이 백그라운드에서 쓰고 onSuccess가 EDT에서 읽는다
     @Volatile
     private var written = 0
 
@@ -37,8 +35,11 @@ class ExportNotesTask(
 
     override fun onThrowable(error: Throwable) {
         val cause = if (error is ExecutionException) error.cause ?: error else error
-        // 알림 내용은 HTML이므로 예외 메시지를 이스케이프한다
-        val reason = StringUtil.escapeXmlEntities(cause.message ?: cause.javaClass.simpleName)
+        val reason = if (cause is ExportTargetIsDatabaseException) {
+            JNoteBundle.message("notification.export.failed.activeDatabase")
+        } else {
+            StringUtil.escapeXmlEntities(cause.message ?: cause.javaClass.simpleName)
+        }
         group().createNotification(
             JNoteBundle.message("notification.export.failed.title"),
             JNoteBundle.message("notification.export.failed.content", reason),

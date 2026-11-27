@@ -621,7 +621,7 @@ class JNotePanel internal constructor(
     }
 
     override fun uiDataSnapshot(sink: DataSink) {
-        sink[SELECTED_NOTES] = list.selectedValuesList.map { it.note }
+        sink[SELECTED_NOTES] = list.selectedValuesList.map { it.summary }
     }
 
     override fun dispose() {

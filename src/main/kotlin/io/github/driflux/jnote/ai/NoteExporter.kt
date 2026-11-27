@@ -9,15 +9,15 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 
-/** 노트를 형식 v1 파일로 쓴다. DB를 기다리고 파일을 쓰므로 EDT 밖에서 부른다. */
+class ExportTargetIsDatabaseException : IllegalArgumentException("export target is the active database")
+
 class NoteExporter(private val database: Database) {
-    /**
-     * [selectedUids]가 null이면 모든 프로젝트의 노트 전부를, 아니면 그중 남아 있는 노트만 최근 수정 순으로 쓰고 쓴 수를 돌려준다.
-     * 임시 파일에 다 쓴 뒤 한 번에 바꿔 끼우므로, [checkCanceled]가 던지거나 실패하면 [target]은 이전 그대로다.
-     */
     fun export(target: Path, selectedUids: Set<String>?, checkCanceled: () -> Unit): Int {
         checkCanceled()
-        val (all, tagsByNote) = database.submit { c -> readSnapshot(c) }.get()
+        val snapshot = database.submit { c -> readSnapshot(c) }.get()
+        val all = snapshot.notes
+        val tagsByNote = snapshot.tags
+        if (sameFile(snapshot.databaseFile, target)) throw ExportTargetIsDatabaseException()
         checkCanceled()
         val chosen = if (selectedUids == null) all else all.filter { it.uid in selectedUids }
         val exported = chosen.map { toExported(it, tagsByNote[it.id].orEmpty()) }
@@ -32,11 +32,7 @@ class NoteExporter(private val database: Database) {
         return exported.size
     }
 
-    /**
-     * 노트와 태그를 한 읽기 트랜잭션에서 읽는다. 따로 읽으면 그 사이 지워진 노트의 id를 새 노트가 다시 받아
-     * 다른 노트의 태그가 붙을 수 있다(INTEGER PRIMARY KEY는 마지막 id를 재사용한다).
-     */
-    private fun readSnapshot(c: java.sql.Connection): Pair<List<Note>, Map<Long, List<String>>> {
+    private fun readSnapshot(c: java.sql.Connection): Snapshot {
         c.autoCommit = false
         try {
             val notes = c.prepareStatement("SELECT $COLUMNS FROM note ORDER BY updated_at DESC, id DESC").use { s ->
@@ -51,14 +47,28 @@ class NoteExporter(private val database: Database) {
                     result
                 }
             }
+            val databaseFile = c.prepareStatement("PRAGMA database_list").use { s ->
+                s.executeQuery().use { rs ->
+                    var file: String? = null
+                    while (rs.next()) if (rs.getString("name") == "main") file = rs.getString("file")
+                    file
+                }
+            }
             c.commit()
-            return notes to tags
+            return Snapshot(notes, tags, databaseFile)
         } catch (e: Throwable) {
             c.rollback()
             throw e
         } finally {
             c.autoCommit = true
         }
+    }
+
+    private class Snapshot(val notes: List<Note>, val tags: Map<Long, List<String>>, val databaseFile: String?)
+
+    private fun sameFile(databaseFile: String?, target: Path): Boolean {
+        if (databaseFile.isNullOrEmpty() || !Files.exists(target)) return false
+        return Files.isSameFile(Path.of(databaseFile), target)
     }
 
     internal companion object {
