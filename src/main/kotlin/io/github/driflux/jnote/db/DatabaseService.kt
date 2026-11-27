@@ -21,15 +21,18 @@ class DatabaseService : Disposable {
     val database: Database
         get() = synchronized(lock) {
             check(!disposed) { "DatabaseService is disposed" }
-            current ?: Database(::currentPath).also { current = it }
+            current ?: Database(path?.let { known -> { known } } ?: ::resolveDefault).also { current = it }
         }
 
-    fun currentPath(): Path = synchronized(lock) { pathLocked() }
+    fun currentPath(): Path = synchronized(lock) { path } ?: resolveDefault()
 
     /** 경로와 DB를 따로 읽으면 그 사이 전환이 끼어들어 서로 다른 DB의 것이 될 수 있어 한 번에 읽는다. */
-    fun current(): Current = synchronized(lock) {
-        check(!disposed) { "DatabaseService is disposed" }
-        Current(pathLocked(), current)
+    fun current(): Current {
+        currentPath()
+        return synchronized(lock) {
+            check(!disposed) { "DatabaseService is disposed" }
+            Current(checkNotNull(path), current)
+        }
     }
 
     fun openDatabaseOrNull(): Database? = synchronized(lock) { current?.takeIf { it.isOpen } }
@@ -39,7 +42,7 @@ class DatabaseService : Disposable {
      * 기다리지 않으므로 옛 DB의 스레드 안에서도 부를 수 있다.
      */
     fun replace(expected: Current, newPath: Path): Boolean = synchronized(lock) {
-        if (disposed || current !== expected.database || pathLocked() != expected.path) return false
+        if (disposed || current !== expected.database || path != expected.path) return false
         current = null
         path = newPath
         true
@@ -56,7 +59,15 @@ class DatabaseService : Disposable {
         old?.close()
     }
 
-    private fun pathLocked(): Path = path ?: defaultPath().also { path = it }
+    /**
+     * 설정 읽기는 파일 I/O라 잠금 밖에서 한다. 잠금을 쥔 채 읽으면 EDT의 [database]와 [dispose]가 그동안 기다린다.
+     * 경로가 정해지기 전에 만들어진 DB는 기본 경로의 것이므로, 그 사이 전환이 있었어도 읽은 값을 그대로 쓴다.
+     */
+    private fun resolveDefault(): Path {
+        val resolved = defaultPath()
+        synchronized(lock) { if (path == null) path = resolved }
+        return resolved
+    }
 
     override fun dispose() {
         val old = synchronized(lock) {

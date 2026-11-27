@@ -4,6 +4,7 @@ import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -54,6 +55,73 @@ class DatabaseServiceTest : BasePlatformTestCase() {
         assertEquals(listOf(Database.THREAD_NAME), resolvedOn.toList())
         assertTrue(Files.exists(expected))
         assertEquals(expected, service.currentPath())
+        service.dispose()
+    }
+
+    fun testGettingTheDatabaseDoesNotWaitForTheSettingsLoad() {
+        val service = DatabaseService()
+        val entered = CountDownLatch(1)
+        val gate = CountDownLatch(1)
+        service.defaultPath = {
+            entered.countDown()
+            gate.await()
+            dir.resolve("slow.db")
+        }
+        val database = service.database
+        val first = database.submit { 1 }
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+
+        val started = System.nanoTime()
+        assertSame(database, service.database)
+        val waitedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+        gate.countDown()
+
+        assertTrue("database waited ${waitedMillis} ms", waitedMillis < 1000)
+        assertEquals(1, first.get(10, TimeUnit.SECONDS))
+        service.dispose()
+    }
+
+    fun testDatabaseReplacedBeforeItsFirstJobStillOpensItsOwnFile() {
+        val service = DatabaseService()
+        val first = dir.resolve("first.db")
+        service.switchTo(first)
+        val old = service.database
+        val second = dir.resolve("second.db")
+        assertTrue(service.replace(service.current(), second))
+
+        val opened = old.submitAndWait { openedFile(it) }
+        assertEquals(first.toRealPath(), Paths.get(opened).toRealPath())
+        assertFalse(Files.exists(second))
+        old.close()
+        service.dispose()
+    }
+
+    private fun openedFile(c: java.sql.Connection): String =
+        c.createStatement().use { s -> s.executeQuery("PRAGMA database_list").use { it.next(); it.getString("file") } }
+
+    fun testJobQueuedBeforeASwitchUsesThePathItsDatabaseWasMadeFor() {
+        val service = DatabaseService()
+        val entered = CountDownLatch(1)
+        val gate = CountDownLatch(1)
+        val first = dir.resolve("first.db")
+        service.defaultPath = {
+            entered.countDown()
+            gate.await()
+            first
+        }
+        val old = service.database
+        val openedFile = old.submit { openedFile(it) }
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+
+        val second = dir.resolve("second.db")
+        val switching = Thread { service.switchTo(second) }.apply { start() }
+        while (switching.isAlive && switching.state != Thread.State.TIMED_WAITING) Thread.onSpinWait()
+        gate.countDown()
+        switching.join(15_000)
+
+        assertEquals(first.toRealPath(), Paths.get(openedFile.get(10, TimeUnit.SECONDS)).toRealPath())
+        assertFalse(Files.exists(second))
+        assertEquals(second, service.currentPath())
         service.dispose()
     }
 
