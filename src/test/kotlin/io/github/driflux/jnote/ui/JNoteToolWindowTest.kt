@@ -94,7 +94,7 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         val window = com.intellij.toolWindow.ToolWindowHeadlessManagerImpl.MockToolWindow(project)
         assertNull(dbService.openDatabaseOrNull())
 
-        JNoteToolWindowFactory().createToolWindowContent(project, window)
+        JNoteToolWindowFactory {}.createToolWindowContent(project, window)
 
         assertEquals(1, window.contentManager.contentCount)
         assertTrue(window.contentManager.getContent(0)!!.component is JNotePanel)
