@@ -5,6 +5,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.runWriteAction
+import com.intellij.openapi.editor.FoldRegion
 import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.markup.GutterIconRenderer
@@ -96,11 +97,15 @@ class GutterDragReleaseTest : BasePlatformTestCase() {
         return centerOf(editor, plus)
     }
 
-    private fun send(editor: EditorEx, id: Int, at: Point) {
+    private fun send(
+        editor: EditorEx,
+        id: Int,
+        at: Point,
+        button: Int = if (id == MouseEvent.MOUSE_MOVED || id == MouseEvent.MOUSE_DRAGGED) MouseEvent.NOBUTTON else MouseEvent.BUTTON1,
+        held: Int = if (id == MouseEvent.MOUSE_PRESSED || id == MouseEvent.MOUSE_DRAGGED) InputEvent.BUTTON1_DOWN_MASK else 0,
+    ) {
         val gutter = editor.gutterComponentEx
-        val held = id == MouseEvent.MOUSE_PRESSED || id == MouseEvent.MOUSE_DRAGGED
-        val button = if (id == MouseEvent.MOUSE_MOVED || id == MouseEvent.MOUSE_DRAGGED) MouseEvent.NOBUTTON else MouseEvent.BUTTON1
-        gutter.dispatchEvent(MouseEvent(gutter, id, 0L, if (held) InputEvent.BUTTON1_DOWN_MASK else 0, at.x, at.y, 1, false, button))
+        gutter.dispatchEvent(MouseEvent(gutter, id, 0L, held, at.x, at.y, 1, false, button))
     }
 
     private fun click(editor: EditorEx, at: Point) {
@@ -171,5 +176,71 @@ class GutterDragReleaseTest : BasePlatformTestCase() {
         click(editor, centerOf(editor, run))
 
         assertEquals(listOf("run"), ran)
+    }
+
+    fun testAClickOnAnotherIconAfterALostReleaseRunsOnlyThatIcon() {
+        val editor = openFile("ReleaseLost.txt")
+        install(editor)
+        val run = icon(editor, 6, "run")
+        val plus = showPlus(editor, 2)
+        send(editor, MouseEvent.MOUSE_PRESSED, plus)
+        send(editor, MouseEvent.MOUSE_DRAGGED, centerOf(editor, run))
+
+        click(editor, centerOf(editor, run))
+
+        assertEquals(listOf("run"), ran)
+        assertTrue(added.isEmpty())
+    }
+
+    fun testARightClickDuringADragNeitherEndsItNorLetsTheLeftReleaseRunAnIcon() {
+        val editor = openFile("ReleaseRight.txt")
+        install(editor)
+        val run = icon(editor, 6, "run")
+        val plus = showPlus(editor, 2)
+        val at = centerOf(editor, run)
+        send(editor, MouseEvent.MOUSE_PRESSED, plus)
+        send(editor, MouseEvent.MOUSE_DRAGGED, at)
+
+        send(editor, MouseEvent.MOUSE_PRESSED, at, MouseEvent.BUTTON3, InputEvent.BUTTON1_DOWN_MASK or InputEvent.BUTTON3_DOWN_MASK)
+        send(editor, MouseEvent.MOUSE_RELEASED, at, MouseEvent.BUTTON3, InputEvent.BUTTON1_DOWN_MASK)
+        assertTrue(added.isEmpty())
+        send(editor, MouseEvent.MOUSE_RELEASED, at)
+
+        assertEquals(emptyList<String>(), ran)
+        assertEquals(3 to 7, added.single().let { it.startLine to it.endLine })
+    }
+
+    fun testARangeReleasedOutsideTheGutterAddsTheRangeAndEndsTheDrag() {
+        val editor = openFile("ReleaseOutside.txt")
+        install(editor)
+        val run = icon(editor, 6, "run")
+        val plus = showPlus(editor, 2)
+        val outside = Point(editor.gutterComponentEx.preferredSize.width + 40, centerOf(editor, run).y)
+
+        dragAndRelease(editor, plus, outside)
+        click(editor, centerOf(editor, run))
+
+        assertEquals(3 to 7, added.single().let { it.startLine to it.endLine })
+        assertEquals(listOf("run"), ran)
+    }
+
+    fun testARangeReleasedOnAFoldAnchorAddsTheRangeAndLeavesTheFoldAsItWas() {
+        val editor = openFile("ReleaseFold.txt")
+        install(editor)
+        val document = editor.document
+        var fold: FoldRegion? = null
+        editor.foldingModel.runBatchFoldingOperation {
+            fold = editor.foldingModel.addFoldRegion(document.getLineStartOffset(6), document.getLineEndOffset(8), "...")
+            fold!!.isExpanded = false
+        }
+        val plus = showPlus(editor, 2)
+        val gutter = editor.gutterComponentEx
+        val y = editor.logicalPositionToXY(LogicalPosition(6, 0)).y + editor.lineHeight / 2
+        val anchor = (gutter.foldingAreaOffset until gutter.foldingAreaOffset + 40).map { Point(it, y) }.first { gutter.findFoldingAnchorAt(it.x, it.y) === fold }
+
+        dragAndRelease(editor, plus, anchor)
+
+        assertEquals(3 to 7, added.single().let { it.startLine to it.endLine })
+        assertFalse(fold!!.isExpanded)
     }
 }

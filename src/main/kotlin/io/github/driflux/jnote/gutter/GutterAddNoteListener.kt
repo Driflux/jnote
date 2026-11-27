@@ -52,7 +52,7 @@ internal class GutterAddNoteListener(
     private val releaseGuard = object : EditorMouseListener {
         override fun mouseReleased(event: EditorMouseEvent) {
             val e = event.mouseEvent
-            if (e.component === editor.gutter && !geometry.onAddIcon(e)) event.consume()
+            if (e.button == MouseEvent.BUTTON1 && e.component === editor.gutter && !geometry.onAddIcon(e)) event.consume()
         }
     }
 
@@ -73,8 +73,11 @@ internal class GutterAddNoteListener(
     }
 
     override fun mousePressed(e: MouseEvent) {
-        if (e.button != MouseEvent.BUTTON1 || e.isPopupTrigger || editor.isDisposed) return
-        if (!geometry.onAddIcon(e)) return
+        if (e.button != MouseEvent.BUTTON1 || editor.isDisposed) return
+        // 왼쪽 버튼을 누른 채로는 왼쪽 press가 다시 올 수 없으므로, 남은 드래그는 release를 잃은 것이다(ADR 0115).
+        drag.cancel()
+        selecting = false
+        if (e.isPopupTrigger || !geometry.onAddIcon(e)) return
         drag.press(clamp(geometry.lineAt(e))) { editor.removeEditorMouseListener(releaseGuard) }
         editor.addEditorMouseListener(releaseGuard)
     }
@@ -94,7 +97,7 @@ internal class GutterAddNoteListener(
     }
 
     override fun mouseReleased(e: MouseEvent) {
-        if (!drag.active) return
+        if (e.button != MouseEvent.BUTTON1 || !drag.active) return
         val range = drag.release(clamp(geometry.lineAt(e)))
         selecting = false
         if (!geometry.inIconArea(e)) hide()
