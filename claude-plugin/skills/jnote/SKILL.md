@@ -35,9 +35,10 @@ Save something from the conversation as one or more notes.
    cat > "$tmp" <<'EOF'
    { ...the document... }
    EOF
-   python3 -m json.tool "$tmp" > /dev/null   # skip if python3 is missing
-   ln "$tmp" "$inbox/2026-11-27-retry-backoff.json" && rm "$tmp"
+   { ! command -v python3 > /dev/null || python3 -m json.tool "$tmp" > /dev/null; } &&
+     ln "$tmp" "$inbox/2026-11-27-retry-backoff.json" && rm "$tmp"
    ```
+   If the check fails, fix the temporary file and run the last command again; never publish a document that does not parse.
    If `ln` fails because the name exists, publish the same temporary file again with `-2`, `-3`, ... before `.json`, then remove the temporary file.
 5. Tell the user the file name and that JNote shows it for review when its Tool Window gains focus. Nothing is saved until they click Apply there.
 
