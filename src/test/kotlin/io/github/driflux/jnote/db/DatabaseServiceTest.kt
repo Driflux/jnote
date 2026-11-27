@@ -125,8 +125,10 @@ class DatabaseServiceTest : BasePlatformTestCase() {
         val gate = CountDownLatch(1)
         val first = dir.resolve("first.db")
         service.defaultPath = {
-            entered.countDown()
-            gate.await()
+            if (Thread.currentThread().name == Database.THREAD_NAME) {
+                entered.countDown()
+                gate.await()
+            }
             first
         }
         val old = service.database
@@ -149,6 +151,42 @@ class DatabaseServiceTest : BasePlatformTestCase() {
         assertEquals(first.toRealPath(), Paths.get(openedFile.get(10, TimeUnit.SECONDS)).toRealPath())
         assertFalse(Files.exists(second))
         assertEquals(second, service.currentPath())
+        service.dispose()
+    }
+
+    fun testSwitchBindsTheRetiredDatabaseBeforeItsPathIsRead() {
+        val service = DatabaseService()
+        val entered = CountDownLatch(1)
+        val gate = CountDownLatch(1)
+        val first = dir.resolve("first.db")
+        val second = dir.resolve("second.db")
+        val setting = java.util.concurrent.atomic.AtomicReference(first)
+        service.defaultPath = {
+            if (Thread.currentThread().name == Database.THREAD_NAME) {
+                entered.countDown()
+                gate.await()
+            }
+            setting.get()
+        }
+        val old = service.database
+        val openedFile = old.submit { openedFile(it) }
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+
+        val switching = Thread { service.switchTo(second) }.apply { start() }
+        try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (switching.isAlive && switching.state != Thread.State.TIMED_WAITING && System.nanoTime() < deadline) {
+                Thread.onSpinWait()
+            }
+            assertEquals(Thread.State.TIMED_WAITING, switching.state)
+            setting.set(second)
+        } finally {
+            gate.countDown()
+        }
+        switching.join(15_000)
+
+        assertEquals(first.toRealPath(), Paths.get(openedFile.get(10, TimeUnit.SECONDS)).toRealPath())
+        assertFalse(Files.exists(second))
         service.dispose()
     }
 

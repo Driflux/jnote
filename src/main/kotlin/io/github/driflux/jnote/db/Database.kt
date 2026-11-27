@@ -16,7 +16,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class DatabaseClosedException : IllegalStateException("database is closed")
 
-/** [resolvePath]는 처음 열 때 DB 스레드에서 불린다. 경로를 정하는 데 파일 I/O가 들어도 부른 쪽(EDT일 수 있다)에서 일어나지 않는다. */
 class Database internal constructor(
     private val resolvePath: () -> Path,
     private val closeTimeoutMillis: Long,
@@ -75,10 +74,6 @@ class Database internal constructor(
         return opened
     }
 
-    /**
-     * 두 연결이 새 파일을 동시에 WAL로 바꾸면 SQLite는 교착을 피하려고 busy handler를 부르지 않고 바로 SQLITE_BUSY를 돌려준다.
-     * 먼저 바꾼 쪽이 끝나면 파일이 이미 WAL이라 다시 시도하면 성공한다. https://www.sqlite.org/c3ref/busy_handler.html
-     */
     private fun enableWal(connection: Connection) {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(BUSY_TIMEOUT_MS.toLong())
         while (true) {
