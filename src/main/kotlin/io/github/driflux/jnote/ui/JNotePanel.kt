@@ -209,12 +209,16 @@ class JNotePanel internal constructor(
 
     private val focusEntry = FocusEntry(this)
 
+    // 복사를 요청한 뒤 클립보드가 바뀌었는지 알려고 IDE의 클립보드 변경 횟수를 센다
+    private val clipboardChanges = AtomicInteger()
+
     @Volatile
     private var disposed = false
     internal val focusSearchAction = DumbAwareAction.create { focusSearch() }
 
     init {
         Disposer.register(this, spinnerIcon)
+        CopyPasteManager.getInstance().addContentChangedListener({ _, _ -> clipboardChanges.incrementAndGet() }, this)
         focusSearchAction.registerCustomShortcutSet(CommonShortcuts.getFind(), this)
         bindListKey(KeyEvent.VK_ENTER, "jnote.goToCode") { detail.goToCodeButton }
         bindListKey(KeyEvent.VK_DELETE, "jnote.delete") { detail.deleteButton }
@@ -493,11 +497,13 @@ class JNotePanel internal constructor(
 
     private fun copyToClipboard(text: CompletableFuture<String?>): CompletableFuture<*> {
         val ticket = copyGeneration.incrementAndGet()
+        val clipboard = clipboardChanges.get()
         return text.whenComplete { text, error ->
             onEdt {
                 when {
                     ticket != copyGeneration.get() -> Unit
                     error != null -> ToolWindowNotifier.copyFailed(project, (error as? CompletionException)?.cause ?: error)
+                    clipboard != clipboardChanges.get() -> Unit
                     text != null -> CopyPasteManager.getInstance().setContents(StringSelection(text))
                 }
             }
