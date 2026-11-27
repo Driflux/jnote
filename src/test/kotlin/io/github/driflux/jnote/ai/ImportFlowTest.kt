@@ -130,6 +130,30 @@ class ImportFlowTest : BasePlatformTestCase() {
         assertEquals(listOf(ImportResult(0, 1, 0)), applied)
     }
 
+    fun testApplyUsesTheDatabaseThePreviewWasPlannedOn() {
+        val second = Database(dir.resolve("second.db"))
+        var current = db
+        try {
+            val switching = ImportFlow(
+                project,
+                importer = { NoteImporter(current) },
+                askApproval = { _, plan, _ ->
+                    asked += plan
+                    // 미리보기를 보는 사이 DB 경로가 바뀌었다
+                    current = second
+                    true
+                },
+                publish = { published.incrementAndGet() },
+            )
+            run(switching, doc("""{"kind":"FREE","title":"planned on the first"}"""))
+
+            assertEquals(listOf("planned on the first"), titles())
+            assertEquals(emptyList<Any>(), NoteRepository(second).list(null, allProjects = true).get())
+        } finally {
+            second.close()
+        }
+    }
+
     fun testFileActionIsRegisteredAndPassesTheChosenFile() {
         assertTrue(ActionManager.getInstance().getAction("JNote.ImportFromFile") is ImportFromFileAction)
         val file = dir.resolve("in.json").also { Files.writeString(it, "text") }

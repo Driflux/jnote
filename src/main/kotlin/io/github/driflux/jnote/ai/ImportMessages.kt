@@ -25,13 +25,15 @@ internal object ImportMessages {
     fun describe(problem: ImportProblem): String = when (problem) {
         is ImportProblem.Unreadable -> JNoteBundle.message("import.problem.unreadable", problem.document, problem.reason)
         is ImportProblem.Rejected -> JNoteBundle.message("import.document.${problem.error.name}", problem.document)
-        is ImportProblem.Skipped -> JNoteBundle.message(
-            "import.problem.item",
-            problem.document,
-            problem.item.index + 1,
-            problem.item.field,
-            JNoteBundle.message("import.problem.${problem.item.problem.name}"),
-        )
+        is ImportProblem.Skipped -> {
+            val reason = JNoteBundle.message("import.problem.${problem.item.problem.name}")
+            val uid = problem.item.uid
+            if (uid == null) {
+                JNoteBundle.message("import.problem.item", problem.document, problem.item.index + 1, problem.item.field, reason)
+            } else {
+                JNoteBundle.message("import.problem.itemWithUid", problem.document, problem.item.index + 1, uid, problem.item.field, reason)
+            }
+        }
         is ImportProblem.DuplicateAcrossDocuments -> JNoteBundle.message("import.problem.sharedUid", problem.uid, problem.document)
     }
 
