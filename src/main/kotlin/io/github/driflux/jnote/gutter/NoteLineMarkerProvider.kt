@@ -34,14 +34,26 @@ class NoteLineMarkerProvider : LineMarkerProviderDescriptor(), DumbAware {
         val viewProvider = file.viewProvider
         if (viewProvider.getPsi(viewProvider.baseLanguage) != file) return
         val virtualFile = file.virtualFile ?: return
-        val relPath = AnchorLines.relativePath(project.basePath, virtualFile.path) ?: return
+        val relPath = AnchorLines.relativePath(project.basePath, virtualFile.path)
+        if (relPath == null) {
+            project.getServiceIfCreated(GutterNoteService::class.java)?.let { service ->
+                FileDocumentManager.getInstance().getCachedDocument(virtualFile)?.let { service.rangeBars.update(it, emptyList()) }
+            }
+            return
+        }
         val gutterService = project.service<GutterNoteService>()
         FileDocumentManager.getInstance().getCachedDocument(virtualFile)?.let { gutterService.attachGutterInteraction(it) }
         val notes = gutterService.notesFor(virtualFile, relPath)
-        if (notes.isNullOrEmpty()) return
+        if (notes == null) return
+        if (notes.isEmpty()) {
+            FileDocumentManager.getInstance().getCachedDocument(virtualFile)?.let { gutterService.rangeBars.update(it, emptyList()) }
+            return
+        }
         val document = PsiDocumentManager.getInstance(project).getCachedDocument(file) ?: return
         project.service<OpenValidationService>().validateOncePerOpen(document, relPath)
-        val targets = GutterLines.group(project.service<GutterNoteService>().track(document, relPath, notes)).mapNotNull { target(it, document) }
+        val tracked = gutterService.track(document, relPath, notes)
+        gutterService.rangeBars.update(document, RangeBarSpec.of(tracked))
+        val targets = GutterLines.group(tracked).mapNotNull { target(it, document) }
         if (targets.isEmpty()) return
 
         for (element in elements) {
