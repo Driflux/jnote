@@ -2,6 +2,7 @@ package io.github.driflux.jnote.ai
 
 import java.io.IOException
 import java.nio.file.FileAlreadyExistsException
+import java.nio.file.FileSystemException
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
@@ -36,7 +37,8 @@ class Inbox(val dir: Path = defaultDir()) {
     fun claim(file: InboxFile): ClaimedFile? {
         val processing = Files.createDirectories(dir.resolve(PROCESSING))
         val name = file.path.fileName.toString()
-        val target = processing.resolve(UUID.randomUUID().toString() + "--" + name)
+        // 원래 이름이 길어도 넘치지 않도록 선점 이름은 고정 길이로 하고, 원래 이름은 메모리에만 둔다
+        val target = processing.resolve(UUID.randomUUID().toString() + ".json")
         return try {
             Files.move(file.path, target, StandardCopyOption.ATOMIC_MOVE)
             ClaimedFile(name, target)
@@ -53,19 +55,27 @@ class Inbox(val dir: Path = defaultDir()) {
 
     /**
      * 하드 링크는 대상이 이미 있으면 원자적으로 실패하므로 두 창이 같은 이름을 골라도 서로 덮어쓰지 않는다.
-     * ATOMIC_MOVE는 플랫폼에 따라 기존 파일을 덮어쓴다.
+     * ATOMIC_MOVE는 플랫폼에 따라 기존 파일을 덮어쓴다. 링크를 못 만드는 볼륨에서는 덮어쓰지 않는 일반 이동으로 대신한다.
      */
     private fun moveWithoutOverwrite(claimed: ClaimedFile, folder: Path): Path {
         val stem = claimed.name.removeSuffix(".json")
         for (n in 0 until MAX_NAME_TRIES) {
             val target = folder.resolve(if (n == 0) claimed.name else "$stem-$n.json")
             try {
-                Files.createLink(target, claimed.path)
+                try {
+                    Files.createLink(target, claimed.path)
+                    Files.delete(claimed.path)
+                } catch (e: FileAlreadyExistsException) {
+                    throw e
+                } catch (_: UnsupportedOperationException) {
+                    Files.move(claimed.path, target)
+                } catch (_: FileSystemException) {
+                    Files.move(claimed.path, target)
+                }
+                return target
             } catch (_: FileAlreadyExistsException) {
                 continue
             }
-            Files.delete(claimed.path)
-            return target
         }
         throw IOException("no free name for ${claimed.name} in $folder")
     }

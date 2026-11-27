@@ -56,6 +56,16 @@ class InboxTest {
         assertNull("a second window finds it taken", Inbox(inbox.dir).claim(seen))
     }
 
+    @Test fun longNamesSurviveTheClaim() {
+        val name = "n".repeat(240) + ".json"
+        put(name, "long")
+
+        val claimed = inbox.claim(inbox.scan().single())!!
+        inbox.archive(claimed)
+
+        assertEquals(listOf(name), names(inbox.dir.resolve(Inbox.DONE)))
+    }
+
     @Test fun archiveAndReleaseNeverOverwrite() {
         put("a.json", "first")
         inbox.archive(inbox.claim(inbox.scan().single())!!)

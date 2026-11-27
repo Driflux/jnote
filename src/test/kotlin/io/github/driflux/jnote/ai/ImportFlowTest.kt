@@ -157,6 +157,32 @@ class ImportFlowTest : BasePlatformTestCase() {
         }
     }
 
+    fun testFailingPreviewStillFinishesAsNotApplied() {
+        val failing = ImportFlow(project, importer = { NoteImporter(db) }, askApproval = { _, _, _ -> error("dialog failed") }, publish = {})
+        // 테스트에서는 작업이 동기로 돌아 실패가 호출한 쪽으로 그대로 올라온다
+        try {
+            failing.start(listOf(ImportSource("d.json") { doc("""{"kind":"FREE","title":"a"}""") })) { outcomes += it }
+            PlatformTestUtil.waitWithEventsDispatching("not finished", { outcomes.isNotEmpty() }, 20)
+        } catch (_: IllegalStateException) {
+        }
+
+        assertEquals(listOf(ImportOutcome.NotApplied), outcomes)
+        assertEquals(emptyList<String>(), titles())
+    }
+
+    fun testFailingPublishAfterCommitStillFinishes() {
+        val failing = ImportFlow(project, importer = { NoteImporter(db) }, askApproval = { _, _, _ -> true }, publish = { error("publish failed") })
+        // 테스트에서는 작업이 동기로 돌아 실패가 호출한 쪽으로 그대로 올라온다
+        try {
+            failing.start(listOf(ImportSource("d.json") { doc("""{"kind":"FREE","title":"a"}""") })) { outcomes += it }
+            PlatformTestUtil.waitWithEventsDispatching("not finished", { outcomes.isNotEmpty() }, 20)
+        } catch (_: IllegalStateException) {
+        }
+
+        assertEquals(listOf("a"), titles())
+        assertTrue(outcomes.single() is ImportOutcome.Finished)
+    }
+
     fun testFileActionIsRegisteredAndPassesTheChosenFile() {
         assertTrue(ActionManager.getInstance().getAction("JNote.ImportFromFile") is ImportFromFileAction)
         val file = dir.resolve("in.json").also { Files.writeString(it, "text") }

@@ -77,6 +77,16 @@ class ImportFlow(
             val planned = plan
             val chosen = target
             if (project.isDisposed || ready == null || planned == null || chosen == null) return finish(ImportOutcome.NotApplied)
+            try {
+                decide(ready, planned, chosen)
+            } catch (e: Throwable) {
+                // 미리보기나 다음 작업 시작이 실패해도 원본(inbox 파일 등)이 정리되도록 끝을 알린다. 아직 쓴 것은 없다
+                finish(ImportOutcome.NotApplied)
+                throw e
+            }
+        }
+
+        private fun decide(ready: PreparedImport, planned: ImportPlan, chosen: NoteImporter) {
             when {
                 planned.creates.isEmpty() && planned.updates.isEmpty() && ready.notes.isEmpty() && ready.problems.isNotEmpty() -> {
                     notify("notification.import.failed.title", ImportMessages.problemList(ready.problems), NotificationType.ERROR)
@@ -123,6 +133,9 @@ class ImportFlow(
             }
         }
 
+        // 마지막 취소 확인 뒤 커밋까지 간 경우 플랫폼은 onCancel을 부르지만 DB에는 이미 반영되었다
+        override fun onCancel() = if (result != null || outdated) onSuccess() else finish(ImportOutcome.NotApplied)
+
         override fun onSuccess() {
             if (outdated) {
                 // 쓴 것이 없으므로 같은 노트, 같은 DB로 다시 계획해 새 미리보기를 보여 준다
@@ -130,23 +143,25 @@ class ImportFlow(
                 return
             }
             val done = result ?: return finish(ImportOutcome.NotApplied)
-            // 커밋은 끝났으므로 다른 창도 새로 읽도록 프로젝트가 닫혔어도 알린다. 이 프로젝트의 후속 처리만 건너뛴다
-            publish()
-            // 커밋은 끝났으므로 프로젝트가 닫혔어도 파일 정리는 반영된 것으로 한다
-            if (project.isDisposed) return finish(ImportOutcome.Finished(done, prepared.decodedSources))
-            val content = join(
-                JNoteBundle.message("notification.import.done.content", done.created, done.updated, done.unchanged),
-                ImportMessages.problemList(prepared.problems),
-            )
-            notify(
-                "notification.import.done.title",
-                content,
-                if (prepared.problems.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
-            )
-            finish(ImportOutcome.Finished(done, prepared.decodedSources))
+            // 커밋은 끝났으므로 발행이나 알림이 실패해도, 프로젝트가 닫혔어도 반영된 것으로 끝낸다
+            try {
+                // 다른 창도 새로 읽도록 프로젝트가 닫혔어도 알린다
+                publish()
+                if (!project.isDisposed) {
+                    val content = join(
+                        JNoteBundle.message("notification.import.done.content", done.created, done.updated, done.unchanged),
+                        ImportMessages.problemList(prepared.problems),
+                    )
+                    notify(
+                        "notification.import.done.title",
+                        content,
+                        if (prepared.problems.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
+                    )
+                }
+            } finally {
+                finish(ImportOutcome.Finished(done, prepared.decodedSources))
+            }
         }
-
-        override fun onCancel() = finish(ImportOutcome.NotApplied)
 
         override fun onThrowable(error: Throwable) {
             failed(error)
