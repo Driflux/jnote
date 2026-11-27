@@ -88,7 +88,8 @@ Look up saved notes that relate to the current question, code, or file.
    <query>
    SQL
    ```
-   The database uses WAL mode, so a read-only open works only while JNote has it open. If it fails with `unable to open database file`, ask the user to open the JNote Tool Window in the IDE and try again. Do not work around it with `immutable=1` or by opening without `-readonly`.
+   If any line of the query is exactly `SQL`, choose another delimiter that no line of the query equals.
+   The database uses WAL mode. A read-only open can fail with `unable to open database file`, usually because JNote is not running and has not left its WAL files behind. Then ask the user to open the JNote Tool Window in the IDE and try again. Do not work around it with `immutable=1` or by opening without `-readonly`.
    Put the user's words into the query only inside single-quoted SQL strings, doubling any `'` in them.
    The project key of a repository is its origin URL with the host in lower case, then the path, without scheme, user, port, and trailing `.git`: `git@github.com:acme/shop.git` and `https://github.com/acme/shop` both become `github.com/acme/shop`. A project without a remote origin uses the absolute path of its folder. If a project filter finds nothing, list `SELECT DISTINCT project FROM v_notes_export;` and compare. Columns, as in the spec: `uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, status, title, body, ai_source, source_url, prompt, created_at, updated_at, tags` (`tags` comma-separated, times in epoch milliseconds, `project` is the normalized key such as `github.com/acme/shop`).
 3. Useful queries:
