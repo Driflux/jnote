@@ -112,7 +112,6 @@ class DbPathSwitcherTest : BasePlatformTestCase() {
         val target = dir.resolve("next.db")
         var duringCopy: CompletableFuture<Unit>? = null
         run(DbPathChange.Plan.CopyThenSwitch(target)) {
-            // 복사가 도는 동안 노트를 저장한 상황: 이 쓰기는 복사 작업 뒤에 줄 선다
             if (duringCopy == null) duringCopy = insert(service.database, 99)
         }
         assertEquals(target, service.currentPath())
@@ -128,7 +127,6 @@ class DbPathSwitcherTest : BasePlatformTestCase() {
         val target = dir.resolve("next.db")
         var opened = false
         run(DbPathChange.Plan.CopyThenSwitch(target)) {
-            // 한 번도 열지 않은 DB를 복사하는 사이 처음 쓰인 상황
             if (!opened) {
                 opened = true
                 insert(service.database, 77).get()
@@ -156,6 +154,29 @@ class DbPathSwitcherTest : BasePlatformTestCase() {
         assertEquals(other, service.currentPath())
         assertEquals(before, Files.size(other))
         assertFalse(Files.exists(dir.resolve("other.db.copying")))
+    }
+
+    fun testExistingFileThatCannotBeOpenedAtSwitchTimeIsReportedAndNothingChanges() {
+        val broken = dir.resolve("broken.db").also { Files.writeString(it, "changed after the plan") }
+        val error = org.junit.Assert.assertThrows(DbPathSwitcher.UnusableTarget::class.java) {
+            run(DbPathChange.Plan.SwitchToExisting(broken))
+        }
+        assertEquals(broken, error.target)
+        assertEquals(current, service.currentPath())
+        assertEquals(current.toString(), settings.state.dbPath)
+    }
+
+    fun testExistingFileReplacedByAnotherApplicationsDatabaseAfterThePlanIsLeftUntouched() {
+        val other = dir.resolve("app.db")
+        org.sqlite.JDBC().connect("jdbc:sqlite:$other", java.util.Properties())!!.use { c ->
+            c.createStatement().use { it.execute("create table item(x)") }
+        }
+        val before = Files.readAllBytes(other)
+        org.junit.Assert.assertThrows(DbPathSwitcher.UnusableTarget::class.java) {
+            run(DbPathChange.Plan.SwitchToExisting(other))
+        }
+        assertTrue(before.contentEquals(Files.readAllBytes(other)))
+        assertEquals(current, service.currentPath())
     }
 
     fun testCancelledCopyKeepsOldDatabaseActive() {

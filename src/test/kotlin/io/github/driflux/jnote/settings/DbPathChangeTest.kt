@@ -7,8 +7,12 @@ import org.junit.Assume.assumeFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import io.github.driflux.jnote.db.Database
+import io.github.driflux.jnote.db.Migrations
+import org.sqlite.JDBC
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Properties
 
 class DbPathChangeTest {
     @get:Rule
@@ -33,10 +37,163 @@ class DbPathChangeTest {
         assertEquals(Plan.CopyThenSwitch(target), DbPathChange.plan(file("cur.db"), target))
     }
 
+    private fun jnoteDatabase(name: String): Path = path(name).also { p -> Database(p).use { it.submitAndWait { } } }
+
+    private fun sqlite(name: String, vararg statements: String): Path = path(name).also { p ->
+        JDBC().connect("jdbc:sqlite:$p", Properties())!!.use { c -> c.createStatement().use { s -> statements.forEach(s::execute) } }
+    }
+
+    private fun jnoteDatabaseAtVersion(name: String, version: Int): Path = path(name).also { p ->
+        JDBC().connect("jdbc:sqlite:$p", Properties())!!.use { Migrations.run(it, Migrations.ALL.take(version)) }
+    }
+
+    private fun filesIn(): Set<String> = tmp.root.list()!!.toSet()
+
     @Test
-    fun existingTargetSwitchesToExisting() {
-        val target = file("other.db")
-        assertEquals(Plan.SwitchToExisting(target), DbPathChange.plan(file("cur.db"), target))
+    fun existingJNoteDatabaseSwitchesToExisting() {
+        val target = jnoteDatabase("other.db")
+        assertEquals(Plan.SwitchToExisting(target), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun emptyFileAndEmptySqliteDatabaseSwitchToExisting() {
+        val empty = path("empty.db").also { Files.createFile(it) }
+        assertEquals(Plan.SwitchToExisting(empty), DbPathChange.plan(path("cur.db"), empty))
+        val noTables = sqlite("blank.db", "create table t(x)", "drop table t")
+        assertEquals(Plan.SwitchToExisting(noTables), DbPathChange.plan(path("cur.db"), noTables))
+    }
+
+    @Test
+    fun emptySqliteDatabaseWithAVersionIsInvalidBecauseMigrationsWouldSkipTheSchema() {
+        val target = sqlite("versioned.db", "PRAGMA user_version = 3")
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun oldJNoteDatabasesAtEveryEarlierVersionSwitchToExisting() {
+        for (version in 1..Migrations.ALL.size) {
+            val target = jnoteDatabaseAtVersion("v$version.db", version)
+            assertEquals("version $version", Plan.SwitchToExisting(target), DbPathChange.plan(path("cur.db"), target))
+        }
+    }
+
+    @Test
+    fun foreignDatabaseWithANoteTableIsInvalidAtEveryVersion() {
+        for (version in 0..Migrations.ALL.size) {
+            val target = sqlite("foreign$version.db", "create table note(x)", "PRAGMA user_version = $version")
+            assertEquals("version $version", Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), target))
+        }
+    }
+
+    @Test
+    fun jnoteDatabaseMissingARequiredColumnOrTableIsInvalid() {
+        val missingColumn = sqlite("column.db", "create table note(id integer primary key)", "create table tag(id integer primary key, name text)", "create table note_tag(note_id integer, tag_id integer)", "PRAGMA user_version = 1")
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), missingColumn))
+        val missingTable = jnoteDatabaseAtVersion("table.db", 1).also { p ->
+            JDBC().connect("jdbc:sqlite:$p", Properties())!!.use { c -> c.createStatement().use { it.execute("drop table note_tag") } }
+        }
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), missingTable))
+    }
+
+    @Test
+    fun nonEmptyRollbackJournalIsRefusedAndAnEmptyOneIsNot() {
+        val target = jnoteDatabase("journal.db")
+        val journal = path("journal.db-journal")
+        Files.createFile(journal)
+        assertEquals(Plan.SwitchToExisting(target), DbPathChange.plan(path("cur.db"), target))
+        Files.writeString(journal, "x")
+        assertEquals(Plan.Invalid(Reason.HAS_JOURNAL), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun databaseWithOnlyAViewIsNotEmpty() {
+        val target = sqlite("view.db", "create view v as select 1 as x")
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun anotherApplicationsTablesThatAreOnlyInTheWalAreSeenWithoutCreatingAShm() {
+        val crashed = crashedWithWal("crashed.db", "create table item(x)")
+        val link = Files.createSymbolicLink(path("link.db"), crashed)
+        val before = filesIn()
+        val bytes = listOf(crashed, path("crashed.db-wal")).map { Files.readAllBytes(it).toList() }
+
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), crashed))
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), link))
+
+        assertEquals(before, filesIn())
+        assertEquals(bytes, listOf(crashed, path("crashed.db-wal")).map { Files.readAllBytes(it).toList() })
+    }
+
+    private fun crashedWithWal(name: String, vararg statements: String): Path {
+        val live = path("live-$name")
+        val crashed = path(name)
+        JDBC().connect("jdbc:sqlite:$live", Properties())!!.use { c ->
+            c.createStatement().use { s ->
+                s.execute("PRAGMA journal_mode = WAL")
+                s.execute("PRAGMA wal_autocheckpoint = 0")
+                statements.forEach(s::execute)
+            }
+            Files.copy(live, crashed)
+            Files.copy(path("live-$name-wal"), path("$name-wal"))
+        }
+        return crashed
+    }
+
+    @Test
+    fun databaseWithAWalTooLargeToCopyIsInvalidEvenIfTheMainFileHasANoteTable() {
+        val before = DbPathChange.maxCopyBytes
+        DbPathChange.maxCopyBytes = 0
+        try {
+            val renamed = crashedWithWal("renamed.db", "create table note(x)", "PRAGMA wal_checkpoint", "alter table note rename to item")
+            assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), renamed))
+        } finally {
+            DbPathChange.maxCopyBytes = before
+        }
+    }
+
+    @Test
+    fun noteTableRemovedInTheWalIsSeen() {
+        val renamed = crashedWithWal("renamed.db", "create table note(x)", "PRAGMA wal_checkpoint", "alter table note rename to item")
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), renamed))
+    }
+
+    @Test
+    fun pathWithCharactersSpecialInUrisIsRead() {
+        Files.createDirectories(path("a b#%"))
+        val target = sqlite("a b#%/app.db", "create table item(x)")
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun fileThatIsNotSqliteIsInvalid() {
+        val target = file("notes.txt")
+        assertEquals(Plan.Invalid(Reason.NOT_SQLITE), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun anotherApplicationsDatabaseIsInvalidAndLeftUntouched() {
+        val walMode = sqlite("app-wal.db", "PRAGMA journal_mode = WAL", "create table item(x)", "PRAGMA user_version = 7")
+        val rollback = sqlite("app.db", "create table item(x)")
+        val before = filesIn()
+        val bytes = listOf(walMode, rollback).map { Files.readAllBytes(it).toList() }
+
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), walMode))
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), rollback))
+
+        assertEquals(before, filesIn())
+        assertEquals(bytes, listOf(walMode, rollback).map { Files.readAllBytes(it).toList() })
+    }
+
+    @Test
+    fun databaseOpenInAnotherConnectionIsStillRecognised() {
+        val target = jnoteDatabase("live.db")
+        Database(target).use { live ->
+            live.submitAndWait { }
+            val before = filesIn()
+            assertEquals(Plan.SwitchToExisting(target), DbPathChange.plan(path("cur.db"), target))
+            assertEquals(before, filesIn())
+        }
     }
 
     @Test

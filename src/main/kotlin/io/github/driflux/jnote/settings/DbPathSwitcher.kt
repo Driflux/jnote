@@ -6,11 +6,9 @@ import io.github.driflux.jnote.db.DatabaseService
 import java.nio.file.Path
 import java.util.concurrent.ExecutionException
 
-/** 계획대로 복사와 전환을 수행한다. 블로킹이므로 백그라운드 스레드에서만 부른다. */
 object DbPathSwitcher {
     class UnusableTarget(val target: Path, cause: Throwable) : Exception(cause.message, cause)
 
-    /** 전환과 저장은 끝났지만 옛 DB를 닫지 못했다. */
     class OldDatabaseNotClosed(val target: Path, override val cause: Throwable) : Exception(cause.message, cause)
 
     fun execute(
@@ -33,7 +31,6 @@ object DbPathSwitcher {
             DbPathChange.Plan.NoChange, is DbPathChange.Plan.Invalid ->
                 throw IllegalArgumentException("nothing to execute for $plan")
         }
-        // 경로는 이미 바뀌었으므로, 옛 DB를 닫다 실패해도 재시작 뒤 새 경로를 쓰도록 먼저 저장한다
         settings.store(target)
         try {
             retired?.close()
@@ -42,8 +39,8 @@ object DbPathSwitcher {
         }
     }
 
-    // 설정에 남긴 뒤에 실패하면 다음 사용과 재시작마다 같은 오류가 나므로, 바꾸기 전에 한 번 열어 마이그레이션까지 해 본다
     private fun requireUsable(target: Path) {
+        DbPathChange.existingFileProblem(target)?.let { throw UnusableTarget(target, IllegalStateException("not a JNote database: $it")) }
         val probe = Database(target)
         try {
             probe.submit { }.get()
@@ -54,7 +51,6 @@ object DbPathSwitcher {
         }
     }
 
-    // 상태를 읽은 뒤 DB가 처음 쓰여 만들어졌다면 replace가 거절하므로, 그 DB 스레드에서 다시 하도록 새로 읽어 되풀이한다
     private tailrec fun swap(service: DatabaseService, attempt: (DatabaseService.Current) -> Boolean): Database? {
         val current = service.current()
         return if (attempt(current)) current.database else swap(service, attempt)
