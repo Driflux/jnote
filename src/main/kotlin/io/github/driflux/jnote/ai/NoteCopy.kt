@@ -7,12 +7,7 @@ import java.io.StringWriter
 import java.sql.ResultSet
 import java.util.concurrent.CompletableFuture
 
-/** 선택한 노트를 AI 대화에 붙여 넣을 Markdown이나 JSON 형식 v1 텍스트로 만든다. */
 object NoteCopy {
-    /**
-     * [uids] 순서대로, 아직 남아 있는 노트만 돌려준다. 다른 IDE가 그 사이 지우거나 고쳐도 노트와 태그가
-     * 어긋나지 않도록 v_notes_export 한 문장으로 읽는다. id는 지운 뒤 재사용될 수 있어 uid로 찾는다.
-     */
     fun read(database: Database, uids: List<String>): CompletableFuture<List<ExportedNote>> {
         if (uids.isEmpty()) return CompletableFuture.completedFuture(emptyList())
         return database.submit { c ->
@@ -27,7 +22,6 @@ object NoteCopy {
 
     fun json(notes: List<ExportedNote>): String = StringWriter().also { NoteFormatCodec.encode(notes, it) }.toString()
 
-    /** 노트마다 제목, 파일 위치, 스니펫, 본문. FREE 노트는 위치와 스니펫이 없다. */
     fun markdown(notes: List<FormatNote>): String = notes.joinToString("\n\n") { note ->
         buildList {
             add("## " + note.title)
@@ -39,14 +33,12 @@ object NoteCopy {
         }.joinToString("\n\n")
     }
 
-    // 경로에도 백틱이 들어갈 수 있다. 끝의 백틱이 구분자와 붙지 않도록 그때만 공백을 둔다
     private fun inlineCode(text: String): String {
         val tick = "`".repeat(longestBacktickRun(text) + 1)
         val pad = if (text.startsWith('`') || text.endsWith('`')) " " else ""
         return tick + pad + text + pad + tick
     }
 
-    // 스니펫 안의 백틱 묶음보다 길게 펜스를 잡아야 코드 블록이 중간에 닫히지 않는다
     private fun codeBlock(snippet: String, relPath: String): String {
         val fence = "`".repeat(maxOf(3, longestBacktickRun(snippet) + 1))
         val language = relPath.substringAfterLast('/').substringAfterLast('.', "").lowercase().takeIf { it.all(Char::isLetterOrDigit) }.orEmpty()

@@ -184,7 +184,6 @@ class JNotePanel internal constructor(
 
             private fun showMenu(e: MouseEvent) {
                 if (!e.isPopupTrigger) return
-                // 선택 밖의 행을 오른쪽 클릭하면 그 행만 고른다. 선택 안의 행이면 여러 줄 선택을 그대로 둔다
                 val index = list.locationToIndex(e.point)
                 val onRow = index >= 0 && list.getCellBounds(index, index)?.contains(e.point) == true
                 if (onRow && !list.isSelectedIndex(index)) list.selectedIndex = index
@@ -409,7 +408,6 @@ class JNotePanel internal constructor(
         })
     }
 
-    /** 고른 순간의 uid로 DB에서 최신 내용을 읽고, 글로 바꾸는 것까지 EDT 밖에서 한 뒤 클립보드에는 한 번만 쓴다. */
     internal fun copySelected(format: (List<ExportedNote>) -> String): CompletableFuture<*> {
         val uids = list.selectedValuesList.map { it.summary.uid }
         if (uids.isEmpty()) return CompletableFuture.completedFuture(null)
@@ -419,10 +417,8 @@ class JNotePanel internal constructor(
             .whenComplete { text, error ->
                 onEdt {
                     when {
-                        // 나중에 누른 복사가 먼저 끝났다면 늦게 끝난 앞의 복사가 그 결과를 덮지 않는다
                         ticket != copyGeneration.get() -> Unit
                         error != null -> ToolWindowNotifier.copyFailed(project, (error as? CompletionException)?.cause ?: error)
-                        // 그 사이 모두 지워졌다면 클립보드를 건드리지 않는다
                         text != null -> CopyPasteManager.getInstance().setContents(StringSelection(text))
                     }
                 }
@@ -579,7 +575,6 @@ class JNotePanel internal constructor(
         internal const val FOCUS_OWNER_PROPERTY = "permanentFocusOwner"
         private const val SEARCH_DEBOUNCE_MS = 250L
 
-        // 클립보드는 IDE 하나에 하나뿐이라 프로젝트 창마다 있는 패널이 순번을 함께 쓴다
         private val copyGeneration = AtomicInteger()
     }
 }

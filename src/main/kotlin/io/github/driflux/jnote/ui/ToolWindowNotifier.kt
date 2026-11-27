@@ -22,7 +22,6 @@ internal object ToolWindowNotifier {
     fun restoreFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.restore", cause)
 
     fun confirmFailed(project: Project, cause: Throwable) {
-        // 이유에 노트의 파일 경로가 들어가고 알림 내용은 HTML이므로 이스케이프한다
         val reason = StringUtil.escapeXmlEntities(cause.message ?: cause.javaClass.simpleName)
         group().createNotification(
             JNoteBundle.message("toolWindow.error.confirm.title"),
@@ -37,7 +36,6 @@ internal object ToolWindowNotifier {
 
     fun deleteTagFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.tagDelete", cause)
 
-    /** 입력 검사 뒤에 다른 곳에서 같은 이름이 생긴 경우처럼, 이름이 겹쳐 바꾸지 못했을 때. */
     fun tagExists(project: Project, name: String) {
         group().createNotification(
             JNoteBundle.message("toolWindow.error.tagExists.title"),
@@ -47,7 +45,6 @@ internal object ToolWindowNotifier {
     }
 
     fun goToFailed(project: Project, cause: Throwable) {
-        // 알림 내용은 HTML이므로 예외 메시지를 이스케이프한다
         val reason = StringUtil.escapeXmlEntities(cause.message ?: cause.javaClass.simpleName)
         NotificationGroupManager.getInstance().getNotificationGroup(DbPathNotifier.GROUP_ID)
             .createNotification(
@@ -68,7 +65,6 @@ internal object ToolWindowNotifier {
             .notify(project)
     }
 
-    /** 재배치는 이후 이슈에서 다루므로 지금은 파일이 없다는 사실만 알린다. */
     fun fileMissing(project: Project, relPath: String) {
         group().createNotification(
             JNoteBundle.message("toolWindow.error.fileMissing.title"),
@@ -77,10 +73,6 @@ internal object ToolWindowNotifier {
         ).notify(project)
     }
 
-    /**
-     * "노트를 삭제했습니다" 알림. [onUndo]는 되돌리기를 누를 때, [expireAfterMs] 뒤에는 알림이 사라진다.
-     * 만료 작업은 알림이 먼저 사라지면(되돌리기, 닫기) 취소한다. [schedule]은 테스트에서 바꿔 끼운다.
-     */
     fun deleted(
         project: Project,
         expireAfterMs: Long = NoteDeletion.UNDO_TIMEOUT_MS,

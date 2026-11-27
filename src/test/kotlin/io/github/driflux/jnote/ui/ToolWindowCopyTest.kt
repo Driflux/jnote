@@ -110,7 +110,7 @@ class ToolWindowCopyTest : BasePlatformTestCase() {
 
         val decoded = NoteFormatCodec.decode(clipboard()!!) as DecodeResult.Decoded
         assertEquals(listOf("third", "first"), decoded.notes.map { it.title })
-        assertEquals(panel.list.selectedValuesList.map { it.note.uid }, decoded.notes.map { it.uid })
+        assertEquals(panel.list.selectedValuesList.map { it.summary.uid }, decoded.notes.map { it.uid })
     }
 
     fun testCopyAsMarkdownCopiesTitleLocationSnippetAndBody() {
@@ -125,7 +125,7 @@ class ToolWindowCopyTest : BasePlatformTestCase() {
     fun testCopyReadsTheLatestTextFromTheDatabase() {
         val panel = threeNotes()
         panel.list.selectedIndex = 0
-        val shown = panel.list.selectedValue.note
+        val shown = repo.get(panel.list.selectedValue.summary.id).get()!!
         repo.update(shown.copy(title = "renamed elsewhere")).get()
 
         copyWith(panel, "toolWindow.copy.markdown")
@@ -136,7 +136,7 @@ class ToolWindowCopyTest : BasePlatformTestCase() {
     fun testCopyOfNotesDeletedMeanwhileLeavesTheClipboardAlone() {
         val panel = threeNotes()
         panel.list.selectedIndex = 0
-        repo.delete(panel.list.selectedValue.note.id).get()
+        repo.delete(panel.list.selectedValue.summary.id).get()
 
         panel.copySelected { "should not be copied" }.get(10, TimeUnit.SECONDS)
         PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
@@ -155,7 +155,7 @@ class ToolWindowCopyTest : BasePlatformTestCase() {
     fun testReloadDoesNotSelectANewNoteThatReusedTheIdOfASelectedOne() {
         val panel = threeNotes()
         panel.list.selectedIndex = 0
-        val selected = panel.list.selectedValue.note
+        val selected = panel.list.selectedValue.summary
         repo.delete(selected.id).get()
         val reused = repo.create(NewNote.free("reused id")).get()
         assertEquals("SQLite gives the next note the deleted highest id", selected.id, reused.id)
