@@ -25,16 +25,14 @@ import javax.swing.BoxLayout
 import javax.swing.JComponent
 import javax.swing.JPanel
 
-/** 미리보기 카드에서 고른 동작. */
 internal interface PreviewActions {
-    fun edit(noteId: Long)
+    fun edit(noteId: Long, uid: String)
 
-    fun open(noteId: Long)
+    fun open(noteId: Long, uid: String)
 
-    fun delete(noteId: Long)
+    fun delete(noteId: Long, uid: String)
 }
 
-/** 미리보기 내용. 캐시된 [CachedNote]만 읽으므로 DB나 파일에 닿지 않는다. */
 internal object NotePreviewPanel {
     private const val WIDTH = 420
 
@@ -79,9 +77,9 @@ internal object NotePreviewPanel {
         if (note.body.isNotBlank()) details.add(textArea("body", NotePreviewText.body(note.body), monospaced = false))
         if (note.snippetHead.isNotBlank()) details.add(textArea("snippet", note.snippetHead, monospaced = true))
         val links = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, JBUI.scale(10), 0)).apply {
-            add(ActionLink(JNoteBundle.message("toolWindow.detail.edit")) { actions.edit(note.id) }.apply { name = "edit" })
-            add(ActionLink(JNoteBundle.message("gutter.preview.open")) { actions.open(note.id) }.apply { name = "open" })
-            add(ActionLink(JNoteBundle.message("toolWindow.detail.delete")) { actions.delete(note.id) }.apply { name = "delete" })
+            add(ActionLink(JNoteBundle.message("toolWindow.detail.edit")) { actions.edit(note.id, note.uid) }.apply { name = "edit" })
+            add(ActionLink(JNoteBundle.message("gutter.preview.open")) { actions.open(note.id, note.uid) }.apply { name = "open" })
+            add(ActionLink(JNoteBundle.message("toolWindow.detail.delete")) { actions.delete(note.id, note.uid) }.apply { name = "delete" })
         }
         card.add(header, BorderLayout.NORTH)
         card.add(details, BorderLayout.CENTER)
@@ -90,7 +88,6 @@ internal object NotePreviewPanel {
         return card
     }
 
-    /** 가져온 노트의 글이 <html>로 시작해도 HTML로 그려지지 않는다. 글을 넣기 전에 끄므로 HTML 뷰가 만들어지지 않는다. */
     internal fun plainLabel(text: String): JBLabel = JBLabel().apply {
         putClientProperty("html.disable", true)
         this.text = text
@@ -101,6 +98,7 @@ internal object NotePreviewPanel {
         isEditable = false
         isOpaque = false
         lineWrap = !monospaced
+        if (!monospaced) setSize(JBUI.scale(WIDTH), 1)
         wrapStyleWord = true
         border = JBUI.Borders.empty(2, 0)
         if (monospaced) font = Font(Font.MONOSPACED, Font.PLAIN, JBUI.Fonts.smallFont().size)
@@ -108,19 +106,17 @@ internal object NotePreviewPanel {
     }
 }
 
-/** 팝업으로 미리보기를 띄운다. 편집기 포커스를 가져가지 않고, 거터 오른쪽 호버한 줄 높이에 놓는다. */
 internal class NotePreviewPopup(private val editor: EditorEx, private val actionsFor: () -> PreviewActions?) : PreviewPresenter {
     override fun show(notes: List<CachedNote>, anchorY: Int, onEntered: () -> Unit, onExited: () -> Unit): PreviewHandle? {
         if (editor.isDisposed) return null
-        // 카드는 노트 번호만 알므로, 노트를 읽어 온 DB에 묶인 동작을 이 팝업을 띄울 때 만든다
         val actions = actionsFor() ?: return null
         lateinit var popup: JBPopup
         val closing = object : PreviewActions {
-            override fun edit(noteId: Long) = run { popup.cancel(); actions.edit(noteId) }
+            override fun edit(noteId: Long, uid: String) = run { popup.cancel(); actions.edit(noteId, uid) }
 
-            override fun open(noteId: Long) = run { popup.cancel(); actions.open(noteId) }
+            override fun open(noteId: Long, uid: String) = run { popup.cancel(); actions.open(noteId, uid) }
 
-            override fun delete(noteId: Long) = run { popup.cancel(); actions.delete(noteId) }
+            override fun delete(noteId: Long, uid: String) = run { popup.cancel(); actions.delete(noteId, uid) }
         }
         val content = NotePreviewPanel.build(notes, closing)
         watchMouse(content, onEntered, onExited)
@@ -141,7 +137,6 @@ internal class NotePreviewPopup(private val editor: EditorEx, private val action
         }
     }
 
-    // 자식 컴포넌트 경계에서는 나감과 들어옴이 이어서 오므로, 닫기를 예약했다가 곧 취소하는 것으로 충분하다
     private fun watchMouse(root: Container, onEntered: () -> Unit, onExited: () -> Unit) {
         val listener = object : MouseAdapter() {
             override fun mouseEntered(e: MouseEvent) = onEntered()

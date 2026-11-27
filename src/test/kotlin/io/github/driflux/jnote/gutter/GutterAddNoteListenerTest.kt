@@ -288,7 +288,6 @@ class GutterAddNoteListenerTest : BasePlatformTestCase() {
         val scheduler = io.github.driflux.jnote.ui.DelayScheduler { _, _ -> io.github.driflux.jnote.ui.Cancellable { } }
     }
 
-    // 미리보기 영역은 x 10..30, 아이콘 영역은 x 0..15로 읽는다
     private fun previewListener(editor: EditorEx, hovers: Hovers): GutterAddNoteListener {
         val geometry = GutterGeometry(lineAt = { it.y }, inIconArea = { it.x in 0..15 }, onAddIcon = { false }, inPreviewArea = { it.x in 10..30 })
         val controller = GutterPreviewController(

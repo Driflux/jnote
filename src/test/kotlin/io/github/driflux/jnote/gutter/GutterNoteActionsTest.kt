@@ -96,7 +96,7 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
         answer = NoteDraft(title = "new", body = "nb", tags = listOf("x", "y"))
         val changes = countChanges()
 
-        await(actions.edit(note.id))
+        await(actions.edit(note.id, note.uid))
 
         assertEquals(note.id, asked.single().first.id)
         assertEquals(listOf("x"), asked.single().second)
@@ -111,7 +111,7 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
         val note = create()
         answer = null
 
-        await(actions.edit(note.id))
+        await(actions.edit(note.id, note.uid))
 
         assertEquals("old", notes.get(note.id).get()!!.title)
     }
@@ -119,7 +119,7 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
     fun testEditingANoteThatWasDeletedMeanwhileOnlyRefreshesTheList() {
         val changes = countChanges()
 
-        await(actions.edit(404))
+        await(actions.edit(404, "none"))
 
         assertTrue(asked.isEmpty())
         assertEquals(1, changes[0])
@@ -129,7 +129,7 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
         val note = create()
         val shown = captureNotifications()
 
-        await(actions.delete(note.id))
+        await(actions.delete(note.id, note.uid))
 
         assertNull(notes.get(note.id).get())
         val notification = shown.single()
@@ -153,7 +153,7 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
         assertEquals(oldNote.id, newNote.id)
         val shown = captureNotifications()
 
-        await(staleActions.delete(oldNote.id))
+        await(staleActions.delete(oldNote.id, oldNote.uid))
 
         assertEquals("in new", notes.get(newNote.id).get()!!.title)
         assertEquals(1, shown.size)
@@ -168,7 +168,7 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
         answer = NoteDraft(title = "hijacked")
         val shown = captureNotifications()
 
-        await(staleActions.edit(oldNote.id))
+        await(staleActions.edit(oldNote.id, oldNote.uid))
 
         assertTrue(asked.isEmpty())
         assertEquals("in new", notes.get(newNote.id).get()!!.title)
@@ -184,7 +184,7 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
         })
         val shown = captureNotifications()
 
-        await(switching.edit(note.id))
+        await(switching.edit(note.id, note.uid))
 
         val newNote = create("in new")
         assertEquals(note.id, newNote.id)
@@ -197,7 +197,7 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
         DatabaseService.getInstance().switchTo(dir.resolve("other4.db"))
         db
 
-        staleActions.open(5)
+        staleActions.open(5, "u")
 
         assertNull(project.service<PendingNoteSelection>().peek())
     }
@@ -206,14 +206,13 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
         val note = create()
         val throwing = GutterNoteActions(project, db, NoteSaver(), { _, _, _ -> error("dialog broke") })
 
-        val future = throwing.edit(note.id)
+        val future = throwing.edit(note.id, note.uid)
         val deadline = System.currentTimeMillis() + 10_000
         while (!future.isDone) {
             check(System.currentTimeMillis() < deadline) { "timed out" }
             try {
                 PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
             } catch (expected: Throwable) {
-                // 콜백의 예외는 이벤트 큐에서도 보고되므로 여기서는 future만 본다
             }
             Thread.sleep(10)
         }
@@ -222,8 +221,63 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
     }
 
     fun testOpenRequestsTheNoteInTheToolWindow() {
-        actions.open(77)
+        val note = create()
 
-        assertEquals(77L, project.service<PendingNoteSelection>().peek())
+        await(actions.open(note.id, note.uid))
+
+        assertEquals(note.id, project.service<PendingNoteSelection>().peek())
+    }
+
+    private fun staleCardAfterIdReuse(): Triple<Note, Note, GutterNoteActions> {
+        val old = create("old")
+        val stale = actions
+        notes.delete(old.id).get()
+        val reused = create("reused")
+        assertEquals(old.id, reused.id)
+        return Triple(old, reused, stale)
+    }
+
+    fun testDeletingThroughACardWhoseIdWasReusedKeepsTheNewNote() {
+        val (old, reused, stale) = staleCardAfterIdReuse()
+        val changes = countChanges()
+
+        await(stale.delete(old.id, old.uid))
+
+        assertEquals(reused, notes.get(reused.id).get())
+        assertEquals(1, changes[0])
+    }
+
+    fun testEditingThroughACardWhoseIdWasReusedNeitherAsksNorWrites() {
+        val (old, reused, stale) = staleCardAfterIdReuse()
+        answer = NoteDraft(title = "hijacked")
+        val changes = countChanges()
+
+        await(stale.edit(old.id, old.uid))
+
+        assertTrue(asked.isEmpty())
+        assertEquals(reused, notes.get(reused.id).get())
+        assertEquals(1, changes[0])
+    }
+
+    fun testSavingAnEditWhoseNoteWasReplacedMeanwhileDoesNotWriteTheNewNote() {
+        val old = create("old")
+        val reusedHolder = arrayOfNulls<Note>(1)
+        val replacing = GutterNoteActions(project, db, NoteSaver(repository = { NoteRepository(db) }, tags = { TagRepository(db) }), { _, _, _ ->
+            notes.delete(old.id).get()
+            reusedHolder[0] = create("reused")
+            NoteDraft(title = "hijacked")
+        })
+
+        await(replacing.edit(old.id, old.uid))
+
+        assertEquals(reusedHolder[0], notes.get(old.id).get())
+    }
+
+    fun testOpeningACardWhoseIdWasReusedRequestsNothing() {
+        val (old, _, stale) = staleCardAfterIdReuse()
+
+        await(stale.open(old.id, old.uid))
+
+        assertNull(project.service<PendingNoteSelection>().peek())
     }
 }

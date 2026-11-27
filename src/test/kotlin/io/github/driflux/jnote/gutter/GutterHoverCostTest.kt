@@ -33,7 +33,6 @@ class GutterHoverCostTest : BasePlatformTestCase() {
         return "median %.3f us, min %.3f, max %.3f (%d rounds x %d)".format(perRound[rounds / 2], perRound.first(), perRound.last(), rounds, repeats)
     }
 
-    // JUnit3 러너가 test로 시작하는 메서드 안의 람다를 테스트로 오인하므로 본문은 도우미 함수에 둔다
     fun testPreviewLookupCostOnA5000LineFileWith20Notes() {
         if (System.getenv("JNOTE_PERF") == "1") previewCost()
     }

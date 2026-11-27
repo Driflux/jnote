@@ -11,11 +11,11 @@ import java.awt.Container
 class NotePreviewPanelTest : BasePlatformTestCase() {
     private val calls = mutableListOf<String>()
     private val actions = object : PreviewActions {
-        override fun edit(noteId: Long) { calls += "edit $noteId" }
+        override fun edit(noteId: Long, uid: String) { calls += "edit $noteId $uid" }
 
-        override fun open(noteId: Long) { calls += "open $noteId" }
+        override fun open(noteId: Long, uid: String) { calls += "open $noteId $uid" }
 
-        override fun delete(noteId: Long) { calls += "delete $noteId" }
+        override fun delete(noteId: Long, uid: String) { calls += "delete $noteId $uid" }
     }
 
     private fun note(id: Long, title: String = "title $id", body: String = "body $id", tags: List<String> = listOf("a", "b"), ai: String? = null, snippet: String = "code $id") =
@@ -53,6 +53,13 @@ class NotePreviewPanelTest : BasePlatformTestCase() {
         assertEquals("<html><img src=\"file:///x.png\"><b>x</b>", label.text)
     }
 
+    fun testALongBodyLineGetsHeightForItsWrappedLines() {
+        val short = NotePreviewPanel.build(listOf(note(1, body = "short")), actions)
+        val long = NotePreviewPanel.build(listOf(note(2, body = "word ".repeat(90).trim())), actions)
+
+        assertTrue(long.preferredSize.height > short.preferredSize.height + 40)
+    }
+
     fun testEmptyPartsAreLeftOut() {
         val panel = NotePreviewPanel.build(listOf(note(1, body = "", tags = emptyList(), snippet = "")), actions)
 
@@ -61,12 +68,12 @@ class NotePreviewPanelTest : BasePlatformTestCase() {
         assertNull(find<JBTextArea>(panel, "snippet"))
     }
 
-    fun testTheActionLinksCallBackWithTheirNoteId() {
+    fun testTheActionLinksCallBackWithTheirNoteIdAndUid() {
         val panel = NotePreviewPanel.build(listOf(note(7)), actions)
 
         for (name in listOf("edit", "open", "delete")) find<ActionLink>(panel, name)!!.doClick()
 
-        assertEquals(listOf("edit 7", "open 7", "delete 7"), calls)
+        assertEquals(listOf("edit 7 u7", "open 7 u7", "delete 7 u7"), calls)
     }
 
     fun testOnlyTheFirstThreeCardsShowAndTheRestAreCounted() {

@@ -18,7 +18,6 @@ internal class GutterGeometry(
     val lineAt: (MouseEvent) -> Int,
     val inIconArea: (MouseEvent) -> Boolean,
     val onAddIcon: (MouseEvent) -> Boolean,
-    /** 노트 아이콘과 범위 막대가 있는 칸 안인가. 줄 번호 칸은 제외한다. */
     val inPreviewArea: (MouseEvent) -> Boolean = { false },
 ) {
     companion object {

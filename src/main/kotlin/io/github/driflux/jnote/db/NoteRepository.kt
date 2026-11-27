@@ -90,7 +90,8 @@ class NoteRepository(
             s.setString(i++, note.sourceUrl)
             s.setString(i++, note.prompt)
             s.setLong(i++, now)
-            s.setLong(i, note.id)
+            s.setLong(i++, note.id)
+            s.setString(i, note.uid)
             s.executeUpdate()
         }
         if (changed == 0) null else findById(c, note.id)
@@ -219,11 +220,11 @@ class NoteRepository(
         }
     }
 
-    internal fun deleteReturningTagIds(id: Long): CompletableFuture<Pair<Note, List<Long>>?> = database.submit { c ->
+    internal fun deleteReturningTagIds(id: Long, uid: String): CompletableFuture<Pair<Note, List<Long>>?> = database.submit { c ->
         c.createStatement().use { it.execute("BEGIN IMMEDIATE") }
         try {
             val note = findById(c, id)
-            val result = if (note == null) {
+            val result = if (note == null || note.uid != uid) {
                 null
             } else {
                 val tagIds = c.prepareStatement("SELECT tag_id FROM note_tag WHERE note_id = ? ORDER BY tag_id").use { s ->
@@ -276,7 +277,7 @@ class NoteRepository(
             "status, title, body, ai_source, source_url, prompt, created_at, updated_at) " +
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         const val UPDATE = "UPDATE note SET kind=?, project=?, rel_path=?, class_name=?, start_line=?, end_line=?, " +
-            "snapshot=?, status=?, title=?, body=?, ai_source=?, source_url=?, prompt=?, updated_at=? WHERE id=?"
+            "snapshot=?, status=?, title=?, body=?, ai_source=?, source_url=?, prompt=?, updated_at=? WHERE id=? AND uid=?"
 
         const val UPDATE_TEXT = "UPDATE note SET title=?, body=?, ai_source=?, source_url=?, prompt=?, updated_at=? WHERE uid=?"
 

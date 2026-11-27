@@ -318,7 +318,7 @@ class JNotePanel internal constructor(
         deleteOn(NoteDeletion.onCurrentDatabase(), note)
 
     private fun deleteOn(deletion: NoteDeletion, note: Note): CompletableFuture<*> =
-        deletion.delete(note.id).whenComplete { deleted, error ->
+        deletion.delete(note.id, note.uid).whenComplete { deleted, error ->
             onEdt {
                 when {
                     error != null -> ToolWindowNotifier.deleteFailed(project, error.cause ?: error)

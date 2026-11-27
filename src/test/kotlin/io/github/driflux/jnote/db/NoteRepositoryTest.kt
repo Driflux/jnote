@@ -227,6 +227,18 @@ class NoteRepositoryTest {
     }
 
     @Test
+    fun updateWithAReusedIdAndAnotherUidKeepsTheNewNote() {
+        val old = repo.create(code()).get()
+        repo.delete(old.id).get()
+        val reused = repo.create(code()).get()
+        assertEquals(old.id, reused.id)
+
+        assertNull(repo.update(old.copy(title = "hijacked")).get())
+
+        assertEquals(reused, repo.get(reused.id).get())
+    }
+
+    @Test
     fun updateMissingReturnsNull() {
         val created = repo.create(code()).get()
         repo.delete(created.id).get()

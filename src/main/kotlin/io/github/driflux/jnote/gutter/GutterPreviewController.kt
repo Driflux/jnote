@@ -9,12 +9,9 @@ internal interface PreviewHandle {
     fun close()
 }
 
-/** 호버 미리보기가 읽는 곳. 메모리만 읽는다. */
 internal interface PreviewSource {
-    /** [line](0-based)을 범위 안에 두는 노트. */
     fun notesAt(document: com.intellij.openapi.editor.Document, line: Int): List<CachedNote>
 
-    /** 그 노트들을 읽어 온 DB. 아직 없으면 null. */
     fun database(): io.github.driflux.jnote.db.Database?
 
     object None : PreviewSource {
@@ -25,15 +22,9 @@ internal interface PreviewSource {
 }
 
 internal fun interface PreviewPresenter {
-    /** 미리보기를 띄운다. 마우스가 미리보기에 들어가면 [onEntered], 나가면 [onExited]를 불러야 한다. 띄울 수 없으면 null. */
     fun show(notes: List<CachedNote>, anchorY: Int, onEntered: () -> Unit, onExited: () -> Unit): PreviewHandle?
 }
 
-/**
- * 거터 호버로 미리보기를 띄우고 닫는 시점만 정한다. EDT에서만 쓰고 Swing을 몰라서 가짜 스케줄러로 검증한다.
- * 줄이 바뀔 때만 일을 하므로 같은 줄 위의 이벤트는 비교 한 번이다. [notesAt]은 메모리 캐시만 읽는다.
- * 줄은 0-based이다.
- */
 internal class GutterPreviewController(
     private val scheduler: DelayScheduler,
     private val notesAt: (Int) -> List<CachedNote>,
@@ -48,13 +39,11 @@ internal class GutterPreviewController(
     private var pendingShow: Cancellable? = null
     private var pendingClose: Cancellable? = null
 
-    // 취소가 늦어 이미 대기열에 들어간 작업이 낡은 줄로 실행되지 않게 한다
     private var showToken = 0
     private var closeToken = 0
 
     internal val isShowing: Boolean get() = handle?.isOpen == true
 
-    /** 마우스가 노트 영역 위의 [line]에 있으면 그 줄, 아니면 null. */
     fun hover(line: Int?, anchorY: Int) {
         if (line == this.line) {
             if (line != null) cancelClose()
@@ -67,7 +56,6 @@ internal class GutterPreviewController(
             cancelClose()
             return
         }
-        // 다른 줄로 옮겨 가면 옛 미리보기는 잠시 뒤 닫히고, 새 줄에 노트가 있으면 그 뒤에 새로 뜬다
         scheduleClose()
         if (line != null && notesAt(line).isNotEmpty()) {
             val mine = ++showToken
@@ -93,7 +81,6 @@ internal class GutterPreviewController(
         shownLine = target
     }
 
-    // 카드로 들어왔다면 거터를 지나며 예약된 다른 줄의 표시가 이 카드를 닫아 버리면 안 된다
     private fun entered() {
         cancelShow()
         cancelClose()
@@ -128,7 +115,6 @@ internal class GutterPreviewController(
     companion object {
         const val SHOW_DELAY_MS = 400L
 
-        // 마우스가 거터에서 미리보기로 건너가는 시간을 준다. 보이는 시간(400ms)보다 짧아야 옛 것이 먼저 닫힌다
         const val CLOSE_DELAY_MS = 300L
     }
 }

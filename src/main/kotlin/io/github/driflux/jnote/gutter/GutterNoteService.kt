@@ -72,10 +72,6 @@ internal class GutterNoteService(private val project: Project) : Disposable, Pre
         if (!disposed) GutterAddNoteAttacher.attach(project, document, this, { disposed }, this)
     }
 
-    /**
-     * 거터 호버 미리보기가 쓰는, [line](0-based)을 범위 안에 두는 노트. 메모리 캐시와 RangeMarker만 읽고 읽기를 시작하지 않으므로
-     * EDT에서 불러도 DB나 파일에 닿지 않는다. 아직 읽지 못했거나 다른 DB로 바뀐 뒤의 캐시는 비어 있는 것으로 본다(마커 패스가 채운다).
-     */
     internal fun notesCovering(document: Document, line: Int): List<CachedNote> {
         if (disposed) return emptyList()
         val file = FileDocumentManager.getInstance().getFile(document) ?: return emptyList()
