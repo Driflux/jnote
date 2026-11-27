@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #20
-- PRs: #79 copy snippet and keyboard control, #84 current file toggle, #90 syntax highlighting, #91 refresh on focus, then AI notes filter (stacked)
+- PRs: #79 copy snippet and keyboard control, #84 current file toggle, #90 syntax highlighting, #91 refresh on focus, #94 AI notes filter (stacked)
 
 ## Context
 The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011, 0062). The 1.0 usability list in intent.md section 7 still lacks copying a snippet, keyboard control, a current-file view, highlighted snippets, a refresh for multi-window use, and an AI filter. Every one of them must keep the top principle: no startup work, no DB or file I/O on the EDT, no new dependency.
@@ -27,9 +27,11 @@ The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011,
   - The created editor is recorded before it is configured. If configuration throws, `release()` can still free it, so no editor leaks.
   - A long line makes the horizontal scrollbar take room, so its height is added to the preferred height. The height is capped at 12 lines.
   - The editor is released on the EDT when the panel is disposed, so an open snippet editor never outlives a closed panel. `NoteDetailPanel.show(null)` also releases it.
-- **Refresh on focus.** One reload when keyboard focus moves into the panel from outside it, to see changes other IDE windows wrote. A `permanentFocusOwner` listener lives only as long as the panel and compares the old and new owner. Moving focus between the list and the search box does not reload, which `FocusEntry.entered` decides from the old and new owner (an owner is inside when it descends from the panel). When the IDE is activated again while focus is still inside the panel, the owner has not changed, so a second trigger (`ApplicationActivationListener`, connected to the panel's own disposable) reloads once in that case. The subscriptions are made before the first load so a notification that arrives during it is not missed. There is no timer and no polling (PR #91).
+- **Refresh on focus.** One reload when keyboard focus moves into the panel from outside it, to see changes other IDE windows wrote. A `permanentFocusOwner` listener lives only as long as the panel and compares the old and new owner. Moving focus between the list and the search box does not reload, which `FocusEntry.entered` decides from the old and new owner (an owner is inside when it descends from the panel). When the IDE is activated again while focus is still inside the panel, the owner has not changed, so a second trigger (`ApplicationActivationListener`, connected to the panel's own disposable) reloads once in that case, but only when the activated IDE frame contains the panel, so activating another project's window does not reload this one. The subscriptions are made before the first load so a notification that arrives during it is not missed. There is no timer and no polling (PR #91).
+  - Focus can enter many times while a read is running. A request that arrives during a list load only sets a flag, and one more load runs after the current one finishes, so repeated focus costs at most one extra read and the latest data is shown (`reloadOnFocus`, `listLoads`, `rerunAfterLoad`).
+  - A reload keeps the tag chips when the dictionary and the selected tags are unchanged (`tagBarKey`), because recreating them would drop keyboard focus from a chip. A search result is applied only when its query still equals the current query.
 - Refresh tests write through the repository without publishing `NotesChanged`, which is what another IDE process looks like to this window, so only the focus trigger can make the new note appear.
-- **AI notes only.** A check box that keeps rows with an AI source, filtered in memory like the kind filter. It combines with the kind, tag, search, and current-file filters.
+- **AI notes only.** A check box that keeps rows with an AI source (the same non-blank test as the AI badge), filtered in memory like the kind filter, so it does no DB read. It combines with the kind, tag, search, current-file, and all-projects controls. The empty state says there are no AI notes (in the current file when that filter is on) only when turning the AI filter off would show notes; otherwise the tag, search, and current-file messages keep their order (PR #94).
 
 ## Alternatives considered
 - Copy from the DB at click time: the detail already holds the note, so a read adds a thread hop for nothing. Rejected.
@@ -37,6 +39,7 @@ The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011,
 - Rely only on the detail being cleared when the selection changes: it is not cleared while a drag is adjusting the selection, so the uid comparison is also needed. Rejected as insufficient.
 - Only a `ToolWindowManagerListener`: it reports the tool window being activated, not focus entering it by a click on the list. Rejected.
 - Only the application activation listener: it misses switching from the editor to the Tool Window inside one window. It is used for the narrower case it covers, connected from the panel (a dynamic subscription) and not declared in plugin.xml, so it adds no startup work. Rejected as the only trigger.
+- Start a new load for every focus entry: loads pile up and an older result can arrive last. Rejected for the flag plus one rerun.
 - Polling or a file watcher on the DB: violates "no polling" and costs idle CPU. Rejected.
 - A read-only text area with no coloring: it needs no editor but gives no syntax colors. Rejected for the highlighting feature.
 - Always keep one editor for the snippet: an editor is expensive and the intent is "created only on selection". Rejected.
