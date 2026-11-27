@@ -140,6 +140,7 @@ class DatabaseServiceTest : BasePlatformTestCase() {
             while (switching.isAlive && switching.state != Thread.State.TIMED_WAITING && System.nanoTime() < deadline) {
                 Thread.onSpinWait()
             }
+            assertEquals(Thread.State.TIMED_WAITING, switching.state)
         } finally {
             gate.countDown()
         }
