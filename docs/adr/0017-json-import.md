@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #17
-- PR: (import engine), (preview dialog and file import), (clipboard import and pre-import backup)
+- PR: #86 (import engine), #92 (preview dialog and file import), #97 (clipboard import and pre-import backup)
 
 ## Context
 AI agents and people write notes in JSON format v1 (ADR 0016, `docs/ai-format.md`). JNote must take those notes in safely: a person confirms every write, nothing is lost, and a bad item does not block the good ones (intent.md section 10.3). Several IDE processes share one DB file, so the import must not race with another IDE's writes, and the preview a person reads may be stale by the time they click Apply. The inbox (#18) feeds the same flow.
