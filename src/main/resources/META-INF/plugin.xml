@@ -92,6 +92,8 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <action id="JNote.ExportAllNotes" class="io.github.driflux.jnote.ai.ExportAllNotesAction"/>
             <action id="JNote.ExportSelectedNotes" class="io.github.driflux.jnote.ai.ExportSelectedNotesAction"/>
+            <separator/>
+            <action id="JNote.ImportFromFile" class="io.github.driflux.jnote.ai.ImportFromFileAction"/>
         </group>
     </actions>
 </idea-plugin>

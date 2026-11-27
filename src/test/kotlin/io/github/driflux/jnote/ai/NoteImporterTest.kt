@@ -224,6 +224,22 @@ class NoteImporterTest {
         assertEquals(listOf("drop", "keep"), tagsOf(existing))
     }
 
+    @Test fun cancelDuringPlanningStopsItAndLeavesTheDatabaseUsable() {
+        var seen = 0
+        try {
+            importer.plan(listOf(FormatNote(uid = null, title = "first"), FormatNote(uid = null, title = "second"))) {
+                if (++seen == 2) throw CancellationException()
+            }.get()
+            fail("expected cancellation")
+        } catch (e: ExecutionException) {
+            assertTrue(e.cause is CancellationException)
+        }
+
+        assertEquals(2, seen)
+        assertEquals(emptyList<Note>(), all())
+        assertEquals(ImportResult(1, 0, 0), importer.importNow(listOf(FormatNote(uid = null, title = "after"))).get())
+    }
+
     @Test fun cancelDuringTheLastWriteStillRollsBack() {
         var seen = 0
         try {
@@ -271,6 +287,33 @@ class NoteImporterTest {
         val again = importer.plan(plan.items.map { it.note }).get()
         assertEquals(listOf(true to false), again.updates.map { it.emptiedBody to it.emptiedTags })
         assertEquals(ImportResult(0, 1, 0), importer.apply(again).get())
+    }
+
+    @Test fun anItemPlannedAsUnchangedThatBecomesAnUpdateStopsTheImport() {
+        val existing = notes.create(NewNote.free("same")).get()
+        val plan = importer.plan(listOf(FormatNote(uid = existing.uid, title = "same"))).get()
+        assertEquals(1, plan.unchanged.size)
+        notes.update(existing.copy(title = "edited meanwhile")).get()
+
+        try {
+            importer.apply(plan).get()
+            fail("expected PlanOutdatedException")
+        } catch (e: ExecutionException) {
+            assertTrue(e.cause is PlanOutdatedException)
+        }
+        assertEquals("edited meanwhile", notes.get(existing.id).get()!!.title)
+
+        val again = importer.plan(plan.items.map { it.note }).get()
+        assertEquals(1, again.updates.size)
+        assertEquals(ImportResult(0, 1, 0), importer.apply(again).get())
+    }
+
+    @Test fun aCreateThatBecomesAnUpdateStaysAdvisory() {
+        val plan = importer.plan(listOf(FormatNote(uid = "late-uid", title = "imported"))).get()
+        assertEquals(1, plan.creates.size)
+        importer.importNow(listOf(FormatNote(uid = "late-uid", title = "made elsewhere"))).get()
+
+        assertEquals(ImportResult(0, 1, 0), importer.apply(plan).get())
     }
 
     @Test fun importsAreSearchableAndOldTextIsNot() {
