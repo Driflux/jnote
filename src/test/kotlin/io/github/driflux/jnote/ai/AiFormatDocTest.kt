@@ -13,13 +13,17 @@ class AiFormatDocTest {
     @Test fun everyJsonExampleDecodesWithoutSkippedItems() {
         val examples = Regex("```json\\n(.*?)```", RegexOption.DOT_MATCHES_ALL).findAll(doc).map { it.groupValues[1] }.toList()
         val complete = examples.filter { "\"notes\": [ ... ]" !in it }
-        assertTrue("expected the three full examples, found ${complete.size}", complete.size >= 3)
+        assertTrue("expected the four full examples, found ${complete.size}", complete.size >= 4)
         for (example in complete) {
             val result = NoteFormatCodec.decode(example)
             assertTrue("$result\n$example", result is DecodeResult.Decoded)
             result as DecodeResult.Decoded
             assertEquals(example, emptyList<SkippedItem>(), result.skipped)
             assertTrue(example, result.notes.isNotEmpty())
+            for (anchor in result.notes.mapNotNull { it.anchor }) {
+                val snapshotLines = anchor.snapshot?.lines()?.size ?: continue
+                assertEquals("snapshot must cover the anchored lines", anchor.endLine - anchor.startLine + 1, snapshotLines)
+            }
         }
     }
 
