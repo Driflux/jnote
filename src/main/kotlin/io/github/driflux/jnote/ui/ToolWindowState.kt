@@ -15,6 +15,8 @@ data class ToolWindowState(
     val match: SearchMatch? = null,
     val currentFileOnly: Boolean = false,
     val currentRelPath: String? = null,
+    /** "AI 노트만" 보기. 켜면 AI 출처가 있는 노트만 남는다. */
+    val aiOnly: Boolean = false,
 ) {
     val searching: Boolean get() = SearchQuery.isSearchable(query)
 
@@ -23,6 +25,7 @@ data class ToolWindowState(
             val ids = if (searching) match?.ids else null
             return notes.orEmpty().filter { row ->
                 filter.accepts(row.summary.kind) &&
+                    (!aiOnly || row.aiBadge) &&
                     inCurrentFile(row) &&
                     selectedTagIds.all { id -> row.tags.any { it.id == id } } &&
                     (ids == null || row.summary.id in ids)
@@ -31,6 +34,8 @@ data class ToolWindowState(
 
     private fun inCurrentFile(row: NoteRow): Boolean =
         !currentFileOnly || (row.summary.kind == NoteKind.CODE && row.projectName == null && row.summary.relPath == currentRelPath && currentRelPath != null)
+
+    val aiFilterEmptiedTheList: Boolean get() = aiOnly && showEmptyState && copy(aiOnly = false).visibleNotes.isNotEmpty()
 
     val tagFilterActive: Boolean get() = selectedTagIds.isNotEmpty()
 

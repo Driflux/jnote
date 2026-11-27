@@ -179,4 +179,45 @@ class ToolWindowStateTest {
         val state = ToolWindowState(notes = listOf(codeIn(10, "p", "src/A.kt")), filter = NoteFilter.FREE, currentFileOnly = true, currentRelPath = "src/A.kt")
         assertTrue(state.visibleNotes.isEmpty())
     }
+
+    private fun aiRow(id: Long, aiSource: String?) = NoteRows.of(
+        NoteSummary(id, "u$id", NoteKind.CODE, "p", "a.kt", null, 1, 1, NoteStatus.OK, "t$id", aiSource, 1),
+        "p",
+        "free",
+    )
+
+    @Test
+    fun aiOnlyKeepsOnlyNotesWithAnAiSource() {
+        val state = ToolWindowState(notes = listOf(aiRow(1, "Claude"), aiRow(2, null), aiRow(3, "  "), aiRow(4, "GPT")), aiOnly = true)
+        assertEquals(listOf(1L, 4L), state.visibleNotes.map { it.summary.id })
+    }
+
+    @Test
+    fun aiOffKeepsEveryNote() {
+        val state = ToolWindowState(notes = listOf(aiRow(1, "Claude"), aiRow(2, null)), aiOnly = false)
+        assertEquals(2, state.visibleNotes.size)
+    }
+
+    @Test
+    fun aiOnlyCombinesWithTheKindAndTagFilters() {
+        val tagged = aiRow(1, "Claude").copy(tags = listOf(io.github.driflux.jnote.model.Tag(5, "x")))
+        val plain = aiRow(2, "Claude")
+        val human = aiRow(3, null).copy(tags = listOf(io.github.driflux.jnote.model.Tag(5, "x")))
+        val state = ToolWindowState(notes = listOf(tagged, plain, human), aiOnly = true, selectedTagIds = setOf(5), filter = NoteFilter.CODE)
+        assertEquals(listOf(1L), state.visibleNotes.map { it.summary.id })
+    }
+
+    @Test
+    fun aiFilterIsTheReasonOnlyWhenTurningItOffShowsNotes() {
+        val handNote = aiRow(1, null).copy(tags = listOf(io.github.driflux.jnote.model.Tag(5, "x")))
+        assertTrue(ToolWindowState(notes = listOf(handNote), aiOnly = true, selectedTagIds = setOf(5)).aiFilterEmptiedTheList)
+        assertFalse("another filter also empties the list", ToolWindowState(notes = listOf(handNote), aiOnly = true, selectedTagIds = setOf(6)).aiFilterEmptiedTheList)
+        assertFalse("nothing is hidden", ToolWindowState(notes = listOf(aiRow(1, "Claude")), aiOnly = true).aiFilterEmptiedTheList)
+        assertFalse("filter is off", ToolWindowState(notes = listOf(handNote), aiOnly = false).aiFilterEmptiedTheList)
+    }
+
+    @Test
+    fun aiOnlyWithNoAiNotesShowsTheEmptyState() {
+        assertTrue(ToolWindowState(notes = listOf(aiRow(1, null)), aiOnly = true).showEmptyState)
+    }
 }

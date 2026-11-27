@@ -129,6 +129,14 @@ class JNotePanel internal constructor(
             render()
         }
     }
+    internal val aiOnlyBox = JBCheckBox(JNoteBundle.message("toolWindow.aiOnly")).apply {
+        // 이미 읽은 행에만 걸리므로 다시 읽지 않는다
+        addActionListener {
+            state = state.copy(aiOnly = isSelected)
+            render()
+        }
+    }
+
     // 지금 칩이 그려 낸 사전과 켜 둔 태그. 이것이 바뀔 때만 칩을 새로 만든다. EDT에서만 쓴다
     private var tagBarKey: Pair<List<Tag>, Set<Long>>? = null
     internal val tagBar = JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 2)).apply { isVisible = false }
@@ -190,6 +198,7 @@ class JNotePanel internal constructor(
             add(JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 0)).apply {
                 add(allProjectsBox)
                 add(currentFileBox)
+                add(aiOnlyBox)
                 add(filterCombo)
             }, BorderLayout.CENTER)
             add(spinnerIcon, BorderLayout.EAST)
@@ -523,12 +532,18 @@ class JNotePanel internal constructor(
         if (state.showEmptyState && state.currentFileOnly && state.currentRelPath == null) {
             text.text = JNoteBundle.message("toolWindow.empty.currentFile.none.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.currentFile.none.hint"))
+        } else if (state.aiFilterEmptiedTheList) {
+            text.text = JNoteBundle.message(if (state.currentFileOnly) "toolWindow.empty.ai.currentFile.title" else "toolWindow.empty.ai.title")
+            text.appendLine(JNoteBundle.message("toolWindow.empty.ai.hint"))
         } else if (state.showEmptyState && state.tagFilterActive) {
             text.text = JNoteBundle.message("toolWindow.empty.tags.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.tags.hint"))
         } else if (state.noSearchResults) {
             text.text = JNoteBundle.message("toolWindow.search.empty.title", state.query)
             text.appendLine(JNoteBundle.message(if (state.allProjects) "toolWindow.search.empty.hint.all" else "toolWindow.search.empty.hint"))
+        } else if (state.showEmptyState && state.aiOnly) {
+            text.text = JNoteBundle.message(if (state.currentFileOnly) "toolWindow.empty.ai.currentFile.title" else "toolWindow.empty.ai.title")
+            text.appendLine(JNoteBundle.message("toolWindow.empty.ai.hint"))
         } else if (state.showEmptyState && state.currentFileOnly) {
             text.text = JNoteBundle.message("toolWindow.empty.currentFile.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.currentFile.hint"))
