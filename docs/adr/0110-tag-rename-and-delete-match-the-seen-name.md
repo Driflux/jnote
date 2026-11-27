@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-27
 - Issue: #110, #111
-- PR: (this PR)
+- PR: #126
 
 ## Context
 The Tool Window reads the tag list, and a later rename or delete runs `UPDATE tag ... WHERE id = ?` or `DELETE FROM tag WHERE id = ?` with the id from that list. `tag.id` is an `INTEGER PRIMARY KEY` without `AUTOINCREMENT`, so SQLite hands out `max(id) + 1` and reuses the id of a deleted tag that had the largest id. If another IDE process sharing `jnote.db` deletes the tag and creates a new one between the list read and the operation, the rename or delete hits the new, different tag (ADR 0059 recorded this gap; #111 reported the same hole).
