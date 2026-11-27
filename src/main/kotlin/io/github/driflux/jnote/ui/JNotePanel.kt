@@ -483,7 +483,7 @@ class JNotePanel internal constructor(
 
     internal fun renameTag(tag: Tag): CompletableFuture<*> {
         val name = askTagName(project, tag, state.tags) ?: return CompletableFuture.completedFuture(null)
-        return TagRepository(DatabaseService.getInstance().database).rename(tag.id, name).whenComplete { result, error ->
+        return TagRepository(DatabaseService.getInstance().database).rename(tag, name).whenComplete { result, error ->
             onEdt {
                 when {
                     error != null -> ToolWindowNotifier.renameTagFailed(project, error.cause ?: error)
@@ -496,7 +496,7 @@ class JNotePanel internal constructor(
 
     internal fun deleteTag(tag: Tag): CompletableFuture<*> {
         if (!confirmTagDelete(project, tag)) return CompletableFuture.completedFuture(null)
-        return TagRepository(DatabaseService.getInstance().database).delete(tag.id).whenComplete { _, error ->
+        return TagRepository(DatabaseService.getInstance().database).delete(tag).whenComplete { _, error ->
             onEdt { if (error == null) publishChanged() else ToolWindowNotifier.deleteTagFailed(project, error.cause ?: error) }
         }
     }
