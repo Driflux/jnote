@@ -21,6 +21,14 @@ internal object ToolWindowNotifier {
 
     fun restoreFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.restore", cause)
 
+    fun deleteStale(project: Project, missing: Int) {
+        group().createNotification(
+            JNoteBundle.message("toolWindow.error.deleteStale.title"),
+            JNoteBundle.message("toolWindow.error.deleteStale.content", missing),
+            NotificationType.WARNING,
+        ).notify(project)
+    }
+
     fun confirmFailed(project: Project, cause: Throwable) {
         val reason = StringUtil.escapeXmlEntities(cause.message ?: cause.javaClass.simpleName)
         group().createNotification(

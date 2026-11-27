@@ -332,7 +332,7 @@ class JNotePanel internal constructor(
     private fun deleteSelected() {
         if (list.valueIsAdjusting) return
         val selected = list.selectedValuesList
-        if (selected.size > 1) deleteNotes(selected.map { it.summary.id }) else clickShown(detail.deleteButton)
+        if (selected.size > 1) deleteNotes(selected.map { it.summary.uid }) else clickShown(detail.deleteButton)
     }
     fun reload() {
         val ticket = generation.incrementAndGet()
@@ -354,13 +354,13 @@ class JNotePanel internal constructor(
         }
     }
 
-    internal fun delete(note: Note): CompletableFuture<*> = deleteNotes(listOf(note.id))
+    internal fun delete(note: Note): CompletableFuture<*> = deleteNotes(listOf(note.uid))
 
-    internal fun deleteNotes(ids: List<Long>): CompletableFuture<*> =
-        deleteOn(NoteDeletion.onCurrentDatabase(), ids)
+    internal fun deleteNotes(uids: List<String>): CompletableFuture<*> =
+        deleteOn(NoteDeletion.onCurrentDatabase(), uids)
 
-    private fun deleteOn(deletion: NoteDeletion, ids: List<Long>): CompletableFuture<*> =
-        deletion.delete(ids).whenComplete { deleted, error ->
+    private fun deleteOn(deletion: NoteDeletion, uids: List<String>): CompletableFuture<*> =
+        deletion.delete(uids).whenComplete { deleted, error ->
             onEdt {
                 if (error != null) {
                     ToolWindowNotifier.deleteFailed(project, error.cause ?: error)
@@ -368,6 +368,7 @@ class JNotePanel internal constructor(
                 }
                 publishChanged()
                 if (deleted.isNotEmpty()) ToolWindowNotifier.deleted(project, deleted.size) { undo(deletion, deleted) }
+                if (deleted.size < uids.size) ToolWindowNotifier.deleteStale(project, uids.size - deleted.size)
             }
         }
 

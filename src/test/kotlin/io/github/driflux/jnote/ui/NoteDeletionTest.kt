@@ -34,7 +34,7 @@ class NoteDeletionTest {
         val tag = tags.getOrCreate("x").get()
         tags.attach(note.id, tag.id).get()
 
-        val deleted = deletion.delete(listOf(note.id)).get().single()
+        val deleted = deletion.delete(listOf(note.uid)).get().single()
 
         assertEquals(note, deleted.note)
         assertEquals(listOf(tag.id), deleted.tagIds)
@@ -43,7 +43,7 @@ class NoteDeletionTest {
 
     @Test
     fun deletingAMissingNoteGivesNull() {
-        assertTrue(deletion.delete(listOf(404)).get().isEmpty())
+        assertTrue(deletion.delete(listOf("missing")).get().isEmpty())
     }
 
     @Test
@@ -53,7 +53,7 @@ class NoteDeletionTest {
         tags.attach(note.id, tag.id).get()
         now = 50_000
 
-        val deleted = deletion.delete(listOf(note.id)).get().single()
+        val deleted = deletion.delete(listOf(note.uid)).get().single()
         val restored = deletion.undo(listOf(deleted)).get().single()
 
         assertEquals(note, restored)
@@ -65,7 +65,7 @@ class NoteDeletionTest {
     @Test
     fun undoTwiceFailsTheSecondTime() {
         val note = notes.create(NewNote.free("t")).get()
-        val deleted = deletion.delete(listOf(note.id)).get().single()
+        val deleted = deletion.delete(listOf(note.uid)).get().single()
         deletion.undo(listOf(deleted)).get()
         val second = deletion.undo(listOf(deleted))
         assertFalse(runCatching { second.get() }.isSuccess)
@@ -74,7 +74,7 @@ class NoteDeletionTest {
     @Test
     fun undoRestoresIntoTheDatabaseTheNoteWasDeletedFrom() {
         val note = notes.create(NewNote.free("t")).get()
-        val deleted = deletion.delete(listOf(note.id)).get().single()
+        val deleted = deletion.delete(listOf(note.uid)).get().single()
         // 지운 뒤 다른 DB로 바뀌어도 되돌리기는 원래 DB로 간다
         val other = Database(tmp.root.toPath().resolve("other.db"))
         try {
@@ -89,7 +89,7 @@ class NoteDeletionTest {
     @Test
     fun undoAfterTheDatabaseWasClosedFailsInsteadOfRestoringElsewhere() {
         val note = notes.create(NewNote.free("t")).get()
-        val deleted = deletion.delete(listOf(note.id)).get().single()
+        val deleted = deletion.delete(listOf(note.uid)).get().single()
         db.close()
 
         val error = assertThrows(ExecutionException::class.java) { deletion.undo(listOf(deleted)).get() }
@@ -103,11 +103,11 @@ class NoteDeletionTest {
         val tag = tags.getOrCreate("x").get()
         tags.attach(note.id, tag.id).get()
         // 같은 DB 스레드에서 지우므로, 읽은 노트와 태그가 지워진 것과 같다
-        val (read, tagIds) = notes.deleteReturningTagIds(listOf(note.id)).get().single()
+        val (read, tagIds) = notes.deleteReturningTagIds(listOf(note.uid)).get().single()
         assertEquals(note, read)
         assertEquals(listOf(tag.id), tagIds)
         assertNull(notes.get(note.id).get())
-        assertTrue(notes.deleteReturningTagIds(listOf(note.id)).get().isEmpty())
+        assertTrue(notes.deleteReturningTagIds(listOf(note.uid)).get().isEmpty())
     }
 
     @Test
@@ -118,7 +118,7 @@ class NoteDeletionTest {
         val tag = tags.getOrCreate("x").get()
         tags.attach(b.id, tag.id).get()
 
-        val deleted = deletion.delete(listOf(a.id, 404, b.id)).get()
+        val deleted = deletion.delete(listOf(a.uid, "missing", b.uid)).get()
 
         assertEquals(listOf(a, b), deleted.map { it.note })
         assertNull(notes.get(a.id).get())
@@ -134,11 +134,40 @@ class NoteDeletionTest {
     fun undoOfSeveralNotesRestoresNoneWhenOneCannotBeRestored() {
         val a = notes.create(NewNote.free("a")).get()
         val b = notes.create(NewNote.free("b")).get()
-        val deleted = deletion.delete(listOf(a.id, b.id)).get()
+        val deleted = deletion.delete(listOf(a.uid, b.uid)).get()
         notes.restore(deleted[1].note, emptyList()).get()
 
         assertFalse(runCatching { deletion.undo(deleted).get() }.isSuccess)
 
         assertNull("the first note is rolled back with the failed second one", notes.get(a.id).get())
+    }
+
+    @Test
+    fun aStaleNoteWhoseIdWasReusedDeletesNothing() {
+        val stale = notes.create(NewNote.free("deleted elsewhere")).get()
+        notes.delete(stale.id).get()
+        val reused = notes.create(NewNote.free("new note")).get()
+        assertEquals("SQLite gives the next note the deleted highest id", stale.id, reused.id)
+
+        assertTrue(deletion.delete(listOf(stale.uid)).get().isEmpty())
+
+        assertEquals(reused, notes.get(reused.id).get())
+    }
+
+    @Test
+    fun aSelectionFromTheDatabaseBeforeASwitchDeletesNothingInTheNewOne() {
+        val shown = notes.create(NewNote.free("in the old database")).get()
+        val newDb = Database(tmp.root.toPath().resolve("switched.db"))
+        try {
+            val newNotes = NoteRepository(newDb)
+            val other = newNotes.create(NewNote.free("same id, other note")).get()
+            assertEquals(shown.id, other.id)
+
+            assertTrue(NoteDeletion(newDb).delete(listOf(shown.uid)).get().isEmpty())
+
+            assertEquals(other, newNotes.get(other.id).get())
+        } finally {
+            newDb.close()
+        }
     }
 }

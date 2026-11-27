@@ -397,6 +397,23 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         awaitUntil("list emptied") { panel.list.model.size == 0 }
     }
 
+    fun testDeletingAStaleNoteWhoseIdWasReusedReportsItAndKeepsTheOtherNote() {
+        captureNotifications()
+        val key = projectKey()
+        val stale = repo.create(NewNote.code(key, "src/Foo.kt", 1, 1, "stale")).get()
+        val panel = newPanel(1)
+        repo.delete(stale.id).get()
+        val reused = repo.create(NewNote.code(key, "src/Bar.kt", 1, 1, "reused id")).get()
+        assertEquals(stale.id, reused.id)
+
+        panel.delete(stale).get()
+
+        val title = JNoteBundle.message("toolWindow.error.deleteStale.title")
+        awaitUntil("stale delete reported") { shownNotifications().any { it.title == title } }
+        assertEquals(reused, repo.get(reused.id).get())
+        awaitUntil("list refreshed") { panel.list.model.size == 1 && panel.list.model.getElementAt(0).title == "reused id" }
+    }
+
     private fun panelWith(saver: NoteSaver, askEdit: (Project, Note, List<String>) -> NoteDraft?): JNotePanel =
         JNotePanel(project, AppDelayScheduler, saver, askEdit).also {
             panels += it
