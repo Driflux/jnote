@@ -7,8 +7,11 @@ import org.junit.Assume.assumeFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import io.github.driflux.jnote.db.Database
+import org.sqlite.JDBC
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Properties
 
 class DbPathChangeTest {
     @get:Rule
@@ -33,10 +36,64 @@ class DbPathChangeTest {
         assertEquals(Plan.CopyThenSwitch(target), DbPathChange.plan(file("cur.db"), target))
     }
 
+    private fun jnoteDatabase(name: String): Path = path(name).also { p -> Database(p).use { it.submitAndWait { } } }
+
+    private fun sqlite(name: String, vararg statements: String): Path = path(name).also { p ->
+        JDBC().connect("jdbc:sqlite:$p", Properties())!!.use { c -> c.createStatement().use { s -> statements.forEach(s::execute) } }
+    }
+
+    private fun filesIn(): Set<String> = tmp.root.list()!!.toSet()
+
     @Test
-    fun existingTargetSwitchesToExisting() {
-        val target = file("other.db")
-        assertEquals(Plan.SwitchToExisting(target), DbPathChange.plan(file("cur.db"), target))
+    fun existingJNoteDatabaseSwitchesToExisting() {
+        val target = jnoteDatabase("other.db")
+        assertEquals(Plan.SwitchToExisting(target), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun emptyFileAndEmptySqliteDatabaseSwitchToExisting() {
+        val empty = path("empty.db").also { Files.createFile(it) }
+        assertEquals(Plan.SwitchToExisting(empty), DbPathChange.plan(path("cur.db"), empty))
+        val noTables = sqlite("blank.db", "PRAGMA user_version = 3")
+        assertEquals(Plan.SwitchToExisting(noTables), DbPathChange.plan(path("cur.db"), noTables))
+    }
+
+    @Test
+    fun pathWithCharactersSpecialInUrisIsRead() {
+        Files.createDirectories(path("a b#%?"))
+        val target = sqlite("a b#%?/app.db", "create table item(x)")
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun fileThatIsNotSqliteIsInvalid() {
+        val target = file("notes.txt")
+        assertEquals(Plan.Invalid(Reason.NOT_SQLITE), DbPathChange.plan(path("cur.db"), target))
+    }
+
+    @Test
+    fun anotherApplicationsDatabaseIsInvalidAndLeftUntouched() {
+        val walMode = sqlite("app-wal.db", "PRAGMA journal_mode = WAL", "create table item(x)", "PRAGMA user_version = 7")
+        val rollback = sqlite("app.db", "create table item(x)")
+        val before = filesIn()
+        val bytes = listOf(walMode, rollback).map { Files.readAllBytes(it).toList() }
+
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), walMode))
+        assertEquals(Plan.Invalid(Reason.NOT_JNOTE), DbPathChange.plan(path("cur.db"), rollback))
+
+        assertEquals(before, filesIn())
+        assertEquals(bytes, listOf(walMode, rollback).map { Files.readAllBytes(it).toList() })
+    }
+
+    @Test
+    fun databaseOpenInAnotherConnectionIsStillRecognised() {
+        val target = jnoteDatabase("live.db")
+        Database(target).use { live ->
+            live.submitAndWait { }
+            val before = filesIn()
+            assertEquals(Plan.SwitchToExisting(target), DbPathChange.plan(path("cur.db"), target))
+            assertEquals(before, filesIn())
+        }
     }
 
     @Test

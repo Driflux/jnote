@@ -61,7 +61,7 @@ class DbPathChangerTest : BasePlatformTestCase() {
     }
 
     fun testSecondRequestWhileOneIsRunningIsRejected() {
-        val other = dir.resolve("other.db").also { Files.writeString(it, "x") }
+        val other = dir.resolve("other.db").also { Files.createFile(it) }
         val another = dir.resolve("another.db")
         DbPathChanger.request(other) {
             // 첫 요청이 확인을 기다리는 동안 두 번째 Apply가 온 상황
@@ -176,7 +176,7 @@ class DbPathChangerTest : BasePlatformTestCase() {
     }
 
     fun testDecliningConfirmationKeepsCurrentDatabase() {
-        val other = dir.resolve("other.db").also { Files.writeString(it, "x") }
+        val other = dir.resolve("other.db").also { Files.createFile(it) }
         var asked: Path? = null
         DbPathChanger.request(other) {
             assertTrue(ApplicationManager.getApplication().isDispatchThread)
@@ -201,15 +201,29 @@ class DbPathChangerTest : BasePlatformTestCase() {
         assertTrue(notifications.isEmpty())
     }
 
-    fun testExistingFileThatIsNotADatabaseIsRefusedAndNothingChanges() {
+    fun testExistingFileThatIsNotADatabaseIsRefusedBeforeAskingAndNothingChanges() {
         val other = dir.resolve("other.db").also { Files.writeString(it, "not a database") }
-        DbPathChanger.request(other) { true }
+        DbPathChanger.request(other) { fail("must not ask"); true }
         val n = notifications.single()
         assertEquals(NotificationType.ERROR, n.type)
-        assertEquals(JNoteBundle.message("notification.dbPath.failed.title"), n.title)
-        assertEquals(JNoteBundle.message("notification.dbPath.unusableTarget.content", other), n.content)
+        assertEquals(JNoteBundle.message("notification.dbPath.invalid.title"), n.title)
+        assertEquals(JNoteBundle.message("settings.dbPath.invalid.notSqlite"), n.content)
         assertEquals(current, DatabaseService.getInstance().currentPath())
         assertEquals(current.toString(), DbPathSettings.getInstance().state.dbPath)
         assertEquals("not a database", Files.readString(other))
+    }
+
+    fun testAnotherApplicationsDatabaseIsRefusedBeforeAskingAndGetsNoJNoteTables() {
+        val other = dir.resolve("app.db")
+        org.sqlite.JDBC().connect("jdbc:sqlite:$other", java.util.Properties())!!.use { c ->
+            c.createStatement().use { it.execute("create table item(x)") }
+        }
+        val before = Files.readAllBytes(other)
+        DbPathChanger.request(other) { fail("must not ask"); true }
+        val n = notifications.single()
+        assertEquals(JNoteBundle.message("notification.dbPath.invalid.title"), n.title)
+        assertEquals(JNoteBundle.message("settings.dbPath.invalid.notJNote"), n.content)
+        assertEquals(current, DatabaseService.getInstance().currentPath())
+        assertTrue(before.contentEquals(Files.readAllBytes(other)))
     }
 }

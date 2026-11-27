@@ -1,7 +1,9 @@
 package io.github.driflux.jnote.settings
 
+import org.sqlite.JDBC
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Properties
 
 object DbPathChange {
     enum class Reason(val messageKey: String) {
@@ -9,6 +11,8 @@ object DbPathChange {
         PARENT_NOT_CREATABLE("settings.dbPath.invalid.parentNotCreatable"),
         IS_DIRECTORY("settings.dbPath.invalid.isDirectory"),
         NOT_WRITABLE("settings.dbPath.invalid.notWritable"),
+        NOT_SQLITE("settings.dbPath.invalid.notSqlite"),
+        NOT_JNOTE("settings.dbPath.invalid.notJNote"),
     }
 
     sealed interface Plan {
@@ -29,11 +33,8 @@ object DbPathChange {
         if (canonical(current) == canonical(target)) return Plan.NoChange
 
         if (Files.exists(target)) {
-            return if (Files.isRegularFile(target) && Files.isWritable(target)) {
-                Plan.SwitchToExisting(target)
-            } else {
-                Plan.Invalid(Reason.NOT_WRITABLE)
-            }
+            if (!Files.isRegularFile(target) || !Files.isWritable(target)) return Plan.Invalid(Reason.NOT_WRITABLE)
+            return existingFileProblem(target)?.let { Plan.Invalid(it) } ?: Plan.SwitchToExisting(target)
         }
         val ancestor = nearestExisting(target)
         return when {
@@ -41,6 +42,31 @@ object DbPathChange {
             !Files.isWritable(ancestor) ->
                 Plan.Invalid(if (ancestor == target.parent) Reason.NOT_WRITABLE else Reason.PARENT_NOT_CREATABLE)
             else -> Plan.CopyThenSwitch(target)
+        }
+    }
+
+    // 전환 때 여는 검사는 마이그레이션까지 돌려 다른 앱의 DB에 JNote 테이블을 만들므로, 확인창 전에 쓰기 없이 거른다
+    private fun existingFileProblem(target: Path): Reason? {
+        if (Files.size(target) == 0L) return null
+        val header = ByteArray(SQLITE_HEADER.size)
+        val read = Files.newInputStream(target).use { it.readNBytes(header, 0, header.size) }
+        if (read < header.size || !header.contentEquals(SQLITE_HEADER)) return Reason.NOT_SQLITE
+        val tables = tableNames(target)
+        return if (tables.isEmpty() || NOTE_TABLE in tables) null else Reason.NOT_JNOTE
+    }
+
+    private fun tableNames(target: Path): Set<String> {
+        // -wal이 없으면 본 파일이 내용의 전부라 immutable로 연다. 그래야 잠금을 잡지 않고 -wal/-shm 파일도 만들지 않는다
+        val wal = target.resolveSibling(target.fileName.toString() + "-wal")
+        val query = if (Files.exists(wal)) "?mode=ro" else "?mode=ro&immutable=1"
+        val connection = JDBC().connect("jdbc:sqlite:" + target.toUri() + query, Properties())
+            ?: error("sqlite-jdbc rejected url for $target")
+        return connection.use { c ->
+            c.createStatement().use { s ->
+                s.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table'").use { rows ->
+                    buildSet { while (rows.next()) add(rows.getString(1)) }
+                }
+            }
         }
     }
 
@@ -56,4 +82,7 @@ object DbPathChange {
         val existing = nearestExisting(abs) ?: return abs
         return existing.toRealPath().resolve(existing.relativize(abs)).normalize()
     }
+
+    private val SQLITE_HEADER = "SQLite format 3".toByteArray(Charsets.US_ASCII) + 0.toByte()
+    private const val NOTE_TABLE = "note"
 }

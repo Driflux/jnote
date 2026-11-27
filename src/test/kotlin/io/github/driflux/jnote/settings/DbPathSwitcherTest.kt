@@ -158,6 +158,16 @@ class DbPathSwitcherTest : BasePlatformTestCase() {
         assertFalse(Files.exists(dir.resolve("other.db.copying")))
     }
 
+    fun testExistingFileThatCannotBeOpenedAtSwitchTimeIsReportedAndNothingChanges() {
+        val broken = dir.resolve("broken.db").also { Files.writeString(it, "changed after the plan") }
+        val error = org.junit.Assert.assertThrows(DbPathSwitcher.UnusableTarget::class.java) {
+            run(DbPathChange.Plan.SwitchToExisting(broken))
+        }
+        assertEquals(broken, error.target)
+        assertEquals(current, service.currentPath())
+        assertEquals(current.toString(), settings.state.dbPath)
+    }
+
     fun testCancelledCopyKeepsOldDatabaseActive() {
         writeProbe()
         val old = service.database
