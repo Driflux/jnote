@@ -11,7 +11,7 @@ In Claude Code:
 /plugin install jnote@jnote
 ```
 
-The marketplace file is `.claude-plugin/marketplace.json` at the repository root. Updates follow the repository: run `/plugin marketplace update jnote`, or turn on auto-update for the marketplace in `/plugin`. After an update, run `/reload-plugins` or start a new session to use the new version.
+The marketplace file is `.claude-plugin/marketplace.json` at the repository root. Updates follow the repository. Refreshing the marketplace does not update the installed plugin, so update by hand in two steps: run `/plugin marketplace update jnote`, then `claude plugin update jnote@jnote` in a shell. Or turn on auto-update for the marketplace in `/plugin`. After an update, run `/reload-plugins` or start a new session to use the new version.
 
 The skill needs the JNote IntelliJ plugin, which imports what the skill writes, and `sqlite3` 3.44 or newer for recall and organize. Ask Claude Code things like "save this in JNote", "what do my JNote notes say about this file?", or "clean up the tags of my JNote notes".
 
