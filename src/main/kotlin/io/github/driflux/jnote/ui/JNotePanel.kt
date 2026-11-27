@@ -501,7 +501,7 @@ class JNotePanel internal constructor(
         return text.whenComplete { text, error ->
             onEdt {
                 when {
-                    ticket != copyGeneration.get() -> Unit
+                    disposed || ticket != copyGeneration.get() -> Unit
                     error != null -> ToolWindowNotifier.copyFailed(project, (error as? CompletionException)?.cause ?: error)
                     clipboard != clipboardChanges.get() -> Unit
                     text != null -> CopyPasteManager.getInstance().setContents(StringSelection(text))
