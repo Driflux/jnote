@@ -24,7 +24,7 @@ How a JNote version gets to JetBrains Marketplace. Decisions and alternatives: [
 - Tag the release `vX.Y.Z` on the commit that was uploaded.
 
 ## Plugin Verifier notes
-Run on the 0.1.0-SNAPSHOT build: compatible with 242, 252, and 261, with no errors, no internal or experimental API, and deprecation notes only. They stay because the replacements do not exist in 242:
+Run on the 0.1.0-SNAPSHOT build (2024.2 is pinned in `build.gradle.kts` and does not follow `platformVersion`): compatible with 242, 252, and 261, with no errors, no internal or experimental API, and deprecation notes only. They stay because the replacements do not exist in 242:
 - `JsonReader.setLenient` (Gson, deprecated for `setStrictness`, which needs Gson 2.11).
 - `Row.textFieldWithBrowseButton(String)` in the settings page (the replacement takes a `FileChooserDescriptor` overload that 242 lacks).
 - `ReadAction.compute` (5 places, deprecated for `computeBlocking`, missing in 242).
