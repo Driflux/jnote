@@ -168,8 +168,6 @@ class JNotePanel internal constructor(
 
     private var renderingSelection = false
 
-    private val copyGeneration = AtomicInteger()
-
     @Volatile
     private var disposed = false
     internal val focusSearchAction = DumbAwareAction.create { focusSearch() }
@@ -580,5 +578,8 @@ class JNotePanel internal constructor(
         internal const val ADD_NOTE_ACTION_ID = "JNote.AddNote"
         internal const val FOCUS_OWNER_PROPERTY = "permanentFocusOwner"
         private const val SEARCH_DEBOUNCE_MS = 250L
+
+        // 클립보드는 IDE 하나에 하나뿐이라 프로젝트 창마다 있는 패널이 순번을 함께 쓴다
+        private val copyGeneration = AtomicInteger()
     }
 }

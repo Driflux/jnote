@@ -185,6 +185,23 @@ class ToolWindowCopyTest : BasePlatformTestCase() {
         assertEquals("newer copy", clipboard())
     }
 
+    fun testACopyFromAnotherPanelIsNotOverwrittenByAnEarlierOneThatFinishesLast() {
+        val first = threeNotes()
+        val second = loadedPanel(3)
+        first.list.selectedIndex = 0
+        second.list.selectedIndex = 1
+        val gate = CountDownLatch(1)
+
+        val older = first.copySelected(blockingFormatter(gate))
+        second.copySelected(constantFormatter("newer copy")).get(10, TimeUnit.SECONDS)
+        awaitUntil("newer copy written") { clipboard() == "newer copy" }
+        gate.countDown()
+        older.get(10, TimeUnit.SECONDS)
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertEquals("newer copy", clipboard())
+    }
+
     fun testReloadKeepsEverySelectedNoteSelected() {
         val panel = threeNotes()
         panel.list.selectedIndices = intArrayOf(0, 2)
