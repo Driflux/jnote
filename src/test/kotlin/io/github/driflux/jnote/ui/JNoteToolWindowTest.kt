@@ -294,12 +294,40 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         awaitUntil("reloaded with filter") { titles(panel) == listOf("free") }
     }
 
+    fun testSelectingARowLoadsTheFullNoteIntoTheDetail() {
+        repo.create(NewNote.code(projectKey(), "src/A.kt", 1, 2, "mine", body = "the body", snapshot = "val snap = 1", aiSource = "Claude", prompt = "why")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel) == listOf("mine") }
+
+        panel.list.selectedIndex = 0
+
+        awaitUntil("detail shown") { panel.detail.isVisible }
+        assertEquals("mine", panel.detail.titleLabel.text)
+        assertEquals("val snap = 1", panel.detail.snippetArea.text)
+        assertEquals("the body", panel.detail.bodyArea.text)
+        assertEquals("why", panel.detail.aiPromptArea.text)
+    }
+
+    fun testDetailShowsTheLatestTextAfterAReload() {
+        val note = repo.create(NewNote.free("free", body = "old")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel) == listOf("free") }
+        panel.list.selectedIndex = 0
+        awaitUntil("old body shown") { panel.detail.bodyArea.text == "old" }
+
+        repo.update(note.copy(body = "new")).get()
+        panel.reload()
+
+        awaitUntil("new body shown") { panel.detail.bodyArea.text == "new" }
+        assertEquals(note.id, panel.list.selectedValue.summary.id)
+    }
+
     fun testFilteringOutTheSelectedNoteClearsTheDetail() {
         repo.create(NewNote.free("free")).get()
         val panel = newPanel()
         awaitUntil("listed") { titles(panel) == listOf("free") }
         panel.list.selectedIndex = 0
-        assertTrue(panel.detail.isVisible)
+        awaitUntil("detail shown") { panel.detail.isVisible }
 
         select(panel, NoteFilter.CODE)
 
@@ -315,7 +343,7 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         select(panel, NoteFilter.CODE)
         assertEquals(JNoteBundle.message("toolWindow.empty.code.title"), emptyTextLines(panel).first())
 
-        repo.delete(repo.list(null, true).get().single().id).get()
+        repo.delete(repo.listSummaries(null, true).get().single().id).get()
         panel.reload()
         awaitUntil("emptied") { panel.state.notes?.isEmpty() == true }
         select(panel, NoteFilter.FREE)
@@ -388,7 +416,7 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         awaitUntil("listed") { chipTexts(panel).size == 3 }
         chip(panel, "todo").doClick()
 
-        val plain = repo.list(null, true).get().single { it.title == "plain" }
+        val plain = repo.listSummaries(null, true).get().single { it.title == "plain" }
         tagRepo.replaceTags(plain.id, listOf("todo", "fresh")).get()
         panel.reload()
 
@@ -466,7 +494,7 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         assertEquals(listOf("sql", "todo", "unused"), seen.single().second.map { it.name })
         assertTrue(chip(panel, "query").isSelected)
         assertEquals(setOf("a", "b"), titles(panel).toSet())
-        val all = repo.list(null, true).get().associateBy { it.title }
+        val all = repo.listSummaries(null, true).get().associateBy { it.title }
         assertEquals(listOf("query", "todo"), tagRepo.tagsOf(all.getValue("a").id).get().map { it.name })
         assertEquals(listOf("query"), tagRepo.tagsOf(all.getValue("b").id).get().map { it.name })
     }
@@ -511,9 +539,9 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
 
         awaitUntil("chip gone") { chipTexts(panel) == listOf("todo", "unused") }
         assertEquals(listOf(tag), asked)
-        assertEquals(3, repo.list(null, true).get().size)
+        assertEquals(3, repo.listSummaries(null, true).get().size)
         assertEquals(3, titles(panel).size)
-        assertEquals(listOf("todo"), tagRepo.tagsOf(repo.list(null, true).get().single { it.title == "a" }.id).get().map { it.name })
+        assertEquals(listOf("todo"), tagRepo.tagsOf(repo.listSummaries(null, true).get().single { it.title == "a" }.id).get().map { it.name })
     }
 
     fun testDeclinedDeleteKeepsTheTag() {

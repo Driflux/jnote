@@ -30,9 +30,9 @@ data class ToolWindowState(
         get() {
             val ids = if (searching) match?.ids else null
             return notes.orEmpty().filter { row ->
-                filter.accepts(row.note) &&
+                filter.accepts(row.summary.kind) &&
                     selectedTagIds.all { id -> row.tags.any { it.id == id } } &&
-                    (ids == null || row.note.id in ids)
+                    (ids == null || row.summary.id in ids)
             }
         }
 

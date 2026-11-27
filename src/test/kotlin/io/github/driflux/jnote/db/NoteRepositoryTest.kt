@@ -5,6 +5,7 @@ import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
+import io.github.driflux.jnote.model.NoteSummary
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -157,6 +158,31 @@ class NoteRepositoryTest {
         now = 2_000
         repo.update(a.copy(title = "a2")).get()
         assertEquals(listOf(a.id, c.id, b.id), repo.list("p1", false).get().map { it.id })
+    }
+
+    @Test
+    fun listSummariesMatchListInOrderAndCarryTheSameFields() {
+        val a = repo.create(code("a")).get()
+        val free = repo.create(NewNote.free("free", aiSource = "Claude")).get()
+        now = 2_000
+        repo.update(a.copy(title = "a2")).get()
+
+        val notes = repo.list("p1", true).get()
+        val summaries = repo.listSummaries("p1", true).get()
+
+        assertEquals(notes.map { it.id }, summaries.map { it.id })
+        assertEquals(listOf(a.id, free.id), summaries.map { it.id })
+        notes.zip(summaries).forEach { (note, summary) ->
+            assertEquals(
+                NoteSummary(
+                    note.id, note.uid, note.kind, note.project, note.relPath, note.className, note.startLine, note.endLine,
+                    note.status, note.title, note.aiSource, note.updatedAt,
+                ),
+                summary,
+            )
+        }
+        assertEquals(repo.list("p1", false).get().map { it.id }, repo.listSummaries("p1", false).get().map { it.id })
+        assertEquals(repo.list(null, false).get().map { it.id }, repo.listSummaries(null, false).get().map { it.id })
     }
 
     @Test

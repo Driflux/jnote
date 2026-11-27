@@ -5,6 +5,7 @@ import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
+import io.github.driflux.jnote.model.NoteSummary
 import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.Statement
@@ -199,6 +200,18 @@ class NoteRepository(
     }
 
     /**
+     * [list]와 같은 대상과 순서로, 목록에 필요한 열만 읽는다. 스냅샷, 본문, 프롬프트는 읽지 않으므로
+     * 전체 노트는 [get]으로 따로 읽는다.
+     */
+    fun listSummaries(project: String?, allProjects: Boolean): CompletableFuture<List<NoteSummary>> = database.submit { c ->
+        val where = if (allProjects) "" else "WHERE (kind = 'FREE' AND project IS NULL) OR project = ?"
+        c.prepareStatement("SELECT $SUMMARY_COLUMNS FROM note $where ORDER BY updated_at DESC, id DESC").use { s ->
+            if (!allProjects) s.setString(1, project)
+            s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.toSummary() else null }.toList() }
+        }
+    }
+
+    /**
      * 한 파일에 앵커된 노트를 시작 줄 순(같으면 id순)으로 돌려준다. (project, rel_path) 인덱스를 탄다.
      * 거터가 파일을 처음 열 때 한 번 부른다.
      */
@@ -229,11 +242,29 @@ class NoteRepository(
 internal const val COLUMNS = "id, uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, status, " +
     "title, body, ai_source, source_url, prompt, created_at, updated_at"
 
+internal const val SUMMARY_COLUMNS = "id, uid, kind, project, rel_path, class_name, start_line, end_line, status, " +
+    "title, ai_source, updated_at"
+
 internal fun findById(c: Connection, id: Long): Note? =
     c.prepareStatement("SELECT $COLUMNS FROM note WHERE id = ?").use { s ->
         s.setLong(1, id)
         s.executeQuery().use { if (it.next()) it.toNote() else null }
     }
+
+internal fun ResultSet.toSummary(): NoteSummary = NoteSummary(
+    id = getLong(1),
+    uid = getString(2),
+    kind = NoteKind.valueOf(getString(3)),
+    project = getString(4),
+    relPath = getString(5),
+    className = getString(6),
+    startLine = getInt(7).takeUnless { wasNull() },
+    endLine = getInt(8).takeUnless { wasNull() },
+    status = NoteStatus.valueOf(getString(9)),
+    title = getString(10),
+    aiSource = getString(11),
+    updatedAt = getLong(12),
+)
 
 internal fun ResultSet.toNote(): Note = Note(
     id = getLong(1),

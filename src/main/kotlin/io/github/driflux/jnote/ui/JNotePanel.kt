@@ -35,6 +35,7 @@ import io.github.driflux.jnote.db.SearchRepository
 import io.github.driflux.jnote.db.TagRenameResult
 import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.Note
+import io.github.driflux.jnote.model.NoteSummary
 import io.github.driflux.jnote.model.Tag
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.awt.BorderLayout
@@ -61,7 +62,7 @@ class JNotePanel internal constructor(
 
     private class Loaded(
         val projectKey: String,
-        val notes: List<Note>,
+        val notes: List<NoteSummary>,
         val dictionary: List<Tag>,
         val noteTags: Map<Long, List<Tag>>,
         val match: SearchMatch?,
@@ -142,12 +143,18 @@ class JNotePanel internal constructor(
     // 늦게 끝난 옛 읽기가 새 결과를 덮지 않도록 번호를 매긴다
     private val generation = AtomicInteger()
 
+    // 선택이 빠르게 바뀔 때 늦게 도착한 옛 노트가 상세를 덮지 않도록 번호를 매긴다
+    private val detailGeneration = AtomicInteger()
+
+    // render()가 목록을 갈아 끼우며 선택이 흔들리는 동안에는 상세를 비우지 않는다. EDT에서만 쓴다
+    private var renderingSelection = false
+
     @Volatile
     private var disposed = false
 
     init {
         Disposer.register(this, spinnerIcon)
-        list.addListSelectionListener { if (!it.valueIsAdjusting) detail.show(list.selectedValue?.note) }
+        list.addListSelectionListener { if (!it.valueIsAdjusting && !renderingSelection) showDetailOf(list.selectedValue?.summary?.id) }
         val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(2, 8)
             add(JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
@@ -260,7 +267,7 @@ class JNotePanel internal constructor(
         resolveKey().thenCompose { key ->
             val database = DatabaseService.getInstance().database
             val tags = TagRepository(database)
-            val notes = NoteRepository(database).list(key, allProjects)
+            val notes = NoteRepository(database).listSummaries(key, allProjects)
             val dictionary = tags.list()
             val assignments = tags.assignments()
             // 노트가 바뀌어 다시 읽을 때도 일치 여부를 새로 구해야 새로 생긴 노트가 결과에 들어온다
@@ -368,12 +375,18 @@ class JNotePanel internal constructor(
     }
 
     private fun render() {
-        val selectedId = list.selectedValue?.note?.id
-        model.replaceAll(state.visibleNotes)
-        showEmptyText()
-        // 다시 읽어도 보던 노트를 유지하고, 그 사이 지워졌다면 상세를 비운다
-        val index = model.items.indexOfFirst { it.note.id == selectedId }
-        if (index >= 0) list.selectedIndex = index else detail.show(null)
+        val selectedId = list.selectedValue?.summary?.id
+        renderingSelection = true
+        try {
+            model.replaceAll(state.visibleNotes)
+            showEmptyText()
+            val index = model.items.indexOfFirst { it.summary.id == selectedId }
+            if (index >= 0) list.selectedIndex = index
+        } finally {
+            renderingSelection = false
+        }
+        // 다시 읽어도 보던 노트를 유지하고(최신 내용으로 다시 읽는다), 그 사이 지워졌다면 상세를 비운다
+        showDetailOf(list.selectedValue?.summary?.id)
         project.service<PendingNoteSelection>().peek()?.let { selectAndClear(it) }
     }
 
@@ -387,11 +400,28 @@ class JNotePanel internal constructor(
 
     /** 목록에 없는 노트(다른 프로젝트 등)는 선택을 바꾸지 않고, 요청도 지우지 않는다. */
     private fun selectAndClear(noteId: Long) {
-        val index = model.items.indexOfFirst { it.note.id == noteId }
+        val index = model.items.indexOfFirst { it.summary.id == noteId }
         if (index < 0) return
         list.selectedIndex = index
         list.ensureIndexIsVisible(index)
         project.service<PendingNoteSelection>().clear(noteId)
+    }
+
+    // 목록은 요약만 들고 있으므로 전체 노트는 선택된 한 건만 읽는다
+    private fun showDetailOf(id: Long?) {
+        val ticket = detailGeneration.incrementAndGet()
+        if (id == null) {
+            detail.show(null)
+            return
+        }
+        pendingLoads.incrementAndGet()
+        NoteRepository(DatabaseService.getInstance().database).get(id).whenComplete { note, error ->
+            pendingLoads.decrementAndGet()
+            onEdt {
+                if (disposed || ticket != detailGeneration.get()) return@onEdt
+                if (error == null) detail.show(note) else ToolWindowNotifier.loadFailed(project, error.cause ?: error)
+            }
+        }
     }
 
     private fun showEmptyText() {

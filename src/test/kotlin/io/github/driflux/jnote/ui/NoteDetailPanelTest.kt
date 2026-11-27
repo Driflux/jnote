@@ -77,6 +77,13 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         return panel
     }
 
+    // 상세는 선택한 노트를 DB에서 읽어 채우므로, 화면이 선택한 행의 제목으로 바뀔 때까지 기다린다
+    private fun select(panel: JNotePanel, index: Int) {
+        panel.list.selectedIndex = index
+        val title = panel.list.selectedValue.title
+        awaitUntil("detail shows $title") { panel.detail.titleLabel.text == title }
+    }
+
     fun testSelectingANoteShowsItsDetail() {
         val key = projectKey()
         repo.create(
@@ -88,7 +95,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         val panel = newPanel(1)
         assertFalse(panel.detail.isVisible)
 
-        panel.list.selectedIndex = 0
+        select(panel, 0)
         val d = panel.detail
         assertTrue(d.isVisible)
         assertEquals("why locked", d.titleLabel.text)
@@ -104,7 +111,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
     fun testFreeNoteHidesGoToCodeAndUsesMonospaceBody() {
         repo.create(NewNote.free("query", "select 1")).get()
         val panel = newPanel(1)
-        panel.list.selectedIndex = 0
+        select(panel, 0)
         assertFalse(panel.detail.goToCodeButton.isVisible)
         assertEquals("select 1", panel.detail.bodyArea.text)
         assertFalse(panel.detail.locationLabel.isVisible)
@@ -291,7 +298,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         val note = repo.create(NewNote.code(key, "src/Foo.kt", 2, 3, "doomed", body = "b", aiSource = "Claude")).get()
         tags.attach(note.id, tag.id).get()
         val panel = newPanel(1)
-        panel.list.selectedIndex = 0
+        select(panel, 0)
 
         panel.detail.deleteButton.doClick()
 
@@ -420,7 +427,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         repo.create(NewNote.free("free")).get()
         val panel = newPanel(2)
         (0 until 2).forEach {
-            panel.list.selectedIndex = it
+            select(panel, it)
             assertTrue(panel.detail.editButton.isVisible)
         }
     }
@@ -434,7 +441,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         val seen = mutableListOf<Note>()
         val panel = panelWith(NoteSaver(), answering(NoteDraft("New title", "new body", "Claude", "http://x", "why", tags = listOf("keep")), seen))
         awaitUntil("list loaded") { panel.list.model.size == 1 }
-        panel.list.selectedIndex = 0
+        select(panel, 0)
         val events = countNotifications()
 
         panel.detail.editButton.doClick()
@@ -446,7 +453,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         assertTrue(updated.updatedAt >= note.updatedAt)
         assertEquals(listOf(tag), tags.tagsOf(note.id).get())
         assertEquals(1, events.get())
-        assertEquals("new body", panel.detail.bodyArea.text)
+        awaitUntil("detail shows the edit") { panel.detail.bodyArea.text == "new body" }
     }
 
     fun testEditOfAFreeNoteKeepsItGlobal() {
@@ -521,7 +528,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         Disposer.register(testRootDisposable) { real.toFile().delete() }
         val note = repo.create(NewNote.code(key, "src/Approx.kt", 2, 3, "n", snapshot = "old", status = NoteStatus.APPROX)).get()
         val panel = newPanel(1)
-        panel.list.selectedIndex = 0
+        select(panel, 0)
         assertTrue(panel.detail.confirmButton.isVisible)
 
         panel.detail.confirmButton.doClick()

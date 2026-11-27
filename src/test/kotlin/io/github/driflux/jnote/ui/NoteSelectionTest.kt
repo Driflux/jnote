@@ -73,7 +73,7 @@ class NoteSelectionTest : BasePlatformTestCase() {
 
         NoteSelection.request(project, ids[0]) { }
 
-        awaitUntil("selected") { panel.list.selectedValue?.note?.id == ids[0] }
+        awaitUntil("selected") { panel.list.selectedValue?.summary?.id == ids[0] }
         assertNull(project.service<PendingNoteSelection>().peek())
     }
 
@@ -85,7 +85,7 @@ class NoteSelectionTest : BasePlatformTestCase() {
 
         val panel = newPanel()
 
-        awaitUntil("selected after first load") { panel.list.selectedValue?.note?.id == ids[1] }
+        awaitUntil("selected after first load") { panel.list.selectedValue?.summary?.id == ids[1] }
         assertNull(project.service<PendingNoteSelection>().peek())
     }
 
@@ -94,12 +94,12 @@ class NoteSelectionTest : BasePlatformTestCase() {
         val panel = newPanel()
         awaitUntil("list loaded") { panel.list.model.size == 3 }
         NoteSelection.request(project, ids[2]) { }
-        awaitUntil("selected") { panel.list.selectedValue?.note?.id == ids[2] }
+        awaitUntil("selected") { panel.list.selectedValue?.summary?.id == ids[2] }
 
         NoteSelection.request(project, 9_999L) { }
         PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
 
-        assertEquals(ids[2], panel.list.selectedValue?.note?.id)
+        assertEquals(ids[2], panel.list.selectedValue?.summary?.id)
     }
 
     fun testRequestPublishesTheTopicWithProjectAndId() {
