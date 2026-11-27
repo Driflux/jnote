@@ -10,8 +10,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 class DbPathNotifierTest : BasePlatformTestCase() {
     private val notifications = CopyOnWriteArrayList<Notification>()
-    private val markupPath = Paths.get("/tmp/<b>notes</b> & more/jnote.db")
-    private val escapedPath = "/tmp/&lt;b&gt;notes&lt;/b&gt; &amp; more/jnote.db"
+    // Path로 만들 경로에는 Windows가 허용하지 않는 <, >를 넣지 않는다
+    private val ampersandPath = Paths.get("notes & more", "jnote.db")
+    private val escapedAmpersandPath = Paths.get("notes &amp; more", "jnote.db").toString()
 
     override fun setUp() {
         super.setUp()
@@ -37,17 +38,22 @@ class DbPathNotifierTest : BasePlatformTestCase() {
     }
 
     fun testTargetExistsEscapesThePath() {
-        DbPathNotifier.failed(FileAlreadyExistsException(markupPath.toString()))
-        assertEscaped(content(), escapedPath)
+        DbPathNotifier.failed(FileAlreadyExistsException("/tmp/<b>notes</b> & more/jnote.db"))
+        assertEscaped(content(), "/tmp/&lt;b&gt;notes&lt;/b&gt; &amp; more/jnote.db")
+    }
+
+    fun testTargetExistsWithoutAFileNameStillShows() {
+        DbPathNotifier.failed(FileAlreadyExistsException(null))
+        assertTrue(content(), content().startsWith("null"))
     }
 
     fun testUnusableTargetEscapesThePath() {
-        DbPathNotifier.failed(DbPathSwitcher.UnusableTarget(markupPath, IllegalStateException("bad")))
-        assertEscaped(content(), escapedPath)
+        DbPathNotifier.failed(DbPathSwitcher.UnusableTarget(ampersandPath, IllegalStateException("bad")))
+        assertEscaped(content(), escapedAmpersandPath)
     }
 
     fun testCloseFailedEscapesThePathAndTheCauseMessage() {
-        DbPathNotifier.failed(DbPathSwitcher.OldDatabaseNotClosed(markupPath, IllegalStateException("<i>stuck</i>")))
-        assertEscaped(content(), escapedPath, "&lt;i&gt;stuck&lt;/i&gt;")
+        DbPathNotifier.failed(DbPathSwitcher.OldDatabaseNotClosed(ampersandPath, IllegalStateException("<i>stuck</i>")))
+        assertEscaped(content(), escapedAmpersandPath, "&lt;i&gt;stuck&lt;/i&gt;")
     }
 }

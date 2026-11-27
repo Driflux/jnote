@@ -46,7 +46,7 @@ object DbPathNotifier {
     private fun reason(cause: Throwable): String = escaped(cause.message ?: cause.javaClass.simpleName)
 
     // 알림 내용은 HTML로 그려지므로 경로와 예외 메시지 속 <, &가 태그로 읽히지 않게 한다
-    private fun escaped(value: Any): String = StringUtil.escapeXmlEntities(value.toString())
+    private fun escaped(value: Any?): String = StringUtil.escapeXmlEntities(value.toString())
 
     private fun show(title: String, content: String, type: NotificationType = NotificationType.ERROR) {
         NotificationGroupManager.getInstance().getNotificationGroup(GROUP_ID)
