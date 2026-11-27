@@ -69,11 +69,11 @@ object DbPathChange {
         if (!Files.exists(wal)) return querySchema(immutable(file))
         // -wal에만 있는 내용까지 읽어야 하지만 원본에 잠금이나 -shm을 남기지 않도록 사본을 읽는다.
         // 너무 커서 복사하지 않으면 -wal에 무엇이 있는지 모르므로 통과시키지 않는다
-        if (Files.size(file) + Files.size(wal) > maxCopyBytes) return UNKNOWN
         repeat(COPY_ATTEMPTS) {
+            val before = stamps(file, wal)
+            if (before.sumOf { it.first } > maxCopyBytes) return UNKNOWN
             val dir = Files.createTempDirectory("jnote-check")
             try {
-                val before = stamps(file, wal)
                 val copy = dir.resolve("check.db")
                 Files.copy(file, copy)
                 Files.copy(wal, sidecar(copy, "-wal"))

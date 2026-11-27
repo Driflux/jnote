@@ -40,7 +40,8 @@ When the new DB path points to an existing file, `DbPathChange.plan` returned `S
 - Cons and what we accept
   - For a database with a `-wal` file, up to 64 MiB is copied into a temp folder in the background task.
   - A JNote database over 64 MiB that another process has open (so it has a `-wal`) is refused. Closing the other IDE first makes it pass. JNote databases are expected to stay far below that size.
-  - The size limit is checked before the copy; a file that grows during the copy is caught by the before/after comparison and retried.
+  - The size limit is checked before each copy attempt. A file that grows during a copy can make that one copy exceed the limit; the before/after comparison then discards it and the next attempt checks the limit again.
+  - The before/after comparison only catches changes it can observe. A same-size write within the file system's timestamp resolution, a `-wal` created right after the check saw none, or a rollback-journal writer changing the main file during an immutable read can still give an inconsistent view. The check is a best-effort early refusal, like the re-check.
   - A file whose header is valid but whose content is damaged fails the plan with the generic failure notification.
   - The window between the re-check and the open remains.
 - Follow-up work
