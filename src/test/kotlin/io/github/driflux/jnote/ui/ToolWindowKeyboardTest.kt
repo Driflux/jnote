@@ -198,6 +198,18 @@ class ToolWindowKeyboardTest : BasePlatformTestCase() {
         awaitUntil("both restored") { repo.get(a.id).get() == a && repo.get(c.id).get() == c }
     }
 
+    fun testDeleteWhileTheShownRowIsStillBeingDraggedDoesNothing() {
+        repo.create(NewNote.code(projectKey(), "src/A.kt", 1, 1, "a")).get()
+        repo.create(NewNote.free("b")).get()
+        val panel = newPanel()
+        showNote(panel, "a")
+
+        panel.list.valueIsAdjusting = true
+        press(panel, KeyEvent.VK_DELETE)
+
+        assertEquals(2, repo.list(projectKey(), false).get().size)
+    }
+
     fun testDeleteWhileSeveralRowsAreStillBeingDraggedDoesNothing() {
         repo.create(NewNote.code(projectKey(), "src/A.kt", 1, 1, "a")).get()
         repo.create(NewNote.free("b")).get()

@@ -327,12 +327,9 @@ class JNotePanel internal constructor(
     }
 
     private fun deleteSelected() {
+        if (list.valueIsAdjusting) return
         val selected = list.selectedValuesList
-        if (selected.size > 1) {
-            if (!list.valueIsAdjusting) deleteNotes(selected.map { it.summary.id })
-        } else {
-            clickShown(detail.deleteButton)
-        }
+        if (selected.size > 1) deleteNotes(selected.map { it.summary.id }) else clickShown(detail.deleteButton)
     }
     fun reload() {
         val ticket = generation.incrementAndGet()

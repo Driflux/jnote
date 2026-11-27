@@ -207,14 +207,16 @@ class NoteRepository(
                     }
                 }
             }
+            // 커밋 뒤에 읽으면 그 사이 다른 IDE 프로세스가 지운 행 때문에 되살린 것을 실패로 알릴 수 있다
+            val restored = deleted.map { (note, _) -> requireNotNull(findById(c, note.id)) }
             c.commit()
+            restored
         } catch (e: Throwable) {
             c.rollback()
             throw e
         } finally {
             c.autoCommit = true
         }
-        deleted.map { (note, _) -> requireNotNull(findById(c, note.id)) }
     }
 
     fun delete(id: Long): CompletableFuture<Boolean> = database.submit { c ->
