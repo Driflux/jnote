@@ -5,7 +5,7 @@ description: Save notes into the JNote IntelliJ plugin and look up notes saved t
 
 # JNote
 
-JNote is an IntelliJ plugin that keeps personal notes, anchored to code lines or free, in a local SQLite file. You never write to that file. You write a JSON document into the inbox. A JNote build with the inbox import notifies the user and opens a preview, and no note is saved to the database until they click Apply there. A build without that feature does not read the inbox yet.
+JNote is an IntelliJ plugin that keeps personal notes, anchored to code lines or free, in a local SQLite file. You never write to that file. You write a JSON document into the inbox. A JNote build with the inbox import shows a notification about waiting inbox files. The user opens the preview from that notification, and no note is saved to the database until they click Apply there. A build without that feature does not read the inbox yet.
 
 The format is JNote JSON format v1. Its full rules are in `${CLAUDE_PLUGIN_ROOT}/skills/jnote/ai-format.md` (a copy of `docs/ai-format.md` in the JNote repository). Read it before your first write in a session, and follow it over anything below.
 
@@ -41,7 +41,7 @@ Save something from the conversation as one or more notes.
    ```
    If neither `python3` nor `jq` is installed, the check fails and nothing is published; tell the user instead of publishing unchecked. If the check fails, fix the temporary file and run the last command again; never publish a document that does not parse.
    If `ln` fails because the name exists, publish the same temporary file again with `-2`, `-3`, ... before `.json`, then remove the temporary file.
-5. Tell the user the full path of the file and what happens next, which depends on their JNote build. With the inbox import, opening or re-activating the JNote Tool Window checks the inbox and shows an "N AI notes waiting" notification. The user opens the preview from that notification, and the notes are saved to the database only when they click Apply there. Without it, JNote does not read the inbox, so the file stays there until a build with the import processes it. If you do not know which build they run, tell them all three cases: review it from that notification if it appears; a build that can import from a file can import this file directly; with neither, the file waits in the inbox and no note is saved yet.
+5. Tell the user the full path of the file and what happens next, which depends on their JNote build. With the inbox import, opening or re-activating the JNote Tool Window checks the inbox and shows a notification about the waiting inbox files. The user opens the preview from that notification, and the notes are saved to the database only when they click Apply there. Without it, JNote does not read the inbox, so the file stays there until a build with the import processes it. If you do not know which build they run, tell them both cases: if that notification appears after they open or re-activate the Tool Window, they open the preview from it and the notes are saved only when they click Apply; if no notification appears, their build does not read the inbox yet, the file waits there, and no note is saved yet.
 
 ### Example
 
