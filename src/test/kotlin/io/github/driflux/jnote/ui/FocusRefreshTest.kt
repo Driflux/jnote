@@ -116,6 +116,38 @@ class FocusRefreshTest : BasePlatformTestCase() {
         awaitUntil("refreshed") { titles(panel) == listOf("seen after activation") }
     }
 
+    fun testReturningToTheIdeBeforeFocusIsRestoredToThePanelReloads() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        writeFromAnotherWindow("seen before focus came back")
+
+        panel.onApplicationActivated(null, focusOwner = null, restoredOwner = panel.list)
+
+        awaitUntil("refreshed") { titles(panel) == listOf("seen before focus came back") }
+    }
+
+    fun testReturningToTheIdeBeforeFocusIsRestoredToTheEditorDoesNotReload() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        writeFromAnotherWindow("unseen")
+
+        panel.onApplicationActivated(null, focusOwner = null, restoredOwner = outside)
+        settle(panel)
+
+        assertTrue(titles(panel).isEmpty())
+    }
+
+    fun testAFocusOwnerOutsideThePanelWinsOverTheRestoredOne() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        writeFromAnotherWindow("unseen")
+
+        panel.onApplicationActivated(null, focusOwner = outside, restoredOwner = panel.list)
+        settle(panel)
+
+        assertTrue(titles(panel).isEmpty())
+    }
+
     fun testReturningToTheIdeWithFocusInTheEditorDoesNotReload() {
         val panel = newPanel()
         awaitUntil("first load") { panel.state.notes != null }

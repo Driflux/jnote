@@ -57,6 +57,7 @@ import java.awt.KeyboardFocusManager
 import java.beans.PropertyChangeListener
 import java.awt.FlowLayout
 import java.awt.Insets
+import java.awt.Window
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import java.awt.datatransfer.StringSelection
@@ -279,12 +280,16 @@ class JNotePanel internal constructor(
         if (!disposed && FocusEntry.entered(this, oldOwner, newOwner)) reloadOnFocus()
     }
 
+    /**
+     * 활성화 알림이 AWT가 포커스를 되돌리기 전에 올 수 있다. 그때는 포커스 소유자가 null이라, 창이 포커스를 돌려줄 컴포넌트로 판단한다.
+     */
     internal fun onApplicationActivated(
         frame: Component?,
         focusOwner: Component? = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner,
+        restoredOwner: Component? = frame?.let { it as? Window ?: SwingUtilities.getWindowAncestor(it) }?.mostRecentFocusOwner,
     ) {
         if (disposed || (frame != null && !SwingUtilities.isDescendingFrom(this, frame))) return
-        if (FocusEntry.inside(this, focusOwner)) reloadOnFocus()
+        if (FocusEntry.inside(this, focusOwner ?: restoredOwner)) reloadOnFocus()
     }
 
     private fun reloadOnFocus() {
