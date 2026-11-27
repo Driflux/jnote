@@ -85,6 +85,7 @@ class DatabaseService : Disposable {
             try {
                 database.close()
             } catch (e: Exception) {
+                if (e is InterruptedException) Thread.currentThread().interrupt()
                 warn("Closing the JNote database failed", e)
             }
         }

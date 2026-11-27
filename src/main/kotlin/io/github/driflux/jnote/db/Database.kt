@@ -98,9 +98,11 @@ class Database internal constructor(
         }, executor)
         try {
             job.get(closeTimeoutMillis, TimeUnit.MILLISECONDS)
-        } catch (e: TimeoutException) {
-            // 기다림을 그만둔 뒤 닫기가 실패하면 결과를 볼 쪽이 없어 그때 로그로 남긴다
-            job.whenComplete { _, error -> if (error != null) logger<Database>().warn("Closing the database failed after the wait ended", error) }
+        } catch (e: Exception) {
+            // 시간 초과나 인터럽트로 기다림을 그만둔 뒤 닫기가 실패하면 결과를 볼 쪽이 없어 그때 로그로 남긴다
+            if (e is TimeoutException || e is InterruptedException) {
+                job.whenComplete { _, error -> if (error != null) logger<Database>().warn("Closing the database failed after the wait ended", error) }
+            }
             throw e
         } finally {
             executor.shutdown()

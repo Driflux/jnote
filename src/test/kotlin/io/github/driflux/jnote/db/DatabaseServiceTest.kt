@@ -214,6 +214,18 @@ class DatabaseServiceTest : BasePlatformTestCase() {
         assertEquals(listOf<Throwable>(failure), warnings)
     }
 
+    fun testInterruptedCloseKeepsTheInterruptFlag() {
+        var interrupted = false
+        val thread = Thread {
+            closeInterrupted()
+            interrupted = Thread.currentThread().isInterrupted
+        }.apply { start() }
+        thread.join(5_000)
+        assertTrue(interrupted)
+    }
+
+    private fun closeInterrupted() = DatabaseService.closeAndLog({ throw InterruptedException() }) { _, _ -> }
+
     fun testDisposeDoesNotWaitForABusyDatabaseAndClosesItLater() {
         val service = DatabaseService()
         service.switchTo(dir.resolve("busy.db"))
