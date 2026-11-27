@@ -10,6 +10,7 @@ import com.google.gson.stream.JsonToken
 import com.google.gson.stream.JsonWriter
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.project.RepoUrl
+import io.github.driflux.jnote.ui.CodeTargets
 import java.io.IOException
 import java.io.StringReader
 import java.io.Writer
@@ -33,7 +34,7 @@ object NoteFormatCodec {
         json.flush()
     }
 
-    /** 문서 전체가 잘못되면 [DecodeResult.Rejected], 아니면 잘못된 항목만 건너뛴다. 알 수 없는 필드는 무시한다. */
+    /** 문서 전체가 잘못되면 [DecodeResult.Rejected], 아니면 잘못된 항목만 건너뛴다. 알 수 없는 필드는 무시하고, 값이 null인 필드는 없는 것으로 본다. */
     fun decode(text: String): DecodeResult {
         val root = parseStrict(text) ?: return DecodeResult.Rejected(DocumentError.MALFORMED_JSON)
         if (!root.isJsonObject) return DecodeResult.Rejected(DocumentError.NOT_AN_OBJECT)
@@ -134,7 +135,7 @@ object NoteFormatCodec {
             else -> throw ItemProblem("anchor.repo_url", FieldProblem.MISSING)
         }
         val relPath = requiredString(obj, "path", "anchor.")
-        if (relPath.isBlank()) throw ItemProblem("anchor.path", FieldProblem.INVALID)
+        if (!CodeTargets.isSafeRelPath(relPath)) throw ItemProblem("anchor.path", FieldProblem.INVALID)
         val startLine = requiredLine(obj, "start_line")
         val endLine = requiredLine(obj, "end_line")
         if (endLine < startLine) throw ItemProblem("anchor.end_line", FieldProblem.INVALID)

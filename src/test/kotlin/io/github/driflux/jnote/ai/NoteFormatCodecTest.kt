@@ -107,6 +107,13 @@ class NoteFormatCodecTest {
         assertEquals(FormatNote(uid = null, title = "t"), note)
     }
 
+    @Test fun explicitNullMeansAbsent() {
+        val note = decoded(
+            document("""{"uid":null,"kind":"FREE","title":"t","body":null,"tags":null,"anchor":null,"ai_source":null}"""),
+        ).notes.single()
+        assertEquals(FormatNote(uid = null, title = "t"), note)
+    }
+
     @Test fun tagsAreTrimmedAndDeduplicated() {
         val note = decoded(document("""{"kind":"FREE","title":"t","tags":[" a ","b","a"]}""")).notes.single()
         assertEquals(listOf("a", "b"), note.tags)
@@ -148,6 +155,10 @@ class NoteFormatCodecTest {
                 to SkippedItem(0, null, "anchor.project_path", FieldProblem.INVALID),
             """{"kind":"CODE","title":"t","anchor":{"repo_url":"https://h/o/r","start_line":1,"end_line":1}}"""
                 to SkippedItem(0, null, "anchor.path", FieldProblem.MISSING),
+            """{"kind":"CODE","title":"t","anchor":{"repo_url":"https://h/o/r","path":"../a.kt","start_line":1,"end_line":1}}"""
+                to SkippedItem(0, null, "anchor.path", FieldProblem.INVALID),
+            """{"kind":"CODE","title":"t","anchor":{"repo_url":"https://h/o/r","path":"/tmp/a.kt","start_line":1,"end_line":1}}"""
+                to SkippedItem(0, null, "anchor.path", FieldProblem.INVALID),
             """{"kind":"CODE","title":"t","anchor":{"repo_url":"https://h/o/r","path":"a","end_line":1}}"""
                 to SkippedItem(0, null, "anchor.start_line", FieldProblem.MISSING),
             """{"kind":"CODE","title":"t","anchor":{"repo_url":"https://h/o/r","path":"a","start_line":"1","end_line":1}}"""
