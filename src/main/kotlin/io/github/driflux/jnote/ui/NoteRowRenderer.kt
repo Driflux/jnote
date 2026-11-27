@@ -14,10 +14,10 @@ import javax.swing.BoxLayout
 import javax.swing.JPanel
 
 internal class NoteRowRenderer : JBPanel<NoteRowRenderer>(BorderLayout()), ListCellRenderer<NoteRow> {
-    private val title = JBLabel()
-    private val subtitle = JBLabel().apply { font = JBFont.small() }
-    private val tags = JBLabel().apply { font = JBFont.small() }
-    private val project = JBLabel().apply { font = JBFont.small() }
+    private val title = JBLabel().plainText()
+    private val subtitle = JBLabel().plainText().apply { font = JBFont.small() }
+    private val tags = JBLabel().plainText().apply { font = JBFont.small() }
+    private val project = JBLabel().plainText().apply { font = JBFont.small() }
     private val badge = JBLabel(JNoteBundle.message("toolWindow.badge.ai")).apply {
         font = JBFont.small()
         border = JBUI.Borders.empty(0, 4)

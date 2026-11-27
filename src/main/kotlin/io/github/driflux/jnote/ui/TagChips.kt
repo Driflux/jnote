@@ -8,7 +8,10 @@ import java.awt.FlowLayout
 import javax.swing.JToggleButton
 
 internal fun tagChip(name: String, selected: Boolean, onToggle: () -> Unit): JToggleButton =
-    JToggleButton(name, selected).apply {
+    JToggleButton().plainText().apply {
+        // html 비활성 표시를 먼저 달고 글을 넣어야 HTML 뷰가 만들어지지 않는다
+        text = name
+        isSelected = selected
         isFocusable = true
         addActionListener { onToggle() }
     }
