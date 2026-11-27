@@ -55,6 +55,9 @@ class AddNoteAction(
         resolveAnchor(project, draft)
     }
 
+    /** 거터의 "+" 클릭이나 드래그가 만든 초안으로 노트 추가를 시작한다. */
+    internal fun addNote(project: Project, draft: AnchorDraft) = resolveAnchor(project, draft)
+
     private fun resolveAnchor(project: Project, draft: AnchorDraft) {
         ReadAction.nonBlocking(Callable { resolveOrNameless(project, draft) })
             .expireWith(project)

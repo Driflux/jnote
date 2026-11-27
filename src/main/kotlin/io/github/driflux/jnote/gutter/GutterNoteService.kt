@@ -70,6 +70,11 @@ internal class GutterNoteService(private val project: Project) : Disposable {
 
     internal val isIdle: Boolean get() = cache.isIdle
 
+    /** 이 문서의 편집기에 "+" 거터 리스너를 단다. 프로젝트 파일의 마커 패스가 부른다. */
+    internal fun attachGutterInteraction(document: Document) {
+        if (!disposed) GutterAddNoteAttacher.attach(project, document, this) { disposed }
+    }
+
     internal fun isTracking(document: Document): Boolean = positions.isTracking(document)
 
     /**

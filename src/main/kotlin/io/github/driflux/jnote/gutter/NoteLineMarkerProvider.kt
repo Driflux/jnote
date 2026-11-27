@@ -7,6 +7,7 @@ import com.intellij.lang.injection.InjectedLanguageManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.markup.GutterIconRenderer
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
@@ -40,7 +41,9 @@ class NoteLineMarkerProvider : LineMarkerProviderDescriptor(), DumbAware {
         if (viewProvider.getPsi(viewProvider.baseLanguage) != file) return
         val virtualFile = file.virtualFile ?: return
         val relPath = AnchorLines.relativePath(project.basePath, virtualFile.path) ?: return
-        val notes = project.service<GutterNoteService>().notesFor(virtualFile, relPath)
+        val gutterService = project.service<GutterNoteService>()
+        FileDocumentManager.getInstance().getCachedDocument(virtualFile)?.let { gutterService.attachGutterInteraction(it) }
+        val notes = gutterService.notesFor(virtualFile, relPath)
         if (notes.isNullOrEmpty()) return
         val document = PsiDocumentManager.getInstance(project).getCachedDocument(file) ?: return
         project.service<OpenValidationService>().validateOncePerOpen(document, relPath)

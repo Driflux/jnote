@@ -18,7 +18,7 @@ class GutterIconsTest {
 
     @Test
     fun everyIconFileIsA16PixelSvg() {
-        for (name in listOf("gutterNote", "gutterNote_dark", "gutterNoteApprox", "gutterNoteApprox_dark")) {
+        for (name in listOf("gutterNote", "gutterNote_dark", "gutterNoteApprox", "gutterNoteApprox_dark", "gutterAdd", "gutterAdd_dark")) {
             val text = svg("/icons/$name.svg")
             assertTrue("$name is not an svg", text.contains("<svg"))
             assertTrue("$name must be 16x16", text.contains("width=\"16\"") && text.contains("height=\"16\""))
@@ -29,6 +29,7 @@ class GutterIconsTest {
     fun darkVariantsDifferFromLightOnes() {
         assertNotEquals(svg("/icons/gutterNote.svg"), svg("/icons/gutterNote_dark.svg"))
         assertNotEquals(svg("/icons/gutterNoteApprox.svg"), svg("/icons/gutterNoteApprox_dark.svg"))
+        assertNotEquals(svg("/icons/gutterAdd.svg"), svg("/icons/gutterAdd_dark.svg"))
     }
 
     @Test
