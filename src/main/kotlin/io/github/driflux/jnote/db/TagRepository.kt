@@ -36,22 +36,17 @@ class TagRepository(private val database: Database) {
     fun rename(seen: Tag, newName: String): CompletableFuture<TagRenameResult> = database.submit { c ->
         val trimmed = newName.trim()
         if (trimmed.isEmpty() || ',' in trimmed) return@submit TagRenameResult.InvalidName
-        if (!matches(c, seen)) return@submit TagRenameResult.Stale
-        val clash = findByName(c, trimmed)
-        when {
-            clash != null && clash.id != seen.id -> TagRenameResult.Conflict
-            else -> try {
-                val changed = c.prepareStatement("UPDATE tag SET name = ? WHERE id = ? AND name = ?").use { s ->
-                    s.setString(1, trimmed)
-                    s.setLong(2, seen.id)
-                    s.setString(3, seen.name)
-                    s.executeUpdate()
-                }
-                if (changed == 0) TagRenameResult.Stale else TagRenameResult.Renamed(Tag(seen.id, trimmed))
-            } catch (e: SQLiteException) {
-                if (e.resultCode != SQLiteErrorCode.SQLITE_CONSTRAINT_UNIQUE) throw e
-                TagRenameResult.Conflict
+        try {
+            val changed = c.prepareStatement("UPDATE tag SET name = ? WHERE id = ? AND name = ?").use { s ->
+                s.setString(1, trimmed)
+                s.setLong(2, seen.id)
+                s.setString(3, seen.name)
+                s.executeUpdate()
             }
+            if (changed == 0) TagRenameResult.Stale else TagRenameResult.Renamed(Tag(seen.id, trimmed))
+        } catch (e: SQLiteException) {
+            if (e.resultCode != SQLiteErrorCode.SQLITE_CONSTRAINT_UNIQUE) throw e
+            TagRenameResult.Conflict
         }
     }
 
@@ -139,15 +134,7 @@ class TagRepository(private val database: Database) {
             s.setLong(1, tagId)
             s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.toNote() else null }.toList() }
         }
-    }
-
-    private fun matches(c: java.sql.Connection, seen: Tag): Boolean =
-        c.prepareStatement("SELECT 1 FROM tag WHERE id = ? AND name = ?").use { s ->
-            s.setLong(1, seen.id)
-            s.setString(2, seen.name)
-            s.executeQuery().use { it.next() }
-        }
-}
+    }}
 
 internal fun cleanTagNames(names: List<String>): List<String> {
     val cleaned = names.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
