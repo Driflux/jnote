@@ -15,7 +15,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.JPanel
 
-/** 다른 IDE 창이 DB에 쓴 노트는 포커스가 패널로 들어올 때 한 번 다시 읽어 본다. 타이머는 없다. */
 class FocusRefreshTest : BasePlatformTestCase() {
     private lateinit var dir: Path
     private val dbService get() = DatabaseService.getInstance()
@@ -62,7 +61,6 @@ class FocusRefreshTest : BasePlatformTestCase() {
 
     private fun titles(panel: JNotePanel) = (0 until panel.list.model.size).map { panel.list.model.getElementAt(it).title }
 
-    // NotesChanged를 보내지 않고 쓴다. 다른 IDE 프로세스가 쓴 것과 같다
     private fun writeFromAnotherWindow(title: String) {
         repo.create(NewNote.code(projectKey(), "src/A.kt", 1, 1, title)).get()
     }
@@ -163,8 +161,9 @@ class FocusRefreshTest : BasePlatformTestCase() {
             panel.onFocusOwnerChanged(outside, panel.list)
             panel.onFocusOwnerChanged(panel.list, outside)
         }
-        writeFromAnotherWindow("latest")
+        val write = repo.create(NewNote.code(projectKey(), "src/A.kt", 1, 1, "latest"))
         release.countDown()
+        write.get()
 
         awaitUntil("latest data shown") { titles(panel) == listOf("latest") }
         settle(panel)

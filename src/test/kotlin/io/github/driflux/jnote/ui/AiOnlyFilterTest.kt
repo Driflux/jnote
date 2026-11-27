@@ -14,7 +14,6 @@ import io.github.driflux.jnote.project.ProjectKeyService
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** "AI 노트만" 보기: 켜면 AI 출처가 있는 노트만 보이고, 끄면 모두 돌아온다. */
 class AiOnlyFilterTest : BasePlatformTestCase() {
     private lateinit var dir: Path
     private val dbService get() = DatabaseService.getInstance()
@@ -120,6 +119,15 @@ class AiOnlyFilterTest : BasePlatformTestCase() {
 
         assertTrue(titles(panel).isEmpty())
         assertEquals(JNoteBundle.message("toolWindow.empty.ai.title"), panel.list.emptyText.text)
+    }
+
+    fun testAiFilterDoesNotHideTheOrdinaryEmptyStateWhenItIsNotTheReason() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+
+        panel.aiOnlyBox.doClick(0)
+
+        assertEquals(JNoteBundle.message(panel.state.filter.emptyTitleKey), panel.list.emptyText.text)
     }
 
     fun testAiMessageWinsOverTheTagMessageWhenTheAiFilterIsTheReason() {

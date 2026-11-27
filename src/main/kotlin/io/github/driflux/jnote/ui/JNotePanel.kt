@@ -130,14 +130,12 @@ class JNotePanel internal constructor(
         }
     }
     internal val aiOnlyBox = JBCheckBox(JNoteBundle.message("toolWindow.aiOnly")).apply {
-        // 이미 읽은 행에만 걸리므로 다시 읽지 않는다
         addActionListener {
             state = state.copy(aiOnly = isSelected)
             render()
         }
     }
 
-    // 지금 칩이 그려 낸 사전과 켜 둔 태그. 이것이 바뀔 때만 칩을 새로 만든다. EDT에서만 쓴다
     private var tagBarKey: Pair<List<Tag>, Set<Long>>? = null
     internal val tagBar = JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 2)).apply { isVisible = false }
     internal val searchField = SearchTextField(false).apply {
@@ -164,11 +162,10 @@ class JNotePanel internal constructor(
 
     private val pendingLoads = AtomicInteger()
 
-    // 목록 읽기만 센다. 포커스가 연달아 들어와도 읽기가 쌓이지 않게 하는 데 쓴다
     private val listLoads = AtomicInteger()
     private val rerunAfterLoad = AtomicBoolean()
+    private val loadLock = Any()
 
-    // 테스트가 읽기 횟수를 확인하는 데 쓴다
     internal val reloadsStarted = AtomicInteger()
     internal val isIdle: Boolean get() = pendingLoads.get() == 0
 
@@ -216,17 +213,14 @@ class JNotePanel internal constructor(
         project.messageBus.connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
             override fun selectionChanged(event: FileEditorManagerEvent) = onEditorSelectionChanged()
         })
-        // 다른 IDE 창이 쓴 노트를 보려고, 포커스가 패널로 들어올 때 한 번만 다시 읽는다. 타이머는 없다
         val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
         val focusListener = PropertyChangeListener { onFocusOwnerChanged(it.oldValue as? Component, it.newValue as? Component) }
         focusManager.addPropertyChangeListener(FOCUS_OWNER_PROPERTY, focusListener)
         Disposer.register(this) { focusManager.removePropertyChangeListener(FOCUS_OWNER_PROPERTY, focusListener) }
-        // 패널에 포커스를 둔 채 다른 창에 다녀온 경우에는 포커스 소유자가 그대로여서 위 알림이 오지 않는다
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(ApplicationActivationListener.TOPIC, object : ApplicationActivationListener {
                 override fun applicationActivated(ideFrame: IdeFrame) = onApplicationActivated(ideFrame.component)
             })
-        // 구독을 먼저 걸어 첫 읽기 사이에 오는 알림을 놓치지 않는다
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(NotesChanged.TOPIC, NotesChangedListener { reload() })
         ApplicationManager.getApplication().messageBus.connect(this)
@@ -249,7 +243,6 @@ class JNotePanel internal constructor(
         if (!disposed && FocusEntry.entered(this, oldOwner, newOwner)) reloadOnFocus()
     }
 
-    /** [frame]은 활성화된 IDE 창. 다른 창이면 이 패널과 상관없다. */
     internal fun onApplicationActivated(
         frame: Component?,
         focusOwner: Component? = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner,
@@ -258,9 +251,13 @@ class JNotePanel internal constructor(
         if (FocusEntry.inside(this, focusOwner)) reloadOnFocus()
     }
 
-    // 이미 읽는 중이면 새로 시작하지 않고 끝난 뒤 한 번만 더 읽게 표시해 둔다
     private fun reloadOnFocus() {
-        if (listLoads.get() > 0) rerunAfterLoad.set(true) else reload()
+        val busy = synchronized(loadLock) {
+            val running = listLoads.get() > 0
+            if (running) rerunAfterLoad.set(true)
+            running
+        }
+        if (!busy) reload()
     }
 
     internal fun focusSearch() {
@@ -286,8 +283,8 @@ class JNotePanel internal constructor(
         pendingLoads.incrementAndGet()
         onEdt { if (!disposed) spinner.start() }
         load(allProjects, query).whenComplete { loaded, error ->
-            // 읽는 동안 포커스가 또 들어왔다면 끝난 뒤 한 번만 더 읽는다(그 읽기가 시작되기 전에 쓰인 것까지 보려고)
-            if (listLoads.decrementAndGet() == 0 && rerunAfterLoad.compareAndSet(true, false) && !disposed) reload()
+            val rerun = synchronized(loadLock) { listLoads.decrementAndGet() == 0 && rerunAfterLoad.compareAndSet(true, false) }
+            if (rerun && !disposed) reload()
             pendingLoads.decrementAndGet()
             onEdt {
                 if (disposed || ticket != generation.get()) return@onEdt
@@ -412,10 +409,8 @@ class JNotePanel internal constructor(
         val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free, loaded.noteTags[it.id].orEmpty()) }
         shownProjectKey = loaded.projectKey
         val relPath = if (state.currentFileOnly) currentRelPath() else state.currentRelPath
-        // 읽는 사이 검색어가 바뀌었다면 옛 검색어의 결과는 버리고, 새 검색어의 결과는 applyQuery가 따로 가져온다
         val match = loaded.match?.takeIf { it.query == state.query } ?: state.match
         state = state.copy(notes = rows, allProjects = allProjects, match = match, currentRelPath = relPath).withTags(loaded.dictionary)
-        // 칩이 그대로면 다시 만들지 않는다. 다시 만들면 키보드로 칩에 있던 포커스가 사라진다
         val tagKey = state.tags to state.selectedTagIds
         if (tagKey != tagBarKey) rebuildTagBar()
         render()
@@ -541,9 +536,6 @@ class JNotePanel internal constructor(
         } else if (state.noSearchResults) {
             text.text = JNoteBundle.message("toolWindow.search.empty.title", state.query)
             text.appendLine(JNoteBundle.message(if (state.allProjects) "toolWindow.search.empty.hint.all" else "toolWindow.search.empty.hint"))
-        } else if (state.showEmptyState && state.aiOnly) {
-            text.text = JNoteBundle.message(if (state.currentFileOnly) "toolWindow.empty.ai.currentFile.title" else "toolWindow.empty.ai.title")
-            text.appendLine(JNoteBundle.message("toolWindow.empty.ai.hint"))
         } else if (state.showEmptyState && state.currentFileOnly) {
             text.text = JNoteBundle.message("toolWindow.empty.currentFile.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.currentFile.hint"))

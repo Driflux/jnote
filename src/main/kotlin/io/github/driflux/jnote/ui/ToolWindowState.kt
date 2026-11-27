@@ -15,7 +15,6 @@ data class ToolWindowState(
     val match: SearchMatch? = null,
     val currentFileOnly: Boolean = false,
     val currentRelPath: String? = null,
-    /** "AI 노트만" 보기. 켜면 AI 출처가 있는 노트만 남는다. */
     val aiOnly: Boolean = false,
 ) {
     val searching: Boolean get() = SearchQuery.isSearchable(query)
