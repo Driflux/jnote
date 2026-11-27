@@ -46,7 +46,7 @@ internal class GutterPreviewController(
 
     fun hover(line: Int?, anchorY: Int) {
         if (line == this.line) {
-            if (line != null) cancelClose()
+            if (line != null && line == shownLine) cancelClose()
             return
         }
         this.line = line

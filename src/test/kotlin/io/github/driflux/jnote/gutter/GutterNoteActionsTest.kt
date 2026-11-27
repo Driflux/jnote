@@ -51,7 +51,7 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
     private fun actionsOn(database: io.github.driflux.jnote.db.Database) = GutterNoteActions(
         project,
         database,
-        NoteSaver(repository = { NoteRepository(database) }, tags = { TagRepository(database) }),
+        NoteSaver(repository = { NoteRepository(database) }),
         { _, note, tags ->
             asked += note to tags
             answer
@@ -178,7 +178,7 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
     fun testSwitchingTheDatabaseWhileTheEditDialogIsOpenDoesNotWriteIntoTheNewOne() {
         val note = create("in old")
         val old = db
-        val switching = GutterNoteActions(project, old, NoteSaver(repository = { NoteRepository(old) }, tags = { TagRepository(old) }), { _, _, _ ->
+        val switching = GutterNoteActions(project, old, NoteSaver(repository = { NoteRepository(old) }), { _, _, _ ->
             DatabaseService.getInstance().switchTo(dir.resolve("other3.db"))
             NoteDraft(title = "hijacked")
         })
@@ -262,7 +262,7 @@ class GutterNoteActionsTest : BasePlatformTestCase() {
     fun testSavingAnEditWhoseNoteWasReplacedMeanwhileDoesNotWriteTheNewNote() {
         val old = create("old")
         val reusedHolder = arrayOfNulls<Note>(1)
-        val replacing = GutterNoteActions(project, db, NoteSaver(repository = { NoteRepository(db) }, tags = { TagRepository(db) }), { _, _, _ ->
+        val replacing = GutterNoteActions(project, db, NoteSaver(repository = { NoteRepository(db) }), { _, _, _ ->
             notes.delete(old.id).get()
             reusedHolder[0] = create("reused")
             NoteDraft(title = "hijacked")

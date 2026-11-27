@@ -24,7 +24,7 @@ internal class GutterNotePreviewActions(project: Project, database: Database) : 
     private val actions = GutterNoteActions(
         project,
         database,
-        NoteSaver(repository = { NoteRepository(database) }, tags = { TagRepository(database) }),
+        NoteSaver(repository = { NoteRepository(database) }),
     )
 
     override fun edit(noteId: Long, uid: String) {

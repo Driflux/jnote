@@ -74,6 +74,19 @@ class GutterPreviewControllerTest {
     }
 
     @Test
+    fun aSecondEventOnALineWithoutNotesKeepsTheCloseTimer() {
+        notesByLine[3] = listOf(note(1))
+
+        controller.hover(3, 40)
+        scheduler.advance(GutterPreviewController.SHOW_DELAY_MS)
+        controller.hover(4, 50)
+        controller.hover(4, 50)
+        scheduler.advance(GutterPreviewController.CLOSE_DELAY_MS)
+
+        assertTrue(open().isEmpty())
+    }
+
+    @Test
     fun aLineWithoutNotesNeverShowsAPreview() {
         controller.hover(2, 10)
         scheduler.advance(5_000)
