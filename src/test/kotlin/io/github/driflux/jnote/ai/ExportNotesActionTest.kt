@@ -18,7 +18,6 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.db.Database
 import io.github.driflux.jnote.db.NoteRepository
-import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.Note
 import java.nio.file.Files
@@ -60,8 +59,8 @@ class ExportNotesActionTest : BasePlatformTestCase() {
     private fun note(id: Long) = Note(id, "uid-$id", io.github.driflux.jnote.model.NoteKind.FREE, null, null, null, null, null, null,
         io.github.driflux.jnote.model.NoteStatus.OK, "t", "", null, null, null, 0, 0)
 
-    private fun recorder(target: Path?, calls: MutableList<Pair<Path, Set<Long>?>>) =
-        Triple<(Project) -> Path?, (Project, Path, Set<Long>?) -> Unit, Unit>({ target }, { _, path, ids -> calls += path to ids }, Unit)
+    private fun recorder(target: Path?, calls: MutableList<Pair<Path, Set<String>?>>) =
+        Triple<(Project) -> Path?, (Project, Path, Set<String>?) -> Unit, Unit>({ target }, { _, path, ids -> calls += path to ids }, Unit)
 
     fun testActionsAreRegisteredInToolsJNoteMenu() {
         val manager = ActionManager.getInstance()
@@ -83,23 +82,23 @@ class ExportNotesActionTest : BasePlatformTestCase() {
     }
 
     fun testExportAllPassesNoIdsAndSelectedPassesTheSelection() {
-        val calls = mutableListOf<Pair<Path, Set<Long>?>>()
+        val calls = mutableListOf<Pair<Path, Set<String>?>>()
         val target = dir.resolve("out.json")
         val (ask, start) = recorder(target, calls)
 
         ExportAllNotesAction(ask, start).actionPerformed(event(ExportAllNotesAction(), listOf(note(1))))
         ExportSelectedNotesAction(ask, start).actionPerformed(event(ExportSelectedNotesAction(), listOf(note(2), note(3))))
 
-        assertEquals(listOf<Pair<Path, Set<Long>?>>(target to null, target to setOf(2L, 3L)), calls)
+        assertEquals(listOf<Pair<Path, Set<String>?>>(target to null, target to setOf("uid-2", "uid-3")), calls)
     }
 
     fun testCancelledFileDialogStartsNothing() {
-        val calls = mutableListOf<Pair<Path, Set<Long>?>>()
+        val calls = mutableListOf<Pair<Path, Set<String>?>>()
         val (ask, start) = recorder(null, calls)
 
         ExportAllNotesAction(ask, start).actionPerformed(event(ExportAllNotesAction(), null))
 
-        assertEquals(emptyList<Pair<Path, Set<Long>?>>(), calls)
+        assertEquals(emptyList<Pair<Path, Set<String>?>>(), calls)
     }
 
     fun testTaskWritesTheFileAndReportsTheCount() {
@@ -108,7 +107,7 @@ class ExportNotesActionTest : BasePlatformTestCase() {
         repo.create(NewNote.free("b")).get()
         val target = dir.resolve("out.json")
 
-        ProgressManager.getInstance().run(ExportNotesTask(project, target, null) { NoteExporter(repo, TagRepository(db)) })
+        ProgressManager.getInstance().run(ExportNotesTask(project, target, null) { NoteExporter(db) })
         PlatformTestUtil.waitWithEventsDispatching("no notification", { notifications.isNotEmpty() }, 20)
 
         val shown = notifications.single()
@@ -121,7 +120,7 @@ class ExportNotesActionTest : BasePlatformTestCase() {
         db.close()
         val target = dir.resolve("out.json")
 
-        ProgressManager.getInstance().run(ExportNotesTask(project, target, null) { NoteExporter(NoteRepository(db), TagRepository(db)) })
+        ProgressManager.getInstance().run(ExportNotesTask(project, target, null) { NoteExporter(db) })
         PlatformTestUtil.waitWithEventsDispatching("no notification", { notifications.isNotEmpty() }, 20)
 
         assertEquals(NotificationType.ERROR, notifications.single().type)

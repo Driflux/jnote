@@ -8,8 +8,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.text.StringUtil
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.db.DatabaseService
-import io.github.driflux.jnote.db.NoteRepository
-import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.settings.DbPathNotifier
 import java.nio.file.Path
 import java.util.concurrent.ExecutionException
@@ -18,18 +16,15 @@ import java.util.concurrent.ExecutionException
 class ExportNotesTask(
     project: Project,
     private val target: Path,
-    private val selectedIds: Set<Long>?,
-    private val exporter: () -> NoteExporter = {
-        val database = DatabaseService.getInstance().database
-        NoteExporter(NoteRepository(database), TagRepository(database))
-    },
+    private val selectedUids: Set<String>?,
+    private val exporter: () -> NoteExporter = { NoteExporter(DatabaseService.getInstance().database) },
 ) : Task.Backgroundable(project, JNoteBundle.message("task.export.title"), true) {
     // run이 백그라운드에서 쓰고 onSuccess가 EDT에서 읽는다
     @Volatile
     private var written = 0
 
     override fun run(indicator: ProgressIndicator) {
-        written = exporter().export(target, selectedIds) { indicator.checkCanceled() }
+        written = exporter().export(target, selectedUids) { indicator.checkCanceled() }
     }
 
     override fun onSuccess() {
