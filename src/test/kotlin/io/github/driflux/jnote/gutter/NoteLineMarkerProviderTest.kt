@@ -242,15 +242,17 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
     }
 
     fun testTurningOffTheNoteIconOptionRemovesTheBarsAndTurningItBackOnRedrawsThem() {
-        openFile("GutterBarsOption.txt", lines(20))
-        note("GutterBarsOption.txt", 3, 7, "range")
-        loadedMarkers()
-        settle()
-        assertEquals(listOf(3 to 7), barLines())
         val settings = LineMarkerSettings.getSettings()
         val provider = NoteLineMarkerProvider()
         val wasEnabled = settings.isEnabled(provider)
         try {
+            settings.setEnabled(provider, true)
+            openFile("GutterBarsOption.txt", lines(20))
+            note("GutterBarsOption.txt", 3, 7, "range")
+            loadedMarkers()
+            settle()
+            assertEquals(listOf(3 to 7), barLines())
+
             settings.setEnabled(provider, false)
             DaemonCodeAnalyzer.getInstance(project).restart()
             assertTrue(markers().isEmpty())
@@ -269,15 +271,17 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
     }
 
     fun testABarRequestThatArrivesAfterTheOptionIsTurnedOffIsNotDrawnUntilTheOptionIsBackOn() {
-        openFile("GutterBarsLateRequest.txt", lines(20))
-        val created = note("GutterBarsLateRequest.txt", 3, 7, "range")
-        loadedMarkers()
-        settle()
-        assertEquals(listOf(3 to 7), barLines())
         val settings = LineMarkerSettings.getSettings()
         val provider = NoteLineMarkerProvider()
         val wasEnabled = settings.isEnabled(provider)
         try {
+            settings.setEnabled(provider, true)
+            openFile("GutterBarsLateRequest.txt", lines(20))
+            val created = note("GutterBarsLateRequest.txt", 3, 7, "range")
+            loadedMarkers()
+            settle()
+            assertEquals(listOf(3 to 7), barLines())
+
             settings.setEnabled(provider, false)
             DaemonCodeAnalyzer.getInstance(project).restart()
             assertTrue(markers().isEmpty())
@@ -289,6 +293,35 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
             assertTrue(barLines().isEmpty())
 
             settings.setEnabled(provider, true)
+            DaemonCodeAnalyzer.getInstance(project).restart()
+            assertEquals(1, markers().size)
+            settle()
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            assertEquals(listOf(3 to 7), barLines())
+        } finally {
+            settings.setEnabled(provider, wasEnabled)
+        }
+    }
+
+    fun testAnOffCleanupStillQueuedWhenTheOptionIsTurnedBackOnKeepsTheBars() {
+        val settings = LineMarkerSettings.getSettings()
+        val provider = NoteLineMarkerProvider()
+        val wasEnabled = settings.isEnabled(provider)
+        try {
+            settings.setEnabled(provider, true)
+            openFile("GutterBarsQueuedClear.txt", lines(20))
+            note("GutterBarsQueuedClear.txt", 3, 7, "range")
+            loadedMarkers()
+            settle()
+            assertEquals(listOf(3 to 7), barLines())
+
+            settings.setEnabled(provider, false)
+            val bars = gutter.rangeBars
+            ApplicationManager.getApplication().executeOnPooledThread { bars.clearIfIconsOff() }.get()
+            settings.setEnabled(provider, true)
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            assertEquals(listOf(3 to 7), barLines())
+
             DaemonCodeAnalyzer.getInstance(project).restart()
             assertEquals(1, markers().size)
             settle()

@@ -56,17 +56,18 @@ internal class RangeBars(private val project: Project) {
     }
 
     fun clearIfIconsOff() {
-        if (!iconsOn()) clear()
+        // EDT에서 다시 확인하고 같은 작업에서 정리해야, 그 사이 다시 켜져 들어온 요청과 바를 지우지 않는다
+        if (!iconsOn()) runOnEdt { if (!iconsOn()) clear() }
     }
 
     private fun clear() {
         requested.clear()
-        runOnEdt { applied.keys.toList().forEach(::removeAll) }
+        applied.keys.toList().forEach(::removeAll)
     }
 
     fun dispose() {
         disposed = true
-        clear()
+        runOnEdt(::clear)
     }
 
     private fun apply(document: Document, bars: List<RangeBar>, stamp: Long) {
