@@ -227,7 +227,7 @@ When an item is skipped, the notification names the field and one of these probl
 | Field | Missing | Wrong type | Invalid |
 |---|---|---|---|
 | (the item) | | not an object | |
-| `uid` | | not a string | blank |
+| `uid` | | not a string | blank; or the same `uid` appears twice in the document (every copy is skipped) |
 | `kind` | absent | not a string | not `CODE` or `FREE` |
 | `title` | absent | not a string | blank |
 | `body`, `ai_source`, `source_url`, `prompt` | | not a string | |

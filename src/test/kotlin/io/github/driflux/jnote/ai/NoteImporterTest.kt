@@ -117,21 +117,22 @@ class NoteImporterTest {
 
     @Test fun planClassifiesAndFlagsEmptiedBodyAndTags() {
         val existing = existingCode()
-        val same = sameAs(existing, listOf("keep", "drop"))
+        val retitled = existingCode()
+        val emptied = existingCode()
         val plan = importer.plan(
             listOf(
                 FormatNote(uid = "fresh", title = "new"),
-                same,
-                same.copy(title = "retitled"),
-                same.copy(body = "", tags = emptyList()),
+                sameAs(existing, listOf("keep", "drop")),
+                sameAs(retitled, listOf("keep", "drop")).copy(title = "retitled"),
+                sameAs(emptied, listOf("keep", "drop")).copy(body = "", tags = emptyList()),
             ),
         ).get()
 
         assertEquals(1, plan.creates.size)
         assertEquals(1, plan.unchanged.size)
         assertEquals(listOf(false to false, true to true), plan.updates.map { it.emptiedBody to it.emptiedTags })
-        assertEquals(existing, plan.updates.first().existing)
-        assertEquals("plan writes nothing", listOf(existing), all())
+        assertEquals(retitled, plan.updates.first().existing)
+        assertEquals("plan writes nothing", setOf(existing, retitled, emptied), all().toSet())
     }
 
     @Test fun locationStatusIsKeptOnlyWhileTheLocationIsTheSame() {
@@ -165,12 +166,39 @@ class NoteImporterTest {
         assertTrue(all().any { it.id == existing.id })
     }
 
+    @Test fun everyCopyOfAUidRepeatedInTheBatchIsSkippedAndReported() {
+        val existing = existingCode()
+        val first = sameAs(existing, listOf("keep")).copy(body = "added")
+        val second = sameAs(existing, listOf("keep")).copy(body = "")
+        val twinA = FormatNote(uid = "twin", title = "a")
+        val twinB = FormatNote(uid = "twin", title = "b")
+        val other = FormatNote(uid = "other", title = "other")
+        val batch = listOf(first, twinA, other, second, twinB)
+
+        val plan = importer.plan(batch).get()
+        assertEquals(listOf(other), plan.items.map { it.note })
+        assertEquals(listOf(first, twinA, second, twinB), plan.skippedDuplicates)
+
+        val result = importer.apply(plan).get()
+
+        assertEquals(ImportResult(created = 1, updated = 0, unchanged = 0), result)
+        assertEquals("old body", notes.getByUid(existing.uid).get()!!.body)
+        assertEquals(null, notes.getByUid("twin").get())
+        assertEquals("other", notes.getByUid("other").get()!!.title)
+    }
+
+    @Test fun planWithoutRepeatedUidsSkipsNothing() {
+        val plan = importer.plan(listOf(FormatNote(uid = "a", title = "a"), FormatNote(uid = null, title = "x"), FormatNote(uid = null, title = "y"))).get()
+
+        assertEquals(3, plan.items.size)
+        assertTrue(plan.skippedDuplicates.isEmpty())
+    }
+
     @Test fun applyDecidesAgainAtApplyTime() {
         val existing = existingCode()
         val incoming = sameAs(existing, emptyList()).copy(title = "edited")
         val plan = importer.plan(listOf(incoming, FormatNote(uid = "later", title = "created elsewhere"))).get()
         assertEquals(1, plan.updates.size)
-        // 미리보기 뒤에 다른 IDE가 노트를 지우고, 계획에서 새로 만들 노트를 먼저 만들었다
         notes.delete(existing.id).get()
         importer.importNow(listOf(FormatNote(uid = "later", title = "created elsewhere"))).get()
 
@@ -199,7 +227,6 @@ class NoteImporterTest {
     @Test fun cancelDuringTheLastWriteStillRollsBack() {
         var seen = 0
         try {
-            // 항목마다 한 번, 커밋 직전에 한 번 확인한다. 두 번째(커밋 직전)에서 취소한다
             importer.importNow(listOf(FormatNote(uid = null, title = "only", tags = listOf("t")))) { if (++seen == 2) throw CancellationException() }.get()
             fail("expected cancellation")
         } catch (e: ExecutionException) {
@@ -231,7 +258,6 @@ class NoteImporterTest {
         val existing = notes.create(NewNote.free("plain")).get()
         val plan = importer.plan(listOf(FormatNote(uid = existing.uid, title = "retitled"))).get()
         assertEquals(listOf(false to false), plan.updates.map { it.emptiedBody to it.emptiedTags })
-        // 미리보기를 보는 사이 다른 IDE가 본문을 썼다
         notes.update(existing.copy(body = "written meanwhile")).get()
 
         try {

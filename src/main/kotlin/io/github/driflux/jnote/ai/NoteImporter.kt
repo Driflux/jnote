@@ -10,20 +10,17 @@ import java.sql.Connection
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
-/** 미리보기에 보여 줄 한 항목. 실제 반영은 [NoteImporter.apply]가 그 시점의 DB를 기준으로 다시 판단한다. */
 sealed interface PlannedItem {
     val note: FormatNote
 
     data class Create(override val note: FormatNote) : PlannedItem
 
-    /** [emptiedBody], [emptiedTags]는 값이 있던 본문이나 태그가 이 항목 때문에 비워진다는 뜻이다. */
     data class Update(override val note: FormatNote, val existing: Note, val emptiedBody: Boolean, val emptiedTags: Boolean) : PlannedItem
 
-    /** uid가 같은 노트와 모든 필드가 같아 쓰지 않는다. */
     data class Unchanged(override val note: FormatNote, val existing: Note) : PlannedItem
 }
 
-data class ImportPlan(val items: List<PlannedItem>) {
+data class ImportPlan(val items: List<PlannedItem>, val skippedDuplicates: List<FormatNote> = emptyList()) {
     val creates: List<PlannedItem.Create> get() = items.filterIsInstance<PlannedItem.Create>()
     val updates: List<PlannedItem.Update> get() = items.filterIsInstance<PlannedItem.Update>()
     val unchanged: List<PlannedItem.Unchanged> get() = items.filterIsInstance<PlannedItem.Unchanged>()
@@ -31,25 +28,18 @@ data class ImportPlan(val items: List<PlannedItem>) {
 
 data class ImportResult(val created: Int, val updated: Int, val unchanged: Int)
 
-/**
- * 미리보기 뒤에 다른 IDE가 노트에 본문이나 태그를 더해, 사람이 보지 못한 값이 이번 가져오기로 지워지게 된 경우.
- * 아무것도 쓰지 않았으므로 다시 계획해 미리보기를 보여 주면 된다.
- */
 class PlanOutdatedException : IllegalStateException("notes changed since the preview; review the import again")
 
-/**
- * uid 기준 업서트. 항목은 노트의 새 상태 전체라서 빠진 필드는 비워지고, 가져오기는 노트를 지우지 않는다.
- * 모든 접근은 DB 스레드에서 하므로 EDT에서 불러도 막히지 않는다.
- */
 class NoteImporter(
     private val database: Database,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    /** 노트와 태그를 한 읽기 트랜잭션에서 읽어, 그 사이 지워진 노트의 id를 새 노트가 받아도 섞이지 않는다. */
     fun plan(notes: List<FormatNote>): CompletableFuture<ImportPlan> = database.submit { c ->
         c.autoCommit = false
         try {
-            ImportPlan(notes.map { note -> classify(c, note) }).also { c.commit() }
+            val repeated = notes.mapNotNull { it.uid }.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+            val (skipped, kept) = notes.partition { it.uid in repeated }
+            ImportPlan(kept.map { note -> classify(c, note) }, skipped).also { c.commit() }
         } catch (e: Throwable) {
             c.rollback()
             throw e
@@ -58,11 +48,6 @@ class NoteImporter(
         }
     }
 
-    /**
-     * 한 쓰기 트랜잭션(BEGIN IMMEDIATE)에서 항목마다 그 순간의 uid로 다시 판단해 쓴다. 미리보기 뒤에 다른 IDE가 노트를
-     * 지우거나 만들었어도 업서트 규칙대로 반영된다. 다만 [plan]이 보여 주지 않은 본문·태그 비움이 새로 생기면
-     * [PlanOutdatedException]으로 끝난다. [checkCanceled]가 던지면 아무것도 쓰지 않은 채 되돌린다.
-     */
     fun apply(plan: ImportPlan, checkCanceled: () -> Unit = {}): CompletableFuture<ImportResult> = database.submit { c ->
         c.createStatement().use { it.execute("BEGIN IMMEDIATE") }
         try {
@@ -86,7 +71,6 @@ class NoteImporter(
                     is PlannedItem.Unchanged -> unchanged++
                 }
             }
-            // 마지막 쓰기 중에 누른 취소도 커밋 전에 받아 준다
             checkCanceled()
             c.createStatement().use { it.execute("COMMIT") }
             ImportResult(created, updated, unchanged)
@@ -161,7 +145,6 @@ class NoteImporter(
 
     private fun update(c: Connection, note: FormatNote, existing: Note, now: Long) {
         val anchor = note.anchor
-        // 위치가 그대로면 재배치가 정한 상태(APPROX 등)를 지키고, 위치가 바뀌었으면 새로 받은 위치를 믿는다
         val sameLocation = existing.project == anchor?.project && existing.relPath == anchor?.relPath &&
             existing.startLine == anchor?.startLine && existing.endLine == anchor?.endLine
         val status = if (note.kind == NoteKind.CODE && sameLocation) existing.status else NoteStatus.OK
@@ -196,7 +179,6 @@ class NoteImporter(
             s.executeUpdate()
         }
         for (name in names) {
-            // 사전에 없는 태그는 등록한다
             c.prepareStatement("INSERT OR IGNORE INTO tag (name) VALUES (?)").use { s ->
                 s.setString(1, name)
                 s.executeUpdate()

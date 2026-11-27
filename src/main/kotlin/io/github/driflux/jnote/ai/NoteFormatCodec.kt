@@ -56,7 +56,6 @@ object NoteFormatCodec {
                 skipped += SkippedItem(index, rawUid(item), e.field, e.problem)
             }
         }
-        // 같은 uid가 둘 이상이면 어느 쪽이 맞는지 알 수 없으므로 마지막 것을 고르지 않고 모두 건너뛴다. 잘못된 항목의 uid도 센다
         val duplicated = items.mapNotNull(::rawUid).groupingBy { it }.eachCount().filterValues { it > 1 }.keys
         val (dropped, kept) = parsed.partition { it.value.uid in duplicated }
         skipped += dropped.map { SkippedItem(it.index, it.value.uid, "uid", FieldProblem.DUPLICATE) }
