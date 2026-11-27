@@ -104,6 +104,29 @@ class ClaudePluginTest {
     }
 
     @Test
+    fun theOrganizeExampleUpdatesByUidAndKeepsTheStoredProjectKey() {
+        val organize = skill.substringAfter("## Organize")
+        val example = Regex("```json\\n(.*?)```", RegexOption.DOT_MATCHES_ALL).find(organize)!!.groupValues[1]
+
+        val notes = (NoteFormatCodec.decode(example) as DecodeResult.Decoded).notes
+
+        assertTrue(notes.isNotEmpty())
+        for (note in notes) {
+            assertTrue("an update names its uid", note.uid != null)
+            assertTrue("an update uses project_path, not repo_url", "\"repo_url\"" !in example)
+            assertEquals("github.com/acme/shop", note.anchor?.project)
+        }
+    }
+
+    @Test
+    fun theOrganizeFlowWarnsAboutStaleFilesAndAsksToVerifyTheMergeBeforeDeleting() {
+        val organize = skill.substringAfter("## Organize").substringBefore("### Example")
+
+        assertTrue(organize.contains("discard the pending file"))
+        assertTrue(organize.contains("before deleting"))
+    }
+
+    @Test
     fun everyJsonExampleInTheSkillDecodesWithoutSkippedItems() {
         val examples = Regex("```json\\n(.*?)```", RegexOption.DOT_MATCHES_ALL).findAll(skill).map { it.groupValues[1] }.toList()
         assertTrue("the skill shows at least one example", examples.isNotEmpty())
