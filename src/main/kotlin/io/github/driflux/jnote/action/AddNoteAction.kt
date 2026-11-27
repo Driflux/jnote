@@ -23,11 +23,6 @@ import java.util.concurrent.Callable
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletionException
 
-/**
- * EDT에서는 문서만 읽어 초안을 만들고, 클래스 이름은 non-blocking 읽기 액션에서 구한 뒤
- * UI 스레드에서 다이얼로그를 띄운다. 저장은 [NoteSaver]가 EDT 밖에서 한다.
- * 인자는 테스트에서 다이얼로그와 저장소를 바꿔 끼우기 위한 것이다.
- */
 class AddNoteAction(
     private val askUser: (Project, CodeAnchor) -> NoteDraft? = AddNoteDialog::ask,
     private val saver: NoteSaver = NoteSaver(),
@@ -43,7 +38,6 @@ class AddNoteAction(
     override fun update(e: AnActionEvent) {
         val project = e.project
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
-        // 문자열 비교뿐인 가벼운 검사만 한다
         e.presentation.isEnabledAndVisible = project != null && e.getData(CommonDataKeys.EDITOR) != null &&
             file != null && AnchorLines.relativePath(project.basePath, file.path) != null
     }
@@ -55,7 +49,6 @@ class AddNoteAction(
         resolveAnchor(project, draft)
     }
 
-    /** 거터의 "+" 클릭이나 드래그가 만든 초안으로 노트 추가를 시작한다. */
     internal fun addNote(project: Project, draft: AnchorDraft) = resolveAnchor(project, draft)
 
     private fun resolveAnchor(project: Project, draft: AnchorDraft) {
@@ -70,7 +63,6 @@ class AddNoteAction(
             }
     }
 
-    // 클래스 이름은 선택 값이라 해석이 실패해도 노트 저장을 막지 않는다. 취소는 그대로 전파한다
     private fun resolveOrNameless(project: Project, draft: AnchorDraft): CodeAnchor = try {
         CodeAnchors.resolve(project, draft, nameResolver)
     } catch (e: ProcessCanceledException) {
@@ -82,7 +74,6 @@ class AddNoteAction(
     }
 
     internal fun askAndSave(project: Project, anchor: CodeAnchor) {
-        // 다이얼로그가 열려 있는 동안 프로젝트가 닫힐 수 있다
         if (project.isDisposed) return
         val note = askUser(project, anchor) ?: return
         if (project.isDisposed) return

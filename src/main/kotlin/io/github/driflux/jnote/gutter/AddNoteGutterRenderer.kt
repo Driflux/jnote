@@ -8,7 +8,6 @@ import com.intellij.openapi.project.DumbAware
 import io.github.driflux.jnote.JNoteBundle
 import javax.swing.Icon
 
-/** 마우스가 올라간 줄에 그려지는 "+" 아이콘. 클릭하면 [onClick]이 그 줄의 노트 추가를 연다. */
 internal class AddNoteGutterRenderer(private val onClick: () -> Unit) : GutterIconRenderer(), DumbAware {
     override fun getIcon(): Icon = GutterIcons.ADD
 
@@ -26,7 +25,6 @@ internal class AddNoteGutterRenderer(private val onClick: () -> Unit) : GutterIc
         override fun actionPerformed(e: AnActionEvent) = onClick()
     }
 
-    // 줄마다 새로 만들고 한 번에 하나만 달려 있으므로 같은 인스턴스일 때만 같다
     override fun equals(other: Any?): Boolean = this === other
 
     override fun hashCode(): Int = System.identityHashCode(this)

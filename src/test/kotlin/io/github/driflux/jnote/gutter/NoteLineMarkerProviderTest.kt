@@ -62,7 +62,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
     override fun tearDown() {
         try {
             try {
-                // 늦은 읽기가 DB 경로를 바꾼 뒤 기본 경로(홈 디렉터리)의 DB를 열지 않도록 먼저 끝낸다
                 settle()
                 runWriteAction { created.forEach { if (it.isValid) it.delete(this) } }
                 project.service<PendingNoteSelection>().take()
@@ -78,7 +77,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
     private fun projectKey(): String =
         ApplicationManager.getApplication().executeOnPooledThread<String> { project.service<ProjectKeyService>().resolve().key }.get()
 
-    // 다른 테스트의 파일 이름과 겹쳐 캐시 항목을 나누지 않도록 이름 앞에 Gutter를 붙인다
     private fun openFile(name: String, text: String): VirtualFile {
         val path = Path.of(project.basePath!!, "src", name)
         Files.createDirectories(path.parent)
@@ -94,7 +92,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
     private fun note(name: String, start: Int, end: Int, title: String, status: NoteStatus = NoteStatus.OK) =
         repo.create(NewNote.code(projectKey(), "src/$name", start, end, title, status = status)).get()
 
-    /** JUnit3 러너가 test로 시작하는 메서드 안의 람다를 테스트로 오인하므로 람다는 도우미 함수에서 만든다. */
     private fun awaitUntil(message: String, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 10_000
         while (!condition()) {
@@ -105,7 +102,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
     }
 
     private fun settle() {
-        // EDT에서 처리한 일이 새 읽기를 시작할 수 있으므로, 이벤트를 비운 뒤에도 읽기가 없을 때까지 되풀이한다
         while (true) {
             PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
             if ((services + gutter).all { it.isIdle } && validation.isIdle) return
@@ -119,10 +115,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
             .filter { it.icon === GutterIcons.NOTE || it.icon === GutterIcons.APPROX }
     }
 
-    /**
-     * 테스트 픽스처의 하이라이팅은 기다리는 동안 EDT 이벤트를
-     * 처리하므로, 그 안에서 읽기가 끝나면 데몬 재시작이 하이라이팅 도중에 실행되어 픽스처가 막는다.
-     */
     private fun directPass(): List<LineMarkerInfo<*>> {
         val sink = mutableListOf<LineMarkerInfo<*>>()
         runReadAction {
@@ -135,7 +127,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
     private fun loadedMarkers(): List<LineMarkerInfo<*>> {
         assertTrue(directPass().isEmpty())
         settle()
-        // 노트를 본 첫 패스는 열린 파일의 검증을 예약한다. 그 결과로 오는 데몬 재시작이 하이라이팅 도중에 오지 않게 먼저 끝낸다
         directPass()
         settle()
         return markers()
@@ -204,7 +195,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
     fun testAKotlinFileGetsTheMarkerFromTheSameProvider() {
         val file = openFile("GutterK.kt", "package p\n\nclass A {\n    fun b() = 1\n}\n")
         note("GutterK.kt", 4, 4, "kotlin note")
-        // Kotlin은 소스 폴더 밖 파일을 하이라이팅하지 않으므로 이 테스트 동안만 소스 폴더로 등록한다
         val sourceRoot = file.parent
         PsiTestUtil.addSourceRoot(module, sourceRoot)
         val found = try {
@@ -234,7 +224,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
 
         val found = loadedMarkers()
 
-        // 읽기는 끝났고 두 노트가 캐시에 있으므로, 마커가 없는 것은 상태 때문이다
         assertEquals(2, gutter.notesFor(file, "src/GutterA.txt")!!.size)
         assertTrue(found.isEmpty())
     }
@@ -330,7 +319,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         directPass()
         settle()
 
-        // 다른 파일이 같은 이유로 실패해도, 같은 파일을 다시 그려도 알림은 늘지 않는다
         myFixture.openFileInEditor(second)
         directPass()
         settle()
@@ -389,7 +377,6 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         val step = popups.single().listStep as ListPopupStep<CachedNote>
         assertEquals(listOf("first", "second"), step.values.map { step.getTextFor(it) })
         assertSame(GutterIcons.APPROX, step.getIconFor(step.values[1]))
-        // 팝업만 열리고, 고르기 전에는 아무것도 선택하지 않는다
         assertEquals(emptyList<Long>(), requested)
 
         assertSame(PopupStep.FINAL_CHOICE, step.onChosen(step.values[1], true))

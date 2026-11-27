@@ -38,7 +38,6 @@ class GutterAddNoteListenerTest : BasePlatformTestCase() {
 
     private fun lines(count: Int) = (1..count).joinToString("\n") { "line $it" }
 
-    // 헤드리스에는 거터 레이아웃이 없으므로 y를 줄 번호로, x 0..15를 아이콘 영역으로 읽는다
     private fun listener(editor: EditorEx): GutterAddNoteListener {
         lateinit var created: GutterAddNoteListener
         val geometry = GutterGeometry(
@@ -103,6 +102,7 @@ class GutterAddNoteListenerTest : BasePlatformTestCase() {
         val l = listener(editor)
         l.mouseMoved(mouse(editor, MouseEvent.MOUSE_MOVED, 4))
 
+        l.mousePressed(mouse(editor, MouseEvent.MOUSE_PRESSED, 4))
         val renderer = editor.markupModel.allHighlighters.mapNotNull { it.gutterIconRenderer as? AddNoteGutterRenderer }.single()
         renderer.clickAction!!.actionPerformed(com.intellij.testFramework.TestActionEvent.createTestEvent())
 
@@ -241,11 +241,36 @@ class GutterAddNoteListenerTest : BasePlatformTestCase() {
         val l = listener(editor)
         l.mouseMoved(mouse(editor, MouseEvent.MOUSE_MOVED, 4))
 
+        l.mousePressed(mouse(editor, MouseEvent.MOUSE_PRESSED, 4))
         com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project) { editor.document.insertString(0, "new\n") }
         val renderer = editor.markupModel.allHighlighters.mapNotNull { it.gutterIconRenderer as? AddNoteGutterRenderer }.single()
         renderer.clickAction!!.actionPerformed(com.intellij.testFramework.TestActionEvent.createTestEvent())
 
         assertEquals(6, added.single().startLine)
+    }
+
+    fun testAClickActionWithoutAPressOnThePlusAddsNothing() {
+        val editor = openFile("GutterAddStray.txt", lines(10))
+        val l = listener(editor)
+        l.mouseMoved(mouse(editor, MouseEvent.MOUSE_MOVED, 4))
+
+        l.mousePressed(mouse(editor, MouseEvent.MOUSE_PRESSED, 4, x = 40))
+        val renderer = editor.markupModel.allHighlighters.mapNotNull { it.gutterIconRenderer as? AddNoteGutterRenderer }.single()
+        renderer.clickAction!!.actionPerformed(com.intellij.testFramework.TestActionEvent.createTestEvent())
+
+        assertTrue(added.isEmpty())
+    }
+
+    fun testReleasingADragOutsideTheIconAreaHidesThePlus() {
+        val editor = openFile("GutterAddOutside.txt", lines(10))
+        val l = listener(editor)
+        l.mouseMoved(mouse(editor, MouseEvent.MOUSE_MOVED, 3))
+
+        l.mousePressed(mouse(editor, MouseEvent.MOUSE_PRESSED, 3))
+        l.mouseReleased(mouse(editor, MouseEvent.MOUSE_RELEASED, 6, x = 40))
+
+        assertNull(l.shownLine)
+        assertEquals(0, plusCount(editor))
     }
 
     fun testDisposeRemovesThePlus() {
@@ -344,6 +369,28 @@ class GutterAddNoteAttacherTest : BasePlatformTestCase() {
             attach(editor, parent)
 
             assertEquals(2, listeners(editor))
+        } finally {
+            Disposer.dispose(parent)
+        }
+    }
+
+    private fun childCount(parent: Disposable): Int {
+        var count = 0
+        Disposer.disposeChildren(parent) { count++; false }
+        return count
+    }
+
+    fun testClosingTheEditorReleasesTheParentsCallback() {
+        val editor = openFile("GutterAttachClose.txt")
+        val parent = Disposer.newDisposable()
+        try {
+            attach(editor, parent)
+            assertEquals(1, childCount(parent))
+
+            com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).closeFile(created.last())
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+            assertEquals(0, childCount(parent))
         } finally {
             Disposer.dispose(parent)
         }

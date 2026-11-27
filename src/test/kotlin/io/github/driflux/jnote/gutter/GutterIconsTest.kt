@@ -5,10 +5,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * 아이콘을 그려 보는 방식은 쓰지 않는다:
- * 헤드리스 Linux 테스트 JVM에서는 SVG가 1x1로 로드되어 그린 결과가 환경마다 다르다.
- */
 class GutterIconsTest {
     private fun svg(path: String): String {
         val stream = GutterIcons::class.java.getResourceAsStream(path)

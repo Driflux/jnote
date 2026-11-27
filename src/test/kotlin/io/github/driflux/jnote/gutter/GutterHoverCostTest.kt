@@ -12,10 +12,6 @@ import java.awt.event.MouseEvent
 import java.nio.file.Files
 import java.nio.file.Path
 
-/**
- * 거터 마우스 처리 비용 측정. 시간은 기계마다 달라 단정하지 않고 출력만 하며, JNOTE_PERF=1일 때만 돈다.
- * 실행: JNOTE_PERF=1 ./gradlew test --tests '*GutterHoverCostTest*' -i | grep JNOTE-PERF
- */
 class GutterHoverCostTest : BasePlatformTestCase() {
     private val created = mutableListOf<VirtualFile>()
 
@@ -48,7 +44,6 @@ class GutterHoverCostTest : BasePlatformTestCase() {
         val editor = myFixture.editor as EditorEx
         val lineHeight = editor.lineHeight
         val base = GutterGeometry.of(editor)
-        // 아이콘 영역 판정만 고정한다. 좌표 변환과 줄 계산은 실제 코드이다
         val geometry = GutterGeometry(base.lineAt, { true }, base.onAddIcon)
         val listener = GutterAddNoteListener(editor, project, geometry) { _, _ -> }
         fun move(y: Int) = listener.mouseMoved(MouseEvent(editor.gutterComponentEx, MouseEvent.MOUSE_MOVED, 0L, 0, 5, y, 0, false))
