@@ -181,6 +181,82 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         assertTrue(requested.isEmpty())
     }
 
+    private fun barHighlighters() = com.intellij.openapi.editor.impl.DocumentMarkupModel
+        .forDocument(myFixture.editor.document, project, true).allHighlighters.filter { it.lineMarkerRenderer === RangeBarRenderer }
+
+    private fun barLines(): List<Pair<Int, Int>> = barHighlighters().map {
+        val document = myFixture.editor.document
+        (document.getLineNumber(it.startOffset) + 1) to (document.getLineNumber(it.endOffset) + 1)
+    }.sortedBy { it.first }
+
+    fun testAMultiLineNoteDrawsABarOverItsRangeAndASingleLineNoteDoesNot() {
+        openFile("GutterBars.txt", lines(20))
+        note("GutterBars.txt", 3, 7, "range")
+        note("GutterBars.txt", 12, 12, "single")
+
+        loadedMarkers()
+        settle()
+
+        assertEquals(listOf(3 to 7), barLines())
+    }
+
+    fun testTheBarFollowsEditsAboveItAndKeepsTheEditorBackgroundPlain() {
+        openFile("GutterBarsEdit.txt", lines(20))
+        note("GutterBarsEdit.txt", 5, 8, "range")
+        loadedMarkers()
+        settle()
+
+        com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project) { myFixture.editor.document.insertString(0, "x\ny\n") }
+
+        assertEquals(listOf(7 to 10), barLines())
+        assertTrue(barHighlighters().all { it.getTextAttributes(myFixture.editor.colorsScheme) == null })
+    }
+
+    fun testDeletingTheNoteRemovesItsBar() {
+        openFile("GutterBarsDelete.txt", lines(20))
+        val created = note("GutterBarsDelete.txt", 5, 8, "range")
+        loadedMarkers()
+        settle()
+        assertEquals(1, barHighlighters().size)
+
+        repo.delete(created.id).get()
+        ApplicationManager.getApplication().messageBus.syncPublisher(NotesChanged.TOPIC).notesChanged()
+        settle()
+        directPass()
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertTrue(barHighlighters().isEmpty())
+    }
+
+    fun testRepeatedPassesKeepOneBarPerNote() {
+        openFile("GutterBarsRepeat.txt", lines(20))
+        note("GutterBarsRepeat.txt", 2, 6, "range")
+        loadedMarkers()
+        settle()
+
+        repeat(3) { directPass() }
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertEquals(1, barHighlighters().size)
+    }
+
+    fun testPaintingABarDrawsPixelsInsideTheGutter() {
+        openFile("GutterBarsPaint.txt", lines(5))
+        val editor = myFixture.editor as com.intellij.openapi.editor.ex.EditorEx
+        val image = java.awt.image.BufferedImage(120, 60, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+        val g = image.createGraphics()
+        try {
+            RangeBarRenderer.paint(editor, g, java.awt.Rectangle(0, 10, 120, 40))
+        } finally {
+            g.dispose()
+        }
+
+        val gutter = editor.gutterComponentEx
+        val x = gutter.lineNumberAreaOffset + gutter.lineNumberAreaWidth + 1
+        assertTrue(image.getRGB(x, 30) ushr 24 != 0)
+        assertEquals(0, image.getRGB(x + RangeBarRenderer.BAR_WIDTH + 3, 30) ushr 24)
+    }
+
     fun testAnOkNoteInAPlainTextFileGetsOneMarkerOnItsStartLine() {
         openFile("GutterPlain.txt", lines(10))
         note("GutterPlain.txt", 3, 5, "check this")

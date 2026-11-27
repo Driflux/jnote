@@ -20,6 +20,13 @@ The only new always-on cost is a mouse listener per editor (intent.md section 2)
 - **No I/O on the EDT.** The listener reads the document and the editor only. No DB or file access happens in any mouse handler.
 - **Cost.** Moving the "+" replaces a highlighter, which makes the platform rebuild its gutter renderer cache over the document's highlighters on the EDT. The measurements, including that update with 500 other highlighters, are in the PR body (`GutterHoverCostTest`, `JNOTE_PERF=1`).
 
+## Range bar (PR 2)
+- **What is drawn.** A note with a status of OK or APPROX that covers two or more lines gets a thin vertical bar in the gutter over its range. Nothing is painted in the editor text area. Single-line notes, ORPHAN and NEEDS_RELOCATE notes get none.
+- **Where the lines come from.** The marker pass already holds the notes after `NotePositions.sync`, so the bar uses the same RangeMarker-tracked lines as the icon. `RangeBarSpec.of` turns them into `(noteId, startLine, endLine)` values.
+- **How it is drawn.** `RangeBars` keeps one `RangeHighlighter` per bar in the document's markup model (shared by all editors of the document) with a `LineMarkerRendererEx` at `CUSTOM` position that paints a 2 px rounded bar just right of the line number column. A `LineMarkerInfo` cannot carry a line marker renderer in 2024.2, so the bars are not part of the marker infos.
+- **Threading.** The pass runs in the background and calls `RangeBars.update`, which compares with the last requested list and returns when it is equal, so passes that change nothing cost one map lookup. Otherwise it schedules the highlighter changes on the EDT; a stale scheduled change is skipped when a newer request exists. Highlighters follow edits between passes.
+- **Lifetime.** Closing the last editor of a file, a database switch, and service disposal remove the bars. An empty note list from the cache removes the bars of that document.
+
 ## Alternatives considered
 - `EditorFactoryListener` registered in `plugin.xml`: attaches in every editor at creation, which is startup work and is what ADR 0009 rejected. Rejected.
 - Attaching from the marker pass only for files that have notes: the "+" would not appear where a first note is added. Rejected.
@@ -27,6 +34,9 @@ The only new always-on cost is a mouse listener per editor (intent.md section 2)
 - Handling the click ourselves on release: a press on a note icon would then also add a note, because we cannot tell which icon was hit without the same hit test. Rejected for the renderer's click action.
 - `EditorGutterComponentEx.isInsideMarkerArea`: it is internal and measures the free-painter area in the new UI, not the icon column. Rejected for `iconAreaOffset` and `iconsAreaWidth`.
 - Releasing a range drag over a non-JNote icon is not fixed here: stopping it needs the release to be consumed before the gutter dispatches it, which means registering ahead of the platform's own listener or wrapping the gutter. Both depend on platform internals, so it is split into its own issue.
+- Range bars from the `LineMarkerInfo` pass: the daemon builds the highlighters from the infos and offers no hook for a line marker renderer. Rejected for `RangeBars`.
+- One bar highlighter per editor: it multiplies the work per split. The document markup model is shared. Rejected.
+- Background color over the range in the editor: excluded by intent.md section 7. Rejected.
 - Moving the "+" while dragging: the click and the drag start would then refer to different lines. Rejected.
 
 ## Consequences
@@ -39,4 +49,5 @@ The only new always-on cost is a mouse listener per editor (intent.md section 2)
   - `getIconAreaOffset`, `getIconsAreaWidth` and `getGutterRenderer(Point)` are public platform API, but the layout they describe differs between the classic and the new UI. The gutter geometry could not be checked in a headless test, so it is covered by the `runIde` check in the PR.
   - A drag selects text in the editor, and the selection stays after the dialog closes.
 - Follow-up work
-  - PR 2 adds the range bar and PR 3 adds the hover preview to this ADR.
+  - PR 3 adds the hover preview to this ADR.
+  - The bar's x position (right of the line numbers) was chosen from the measured 2024.2 gutter layout and needs an eye check in the classic and New UI.

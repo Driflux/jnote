@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class GutterNoteService(private val project: Project) : Disposable {
     private val cache = FileNoteCache(::load)
     private val positions = NotePositions()
+    private val bars = RangeBars(project)
 
     private var seenDatabase: DatabaseService.Current? = null
     private val failureReported = AtomicBoolean(false)
@@ -56,12 +57,15 @@ internal class GutterNoteService(private val project: Project) : Disposable {
                     val document = FileDocumentManager.getInstance().getCachedDocument(file) ?: return
                     writeBack(document)
                     positions.forget(document)
+                    bars.forget(document)
                 }
             },
         )
     }
 
     internal val isIdle: Boolean get() = cache.isIdle
+
+    internal val rangeBars: RangeBars get() = bars
 
     internal fun attachGutterInteraction(document: Document) {
         if (!disposed) GutterAddNoteAttacher.attach(project, document, this) { disposed }
@@ -110,6 +114,7 @@ internal class GutterNoteService(private val project: Project) : Disposable {
             if (same) return
             cache.clear()
             positions.clear()
+            bars.clear()
             failureReported.set(false)
         }
     }
@@ -162,5 +167,6 @@ internal class GutterNoteService(private val project: Project) : Disposable {
         disposed = true
         cache.clear()
         positions.clear()
+        bars.clear()
     }
 }
