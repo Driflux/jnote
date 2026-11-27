@@ -16,10 +16,12 @@ class DatabaseService : Disposable {
     private var current: Database? = null
     private var disposed = false
 
+    internal var defaultPath: () -> Path = DatabasePaths::default
+
     val database: Database
         get() = synchronized(lock) {
             check(!disposed) { "DatabaseService is disposed" }
-            current ?: Database(pathLocked()).also { current = it }
+            current ?: Database(::currentPath).also { current = it }
         }
 
     fun currentPath(): Path = synchronized(lock) { pathLocked() }
@@ -54,7 +56,7 @@ class DatabaseService : Disposable {
         old?.close()
     }
 
-    private fun pathLocked(): Path = path ?: DatabasePaths.default().also { path = it }
+    private fun pathLocked(): Path = path ?: defaultPath().also { path = it }
 
     override fun dispose() {
         val old = synchronized(lock) {

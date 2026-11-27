@@ -16,11 +16,16 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class DatabaseClosedException : IllegalStateException("database is closed")
 
+/** [resolvePath]는 처음 열 때 DB 스레드에서 불린다. 경로를 정하는 데 파일 I/O가 들어도 부른 쪽(EDT일 수 있다)에서 일어나지 않는다. */
 class Database internal constructor(
-    private val path: Path,
+    private val resolvePath: () -> Path,
     private val closeTimeoutMillis: Long,
 ) : AutoCloseable {
-    constructor(path: Path) : this(path, CLOSE_TIMEOUT_MS)
+    constructor(path: Path) : this({ path }, CLOSE_TIMEOUT_MS)
+
+    internal constructor(path: Path, closeTimeoutMillis: Long) : this({ path }, closeTimeoutMillis)
+
+    internal constructor(resolvePath: () -> Path) : this(resolvePath, CLOSE_TIMEOUT_MS)
 
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, THREAD_NAME).apply { isDaemon = true }
@@ -52,6 +57,7 @@ class Database internal constructor(
 
     private fun open(): Connection {
         if (closeJobDone) throw closedError()
+        val path = resolvePath()
         path.parent?.let { Files.createDirectories(it) }
         val config = SQLiteConfig().apply {
             setBusyTimeout(BUSY_TIMEOUT_MS)

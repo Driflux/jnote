@@ -4,6 +4,7 @@ import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -35,6 +36,25 @@ class DatabaseServiceTest : BasePlatformTestCase() {
         val second = dir.resolve("second.db")
         service.switchTo(second)
         assertEquals(DatabaseService.Current(second, null), service.current())
+    }
+
+    fun testDefaultPathIsResolvedOnTheDatabaseThreadNotByTheFirstCaller() {
+        val service = DatabaseService()
+        val resolvedOn = ConcurrentLinkedQueue<String>()
+        val expected = dir.resolve("lazy.db")
+        service.defaultPath = {
+            resolvedOn += Thread.currentThread().name
+            expected
+        }
+
+        val database = service.database
+        assertTrue(resolvedOn.toString(), resolvedOn.isEmpty())
+
+        database.submitAndWait { 1 }
+        assertEquals(listOf(Database.THREAD_NAME), resolvedOn.toList())
+        assertTrue(Files.exists(expected))
+        assertEquals(expected, service.currentPath())
+        service.dispose()
     }
 
     fun testDisposeDoesNotWaitForABusyDatabaseAndClosesItLater() {
