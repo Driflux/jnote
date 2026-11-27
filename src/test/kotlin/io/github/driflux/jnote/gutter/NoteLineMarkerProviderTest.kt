@@ -4,6 +4,7 @@ import com.intellij.codeHighlighting.Pass
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
 import com.intellij.codeInsight.daemon.GutterIconNavigationHandler
 import com.intellij.codeInsight.daemon.LineMarkerInfo
+import com.intellij.codeInsight.daemon.LineMarkerSettings
 import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerImpl
 import com.intellij.notification.Notification
 import com.intellij.notification.Notifications
@@ -238,6 +239,32 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
 
         assertEquals(1, barHighlighters().size)
+    }
+
+    fun testTurningOffTheNoteIconOptionRemovesTheBarsAndTurningItBackOnRedrawsThem() {
+        openFile("GutterBarsOption.txt", lines(20))
+        note("GutterBarsOption.txt", 3, 7, "range")
+        loadedMarkers()
+        settle()
+        assertEquals(listOf(3 to 7), barLines())
+        val settings = LineMarkerSettings.getSettings()
+        val provider = NoteLineMarkerProvider()
+        try {
+            settings.setEnabled(provider, false)
+            DaemonCodeAnalyzer.getInstance(project).restart()
+            assertTrue(markers().isEmpty())
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            assertTrue(barLines().isEmpty())
+
+            settings.setEnabled(provider, true)
+            DaemonCodeAnalyzer.getInstance(project).restart()
+            assertEquals(1, markers().size)
+            settle()
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            assertEquals(listOf(3 to 7), barLines())
+        } finally {
+            settings.setEnabled(provider, true)
+        }
     }
 
     fun testAnEditBeforeTheBarIsAppliedDropsTheStaleRequestAndTheNextPassRedrawsIt() {

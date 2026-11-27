@@ -1,6 +1,7 @@
 package io.github.driflux.jnote.gutter
 
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
+import com.intellij.codeInsight.daemon.LineMarkerSettings
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
@@ -9,6 +10,7 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileDocumentManagerListener
+import com.intellij.openapi.fileEditor.FileEditor
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
@@ -33,6 +35,7 @@ internal class GutterNoteService(private val project: Project) : Disposable {
     private val cache = FileNoteCache(::load)
     private val positions = NotePositions()
     private val bars = RangeBars(project)
+    private val markerProvider = NoteLineMarkerProvider()
 
     private var seenDatabase: DatabaseService.Current? = null
     private val failureReported = AtomicBoolean(false)
@@ -47,6 +50,14 @@ internal class GutterNoteService(private val project: Project) : Disposable {
             FileDocumentManagerListener.TOPIC,
             object : FileDocumentManagerListener {
                 override fun beforeDocumentSaving(document: Document) = writeBack(document)
+            },
+        )
+        project.messageBus.connect(this).subscribe(
+            DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC,
+            object : DaemonCodeAnalyzer.DaemonListener {
+                override fun daemonFinished(fileEditors: Collection<FileEditor>) {
+                    if (!LineMarkerSettings.getSettings().isEnabled(markerProvider)) bars.clear()
+                }
             },
         )
         project.messageBus.connect(this).subscribe(

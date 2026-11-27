@@ -53,10 +53,14 @@ internal class RangeBars(private val project: Project) {
         runOnEdt { removeAll(document) }
     }
 
-    fun dispose() {
-        disposed = true
+    fun clear() {
         requested.clear()
         runOnEdt { applied.keys.toList().forEach(::removeAll) }
+    }
+
+    fun dispose() {
+        disposed = true
+        clear()
     }
 
     private fun apply(document: Document, bars: List<RangeBar>, stamp: Long) {
