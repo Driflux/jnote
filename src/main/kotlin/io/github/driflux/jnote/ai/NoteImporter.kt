@@ -6,6 +6,11 @@ import io.github.driflux.jnote.db.toNote
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
+import org.sqlite.JDBC
+import org.sqlite.SQLiteConfig
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 import java.sql.Connection
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -30,6 +35,9 @@ data class ImportPlan(val items: List<PlannedItem>) {
 }
 
 data class ImportResult(val created: Int, val updated: Int, val unchanged: Int)
+
+/** 기본 DB jnote.db는 jnote.pre-import.bak. 다른 이름은 .db만 떼어 서로 다른 DB가 같은 백업을 덮어쓰지 않게 한다. */
+internal fun backupName(dbFileName: String): String = dbFileName.removeSuffix(".db") + ".pre-import.bak"
 
 /**
  * 미리보기 뒤에 다른 IDE가 노트에 본문이나 태그를 더해, 사람이 보지 못한 값이 이번 가져오기로 지워지게 된 경우.
@@ -64,8 +72,11 @@ class NoteImporter(
      * [PlanOutdatedException]으로 끝난다. [checkCanceled]가 던지면 아무것도 쓰지 않은 채 되돌린다.
      */
     fun apply(plan: ImportPlan, checkCanceled: () -> Unit = {}): CompletableFuture<ImportResult> = database.submit { c ->
+        checkCanceled()
         c.createStatement().use { it.execute("BEGIN IMMEDIATE") }
         try {
+            // 쓰기 잠금을 잡은 뒤에 백업해, 백업이 정확히 이 가져오기 직전 상태가 되게 한다. 실패하면 가져오지 않는다
+            backup(c, checkCanceled)
             var created = 0
             var updated = 0
             var unchanged = 0
@@ -93,6 +104,44 @@ class NoteImporter(
         } catch (e: Throwable) {
             runCatching { c.createStatement().use { it.execute("ROLLBACK") } }.exceptionOrNull()?.let(e::addSuppressed)
             throw e
+        }
+    }
+
+    /**
+     * DB 파일 옆에 `<파일 이름에서 .db를 뗀 것>.pre-import.bak`(기본 DB면 jnote.pre-import.bak)을 만들고 이전 것을 덮어쓴다.
+     * 이 연결이 쓰기 잠금을 쥔 채 트랜잭션 안이라 VACUUM INTO를 직접 못 하므로, 읽기 전용 연결을 하나 더 열어 복사한다.
+     * 잠금 때문에 그 사이 아무도 커밋할 수 없어 사본은 이 가져오기 직전 상태와 같다.
+     * 임시 파일은 소유자만 읽을 수 있게 만든 빈 파일을 그대로 쓰고, 다 쓴 뒤 한 번에 바꿔 끼워 실패해도 이전 백업이 남는다.
+     */
+    private fun backup(c: Connection, checkCanceled: () -> Unit) {
+        val file = c.createStatement().use { s ->
+            s.executeQuery("PRAGMA database_list").use { rs ->
+                var found: String? = null
+                while (rs.next()) if (rs.getString("name") == "main") found = rs.getString("file")
+                found
+            }
+        }
+        if (file.isNullOrEmpty()) return
+        val source = Paths.get(file)
+        val backup = source.resolveSibling(backupName(source.fileName.toString()))
+        // 다른 IDE가 동시에 백업해도 서로의 임시 파일을 건드리지 않도록 이름을 따로 받는다
+        val partial = Files.createTempFile(source.toAbsolutePath().parent, "jnote-pre-import-", ".tmp")
+        try {
+            val config = SQLiteConfig().apply {
+                setReadOnly(true)
+                setBusyTimeout(Database.BUSY_TIMEOUT_MS)
+            }
+            val reader = JDBC().connect("jdbc:sqlite:$source", config.toProperties()) ?: error("sqlite-jdbc rejected $source")
+            reader.use { r ->
+                r.prepareStatement("VACUUM INTO ?").use { s ->
+                    s.setString(1, partial.toString())
+                    s.execute()
+                }
+            }
+            checkCanceled()
+            Files.move(partial, backup, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(partial)
         }
     }
 

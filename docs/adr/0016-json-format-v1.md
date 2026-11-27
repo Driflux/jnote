@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #16
-- PR: #67 (format model and codec), (`docs/ai-format.md`), (export action)
+- PR: #67 (format model and codec), #74 (`docs/ai-format.md`), #81 (export action)
 
 ## Context
 AI agents and humans need one way to write notes that JNote can read, and JNote needs a way to hand notes out (intent.md sections 4 and 10). intent.md section 10.2 fixes the contract: a versioned JSON format (`format_version`) is the only official way for an AI to write notes, anchors carry the raw git `repo_url`, and the plugin normalizes it into the project key on import. Import (#17) upserts by `uid`, the inbox (#18) feeds the same importer, and the Claude Code skill (#21) and the clipboard instructions (#19) are built from `docs/ai-format.md`.
