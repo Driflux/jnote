@@ -29,14 +29,14 @@ internal class NoteDetailPanel(
 ) : JBPanel<NoteDetailPanel>(BorderLayout()) {
     private var note: Note? = null
 
-    internal val titleLabel = JBLabel().apply { font = JBFont.label().asBold() }
-    internal val classLabel = JBLabel()
-    internal val locationLabel = JBLabel().apply { foreground = UIUtil.getContextHelpForeground() }
+    internal val titleLabel = JBLabel().plainText().apply { font = JBFont.label().asBold() }
+    internal val classLabel = JBLabel().plainText()
+    internal val locationLabel = JBLabel().plainText().apply { foreground = UIUtil.getContextHelpForeground() }
     internal val approxLabel = JBLabel(JNoteBundle.message("toolWindow.detail.approx"), AllIcons.General.BalloonWarning, JBLabel.LEFT)
     internal val snippetArea = readOnlyArea(wrap = false)
     internal val bodyArea = readOnlyArea(wrap = true)
-    internal val aiSourceLabel = JBLabel()
-    internal val aiUrlLabel = JBLabel()
+    internal val aiSourceLabel = JBLabel().plainText()
+    internal val aiUrlLabel = JBLabel().plainText()
     internal val aiPromptArea = readOnlyArea(wrap = true)
     internal val goToCodeButton = JButton(JNoteBundle.message("toolWindow.detail.goToCode")).apply {
         addActionListener { note?.let(onGoToCode) }
