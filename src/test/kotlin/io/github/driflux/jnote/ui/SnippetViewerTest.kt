@@ -14,7 +14,6 @@ import io.github.driflux.jnote.project.ProjectKeyService
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** 스니펫 편집기는 스니펫이 있는 노트를 고를 때만 만들어지고, 선택이 바뀌거나 패널이 닫히면 풀린다. */
 class SnippetViewerTest : BasePlatformTestCase() {
     private lateinit var dir: Path
     private val dbService get() = DatabaseService.getInstance()
@@ -170,8 +169,6 @@ class SnippetViewerTest : BasePlatformTestCase() {
         assertTrue(editor.isDisposed)
         assertEquals(before, EditorFactory.getInstance().allEditors.size)
     }
-
-    // 시간은 기계마다 달라 단정하지 않고 출력만 하며 JNOTE_PERF=1일 때만 돈다
     fun testCostOfSelectingALargeSnippetIsPrinted() {
         if (System.getenv("JNOTE_PERF") != "1") return
         val code = (1..2000).joinToString("\n") { "    <item id='$it' name='value $it'/>" }.take(65_536)
