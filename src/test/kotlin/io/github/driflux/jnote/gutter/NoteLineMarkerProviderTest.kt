@@ -255,6 +255,20 @@ class NoteLineMarkerProviderTest : BasePlatformTestCase() {
         assertEquals(listOf(7 to 10), barLines())
     }
 
+    fun testAnEditBeforeAnEmptyRequestIsAppliedStillRemovesTheBars() {
+        openFile("GutterBarsEmptyStale.txt", lines(20))
+        val document = myFixture.editor.document
+        gutter.rangeBars.update(document, listOf(RangeBar(9_004, 5, 8)))
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+        assertEquals(1, barHighlighters().size)
+
+        gutter.rangeBars.update(document, emptyList())
+        com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project) { document.insertString(0, "x\ny\n") }
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertTrue(barHighlighters().isEmpty())
+    }
+
     fun testABarRequestForADocumentWithNoEditorLeftIsNotApplied() {
         openFile("GutterBarsClosed.txt", lines(20))
         val document = myFixture.editor.document
