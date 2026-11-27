@@ -39,6 +39,8 @@ The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011,
 - Rely only on the detail being cleared when the selection changes: it is not cleared while a drag is adjusting the selection, so the uid comparison is also needed. Rejected as insufficient.
 - Only a `ToolWindowManagerListener`: it reports the tool window being activated, not focus entering it by a click on the list. Rejected.
 - Only the application activation listener: it misses switching from the editor to the Tool Window inside one window. It is used for the narrower case it covers, connected from the panel (a dynamic subscription) and not declared in plugin.xml, so it adds no startup work. Rejected as the only trigger.
+- Check the flag and the running-load count without a lock: the load can finish between the check and the flag write, so the request is lost until the next focus. Both steps run under one lock (`loadLock`) now. Rejected the unlocked version after the review of PR #94.
+- Show the AI empty message whenever the AI filter is on and the list is empty: with the current-file filter on and a file that has no notes at all, it says there are no AI notes when there are no notes. The AI message is shown only when turning the AI filter off would show notes (`aiFilterEmptiedTheList`); otherwise the ordinary messages apply. Rejected the broader rule.
 - Start a new load for every focus entry: loads pile up and an older result can arrive last. Rejected for the flag plus one rerun.
 - Polling or a file watcher on the DB: violates "no polling" and costs idle CPU. Rejected.
 - A read-only text area with no coloring: it needs no editor but gives no syntax colors. Rejected for the highlighting feature.
