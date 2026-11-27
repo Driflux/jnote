@@ -2,6 +2,7 @@ package io.github.driflux.jnote.ai
 
 import io.github.driflux.jnote.db.Database
 import io.github.driflux.jnote.db.NoteRepository
+import io.github.driflux.jnote.db.SearchRepository
 import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.AnchorUpdate
 import io.github.driflux.jnote.model.NewNote
@@ -10,6 +11,7 @@ import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -41,6 +43,9 @@ class NoteImporterTest {
 
     private val importer get() = NoteImporter(db) { now }
 
+    private fun NoteImporter.importNow(notes: List<FormatNote>, checkCanceled: () -> Unit = {}): CompletableFuture<ImportResult> =
+        plan(notes).thenCompose { apply(it, checkCanceled) }
+
     private val anchor = FormatAnchor("github.com/org/repo", "src/A.kt", 3, 5, "A", "a\nb\nc")
 
     private fun all(): List<Note> = notes.list(null, allProjects = true).get()
@@ -64,7 +69,7 @@ class NoteImporterTest {
 
     @Test fun createsNotesWithAndWithoutUidAndRegistersTags() {
         now = 5_000
-        val result = importer.apply(
+        val result = importer.importNow(
             listOf(
                 FormatNote(uid = "given-uid", title = "code", body = "b", tags = listOf("new", "tags"), anchor = anchor, aiSource = "Claude"),
                 FormatNote(uid = null, title = "free"),
@@ -90,7 +95,7 @@ class NoteImporterTest {
         now = 9_000
         val incoming = FormatNote(uid = existing.uid, title = "new title", tags = listOf("keep"), anchor = anchor)
 
-        assertEquals(ImportResult(0, 1, 0), importer.apply(listOf(incoming)).get())
+        assertEquals(ImportResult(0, 1, 0), importer.importNow(listOf(incoming)).get())
 
         val updated = notes.get(existing.id).get()!!
         assertEquals(
@@ -105,7 +110,7 @@ class NoteImporterTest {
         val existing = existingCode()
         now = 9_000
 
-        assertEquals(ImportResult(0, 0, 1), importer.apply(listOf(sameAs(existing, listOf("drop", "keep")))).get())
+        assertEquals(ImportResult(0, 0, 1), importer.importNow(listOf(sameAs(existing, listOf("drop", "keep")))).get())
 
         assertEquals(existing, notes.get(existing.id).get())
     }
@@ -134,17 +139,17 @@ class NoteImporterTest {
         notes.updateAnchors(listOf(AnchorUpdate(existing.uid, "src/A.kt", 3, 5, NoteStatus.APPROX))).get()
         val same = sameAs(existing, listOf("keep"))
 
-        importer.apply(listOf(same.copy(anchor = anchor.copy(snapshot = "changed")))).get()
+        importer.importNow(listOf(same.copy(anchor = anchor.copy(snapshot = "changed")))).get()
         assertEquals(NoteStatus.APPROX, notes.get(existing.id).get()!!.status)
 
-        importer.apply(listOf(same.copy(anchor = anchor.copy(startLine = 4)))).get()
+        importer.importNow(listOf(same.copy(anchor = anchor.copy(startLine = 4)))).get()
         assertEquals(NoteStatus.OK, notes.get(existing.id).get()!!.status)
     }
 
     @Test fun codeNoteCanBecomeAFreeNote() {
         val existing = existingCode()
 
-        importer.apply(listOf(FormatNote(uid = existing.uid, title = "now free"))).get()
+        importer.importNow(listOf(FormatNote(uid = existing.uid, title = "now free"))).get()
 
         val updated = notes.get(existing.id).get()!!
         assertEquals(NoteKind.FREE, updated.kind)
@@ -154,8 +159,8 @@ class NoteImporterTest {
     @Test fun importNeverDeletesNotesLeftOutOfTheDocument() {
         val existing = existingCode()
 
-        importer.apply(emptyList()).get()
-        importer.apply(listOf(FormatNote(uid = null, title = "other"))).get()
+        importer.importNow(emptyList()).get()
+        importer.importNow(listOf(FormatNote(uid = null, title = "other"))).get()
 
         assertTrue(all().any { it.id == existing.id })
     }
@@ -167,9 +172,9 @@ class NoteImporterTest {
         assertEquals(1, plan.updates.size)
         // 미리보기 뒤에 다른 IDE가 노트를 지우고, 계획에서 새로 만들 노트를 먼저 만들었다
         notes.delete(existing.id).get()
-        importer.apply(listOf(FormatNote(uid = "later", title = "created elsewhere"))).get()
+        importer.importNow(listOf(FormatNote(uid = "later", title = "created elsewhere"))).get()
 
-        assertEquals(ImportResult(1, 0, 1), importer.apply(plan.items.map { it.note }).get())
+        assertEquals(ImportResult(1, 0, 1), importer.apply(plan).get())
 
         assertEquals("edited", notes.getByUid(existing.uid).get()!!.title)
         assertEquals(1, all().count { it.uid == "later" })
@@ -179,7 +184,7 @@ class NoteImporterTest {
         val existing = existingCode()
         var seen = 0
         try {
-            importer.apply(
+            importer.importNow(
                 listOf(FormatNote(uid = null, title = "first"), sameAs(existing, emptyList()).copy(title = "second")),
             ) { if (++seen == 2) throw CancellationException() }.get()
             fail("expected cancellation")
@@ -191,11 +196,96 @@ class NoteImporterTest {
         assertEquals(listOf("drop", "keep"), tagsOf(existing))
     }
 
+    @Test fun cancelDuringTheLastWriteStillRollsBack() {
+        var seen = 0
+        try {
+            // 항목마다 한 번, 커밋 직전에 한 번 확인한다. 두 번째(커밋 직전)에서 취소한다
+            importer.importNow(listOf(FormatNote(uid = null, title = "only", tags = listOf("t")))) { if (++seen == 2) throw CancellationException() }.get()
+            fail("expected cancellation")
+        } catch (e: ExecutionException) {
+            assertTrue(e.cause is CancellationException)
+        }
+
+        assertEquals(emptyList<Note>(), all())
+        assertEquals(emptyList<String>(), tags.list().get().map { it.name })
+    }
+
+    @Test fun sqlErrorRollsBackEarlierItemsAndTheConnectionStaysUsable() {
+        db.submit { c ->
+            c.createStatement().use {
+                it.execute("CREATE TEMP TRIGGER boom BEFORE INSERT ON note WHEN new.title = 'boom' BEGIN SELECT RAISE(ABORT, 'boom'); END")
+            }
+        }.get()
+        try {
+            importer.importNow(listOf(FormatNote(uid = null, title = "first", tags = listOf("t")), FormatNote(uid = null, title = "boom"))).get()
+            fail("expected failure")
+        } catch (_: ExecutionException) {
+        }
+        assertEquals(emptyList<Note>(), all())
+        assertEquals(emptyList<String>(), tags.list().get().map { it.name })
+
+        assertEquals(ImportResult(1, 0, 0), importer.importNow(listOf(FormatNote(uid = null, title = "after"))).get())
+    }
+
+    @Test fun fieldsEmptiedAfterThePreviewStopTheImport() {
+        val existing = notes.create(NewNote.free("plain")).get()
+        val plan = importer.plan(listOf(FormatNote(uid = existing.uid, title = "retitled"))).get()
+        assertEquals(listOf(false to false), plan.updates.map { it.emptiedBody to it.emptiedTags })
+        // 미리보기를 보는 사이 다른 IDE가 본문을 썼다
+        notes.update(existing.copy(body = "written meanwhile")).get()
+
+        try {
+            importer.apply(plan).get()
+            fail("expected PlanOutdatedException")
+        } catch (e: ExecutionException) {
+            assertTrue(e.cause is PlanOutdatedException)
+        }
+        assertEquals("written meanwhile", notes.get(existing.id).get()!!.body)
+
+        val again = importer.plan(plan.items.map { it.note }).get()
+        assertEquals(listOf(true to false), again.updates.map { it.emptiedBody to it.emptiedTags })
+        assertEquals(ImportResult(0, 1, 0), importer.apply(again).get())
+    }
+
+    @Test fun importsAreSearchableAndOldTextIsNot() {
+        val existing = notes.create(NewNote.free("original wording")).get()
+        importer.importNow(listOf(FormatNote(uid = existing.uid, title = "replacement text"), FormatNote(uid = null, title = "brand new entry"))).get()
+        val search = SearchRepository(db)
+
+        assertEquals(listOf(existing.id), search.search("replacement", null, allProjects = true).get())
+        assertEquals(emptyList<Long>(), search.search("original", null, allProjects = true).get())
+        assertEquals(1, search.search("brand new", null, allProjects = true).get().size)
+    }
+
+    @Test fun applyWaitsForAnotherProcessWriteLockAndDecidesAfterIt() {
+        val other = Database(dir.resolve("jnote.db"))
+        try {
+            val plan = importer.plan(listOf(FormatNote(uid = "contested", title = "mine"))).get()
+            assertEquals(1, plan.creates.size)
+            other.submit { c ->
+                c.createStatement().use { it.execute("BEGIN IMMEDIATE") }
+                c.prepareStatement(
+                    "INSERT INTO note (uid, kind, title, body, status, created_at, updated_at) VALUES ('contested', 'FREE', 'theirs', '', 'OK', 1, 1)",
+                ).use { it.executeUpdate() }
+            }.get()
+
+            val applying = importer.apply(plan)
+            Thread.sleep(300)
+            assertFalse("apply must wait for the other write lock", applying.isDone)
+            other.submit { c -> c.createStatement().use { it.execute("COMMIT") } }.get()
+
+            assertEquals(ImportResult(0, 1, 0), applying.get())
+            assertEquals(listOf("mine"), all().map { it.title })
+        } finally {
+            other.close()
+        }
+    }
+
     @Test fun twoProcessesImportingTheSameNewUidsDoNotCollide() {
         val other = Database(dir.resolve("jnote.db"))
         try {
             val batch = (1..20).map { FormatNote(uid = "uid-$it", title = "note $it", tags = listOf("t$it")) }
-            val runs = (1..5).flatMap { listOf(NoteImporter(db).apply(batch), NoteImporter(other).apply(batch)) }
+            val runs = (1..5).flatMap { listOf(NoteImporter(db).importNow(batch), NoteImporter(other).importNow(batch)) }
             CompletableFuture.allOf(*runs.toTypedArray()).get()
 
             assertEquals(20, all().size)
