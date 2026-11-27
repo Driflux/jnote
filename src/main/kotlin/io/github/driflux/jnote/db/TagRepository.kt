@@ -146,17 +146,12 @@ class TagRepository(private val database: Database) {
         }
 }
 
-/** 다듬고 빈 이름과 중복을 뺀 태그 이름. 쉼표가 든 이름이 있으면 IllegalArgumentException. */
 internal fun cleanTagNames(names: List<String>): List<String> {
     val cleaned = names.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
     require(cleaned.none { ',' in it }) { "tag name must not contain a comma" }
     return cleaned
 }
 
-/**
- * 노트에 붙은 태그를 [cleaned]와 정확히 같게 맞추고 이름순으로 돌려준다. 사전에 없는 이름은 만든다.
- * 트랜잭션은 부르는 쪽이 연다.
- */
 internal fun setNoteTags(c: java.sql.Connection, noteId: Long, cleaned: List<String>): List<Tag> {
     val tags = cleaned.map { name ->
         c.prepareStatement("INSERT OR IGNORE INTO tag (name) VALUES (?)").use { s ->

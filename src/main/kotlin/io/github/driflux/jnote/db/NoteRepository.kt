@@ -16,10 +16,6 @@ class NoteRepository(
     private val database: Database,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    /**
-     * 노트를 만들고 [tagNames]를 붙인다. 한 트랜잭션이라 태그 단계가 실패하면 노트도 남지 않는다.
-     * 쉼표가 든 태그 이름이면 아무것도 쓰지 않고 IllegalArgumentException으로 끝난다.
-     */
     fun create(draft: NewNote, tagNames: List<String> = emptyList()): CompletableFuture<Note> = database.submit { c ->
         val names = cleanTagNames(tagNames)
         val now = clock()
@@ -28,7 +24,6 @@ class NoteRepository(
         try {
             val id = insert(c, draft, uid, now)
             if (names.isNotEmpty()) setNoteTags(c, id, names)
-            // 커밋 뒤에 읽으면 다른 프로세스가 그 사이 지우거나 id를 다시 쓸 수 있어 쓰기 잠금 안에서 읽는다
             val note = requireNotNull(findById(c, id))
             c.commit()
             note
