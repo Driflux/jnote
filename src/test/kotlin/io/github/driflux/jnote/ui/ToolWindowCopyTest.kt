@@ -209,7 +209,7 @@ class ToolWindowCopyTest : BasePlatformTestCase() {
 
         copyWith(panel, "toolWindow.copy.instructions")
 
-        assertEquals(io.github.driflux.jnote.ai.AiInstructions.text(), clipboard())
+        assertEquals(ApplicationManager.getApplication().executeOnPooledThread<String> { io.github.driflux.jnote.ai.AiInstructions.text() }.get(), clipboard())
     }
 
     fun testReloadKeepsEverySelectedNoteSelected() {
