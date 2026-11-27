@@ -119,6 +119,14 @@ class ClaudePluginTest {
     }
 
     @Test
+    fun theOrganizeFlowWarnsAboutStaleFilesAndAsksToVerifyTheMergeBeforeDeleting() {
+        val organize = skill.substringAfter("## Organize").substringBefore("### Example")
+
+        assertTrue(organize.contains("discard the pending file"))
+        assertTrue(organize.contains("before deleting"))
+    }
+
+    @Test
     fun everyJsonExampleInTheSkillDecodesWithoutSkippedItems() {
         val examples = Regex("```json\\n(.*?)```", RegexOption.DOT_MATCHES_ALL).findAll(skill).map { it.groupValues[1] }.toList()
         assertTrue("the skill shows at least one example", examples.isNotEmpty())
