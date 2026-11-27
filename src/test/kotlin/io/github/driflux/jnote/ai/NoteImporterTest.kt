@@ -14,10 +14,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
+import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
@@ -290,7 +293,46 @@ class NoteImporterTest {
 
         importer.importNow(listOf(FormatNote(uid = null, title = "second import"))).get()
         assertEquals(2, backupUids(backup).size)
-        assertEquals(listOf("jnote.db", "jnote.db-shm", "jnote.db-wal", "jnote.pre-import.bak"), Files.list(dir).use { s -> s.map { it.fileName.toString() }.sorted().toList() })
+        assertEquals(
+            "no temp file is left",
+            listOf("jnote.db", "jnote.db-shm", "jnote.db-wal", "jnote.pre-import.bak"),
+            Files.list(dir).use { s -> s.map { it.fileName.toString() }.sorted().toList() },
+        )
+    }
+
+    @Test fun backupNamesDifferPerDatabaseFile() {
+        assertEquals("jnote.pre-import.bak", backupName("jnote.db"))
+        assertEquals("work.sqlite.pre-import.bak", backupName("work.sqlite"))
+        assertEquals("work.pre-import.bak", backupName("work.db"))
+    }
+
+    @Test fun backupIsReadableOnlyByTheOwner() {
+        assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"))
+        importer.importNow(listOf(FormatNote(uid = null, title = "x"))).get()
+
+        assertEquals(PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(dir.resolve("jnote.pre-import.bak")))
+    }
+
+    @Test fun backupIsTheStateRightBeforeThisImportEvenWhenAnotherProcessWroteMeanwhile() {
+        val other = Database(dir.resolve("jnote.db"))
+        try {
+            val plan = importer.plan(listOf(FormatNote(uid = null, title = "mine"))).get()
+            other.submit { c ->
+                c.createStatement().use { it.execute("BEGIN IMMEDIATE") }
+                c.prepareStatement(
+                    "INSERT INTO note (uid, kind, title, body, status, created_at, updated_at) VALUES ('theirs', 'FREE', 'theirs', '', 'OK', 1, 1)",
+                ).use { it.executeUpdate() }
+            }.get()
+
+            val applying = importer.apply(plan)
+            Thread.sleep(300)
+            other.submit { c -> c.createStatement().use { it.execute("COMMIT") } }.get()
+            applying.get()
+
+            assertEquals(listOf("theirs"), backupUids(dir.resolve("jnote.pre-import.bak")))
+        } finally {
+            other.close()
+        }
     }
 
     @Test fun failedBackupImportsNothing() {
