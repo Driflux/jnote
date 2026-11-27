@@ -1,0 +1,14 @@
+{
+  "name": "jnote",
+  "owner": {
+    "name": "Driflux"
+  },
+  "description": "Claude Code plugin for JNote, the IntelliJ code-note plugin.",
+  "plugins": [
+    {
+      "name": "jnote",
+      "source": "./claude-plugin",
+      "description": "Capture, recall, and organize JNote notes. Writes only into ~/.jnote/inbox/ and reads only the v_notes_export view."
+    }
+  ]
+}

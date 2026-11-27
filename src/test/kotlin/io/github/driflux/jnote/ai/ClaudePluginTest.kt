@@ -31,6 +31,19 @@ class ClaudePluginTest {
     }
 
     @Test
+    fun theMarketplaceListsThePluginFolderUnderItsManifestName() {
+        val marketplace = JsonParser.parseString(Files.readString(Path.of(".claude-plugin/marketplace.json"))).asJsonObject
+        val entry = marketplace.getAsJsonArray("plugins").single().asJsonObject
+        val source = entry.get("source").asString
+
+        assertEquals("jnote", marketplace.get("name").asString)
+        assertTrue(marketplace.getAsJsonObject("owner").get("name").asString.isNotBlank())
+        assertEquals("./claude-plugin", source)
+        val manifest = JsonParser.parseString(Files.readString(Path.of(source, ".claude-plugin/plugin.json"))).asJsonObject
+        assertEquals(manifest.get("name").asString, entry.get("name").asString)
+    }
+
+    @Test
     fun theManifestNamesThePluginJnote() {
         val manifest = JsonParser.parseString(Files.readString(root.resolve(".claude-plugin/plugin.json"))).asJsonObject
 
