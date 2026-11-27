@@ -13,7 +13,7 @@ internal class FocusEntry(private val panel: Component) {
     fun entered(oldOwner: Component?, newOwner: Component?): Boolean {
         val wasInside = if (oldOwner == null) lastInside else inside(panel, oldOwner)
         val isInside = inside(panel, newOwner)
-        if (newOwner != null) lastInside = isInside
+        lastInside = if (newOwner == null) wasInside else isInside
         return isInside && !wasInside
     }
 

@@ -33,6 +33,19 @@ class FocusEntryTest {
     }
 
     @Test
+    fun aFirstReportFromInsideToNothingIsRemembered() {
+        entry.entered(inner, null)
+        assertFalse(entry.entered(null, other))
+    }
+
+    @Test
+    fun aReportFromOutsideToNothingIsRemembered() {
+        entry.entered(outside, inner)
+        entry.entered(outside, null)
+        assertTrue(entry.entered(null, inner))
+    }
+
+    @Test
     fun comingInFromOutsideThroughNothingIsAnEntry() {
         entry.entered(inner, outside)
         entry.entered(outside, null)
