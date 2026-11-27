@@ -207,6 +207,8 @@ class JNotePanel internal constructor(
         add(tagBar, BorderLayout.SOUTH)
     }
 
+    private val focusEntry = FocusEntry(this)
+
     @Volatile
     private var disposed = false
     internal val focusSearchAction = DumbAwareAction.create { focusSearch() }
@@ -277,7 +279,7 @@ class JNotePanel internal constructor(
     }
 
     internal fun onFocusOwnerChanged(oldOwner: Component?, newOwner: Component?) {
-        if (!disposed && FocusEntry.entered(this, oldOwner, newOwner)) reloadOnFocus()
+        if (!disposed && focusEntry.entered(oldOwner, newOwner)) reloadOnFocus()
     }
 
     /**
