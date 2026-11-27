@@ -220,8 +220,8 @@ class JNotePanel internal constructor(
         Disposer.register(this, spinnerIcon)
         CopyPasteManager.getInstance().addContentChangedListener({ _, _ -> clipboardChanges.incrementAndGet() }, this)
         focusSearchAction.registerCustomShortcutSet(CommonShortcuts.getFind(), this)
-        bindListKey(KeyEvent.VK_ENTER, "jnote.goToCode") { detail.goToCodeButton }
-        bindListKey(KeyEvent.VK_DELETE, "jnote.delete") { detail.deleteButton }
+        bindListKey(KeyEvent.VK_ENTER, "jnote.goToCode") { clickShown(detail.goToCodeButton) }
+        bindListKey(KeyEvent.VK_DELETE, "jnote.delete") { deleteSelected() }
         list.addListSelectionListener { if (!it.valueIsAdjusting && !renderingSelection) showDetailOf(list.selectedValue?.summary) }
         list.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) = showMenu(e)
@@ -313,15 +313,26 @@ class JNotePanel internal constructor(
         IdeFocusManager.getInstance(project).requestFocus(searchField.textEditor, true)
         searchField.textEditor.selectAll()
     }
-    private fun bindListKey(keyCode: Int, name: String, button: () -> JButton) {
+    private fun bindListKey(keyCode: Int, name: String, action: () -> Unit) {
         list.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(keyCode, 0), name)
         list.actionMap.put(name, object : AbstractAction() {
-            override fun actionPerformed(e: ActionEvent) {
-                val target = button()
-                val selectedUid = list.selectedValue?.summary?.uid
-                if (selectedUid != null && selectedUid == shownDetailUid && detail.isVisible && target.isVisible) target.doClick(0)
-            }
+            override fun actionPerformed(e: ActionEvent) = action()
         })
+    }
+
+    // 상세가 지금 선택한 노트를 보일 때만 누른다. 새 선택을 읽는 중이면 예전 노트에 작동하지 않게 한다.
+    private fun clickShown(button: JButton) {
+        val selectedUid = list.selectedValue?.summary?.uid
+        if (selectedUid != null && selectedUid == shownDetailUid && detail.isVisible && button.isVisible) button.doClick(0)
+    }
+
+    private fun deleteSelected() {
+        val selected = list.selectedValuesList
+        if (selected.size > 1) {
+            if (!list.valueIsAdjusting) deleteNotes(selected.map { it.summary.id })
+        } else {
+            clickShown(detail.deleteButton)
+        }
     }
     fun reload() {
         val ticket = generation.incrementAndGet()
@@ -343,20 +354,20 @@ class JNotePanel internal constructor(
         }
     }
 
-    internal fun delete(note: Note): CompletableFuture<*> =
-        deleteOn(NoteDeletion.onCurrentDatabase(), note)
+    internal fun delete(note: Note): CompletableFuture<*> = deleteNotes(listOf(note.id))
 
-    private fun deleteOn(deletion: NoteDeletion, note: Note): CompletableFuture<*> =
-        deletion.delete(note.id).whenComplete { deleted, error ->
+    internal fun deleteNotes(ids: List<Long>): CompletableFuture<*> =
+        deleteOn(NoteDeletion.onCurrentDatabase(), ids)
+
+    private fun deleteOn(deletion: NoteDeletion, ids: List<Long>): CompletableFuture<*> =
+        deletion.delete(ids).whenComplete { deleted, error ->
             onEdt {
-                when {
-                    error != null -> ToolWindowNotifier.deleteFailed(project, error.cause ?: error)
-                    deleted != null -> {
-                        publishChanged()
-                        ToolWindowNotifier.deleted(project) { undo(deletion, deleted) }
-                    }
-                    else -> publishChanged()
+                if (error != null) {
+                    ToolWindowNotifier.deleteFailed(project, error.cause ?: error)
+                    return@onEdt
                 }
+                publishChanged()
+                if (deleted.isNotEmpty()) ToolWindowNotifier.deleted(project, deleted.size) { undo(deletion, deleted) }
             }
         }
 
@@ -390,7 +401,7 @@ class JNotePanel internal constructor(
             if (saved?.locationMoved == true) onEdt { ToolWindowNotifier.locationMoved(project, textSaved = false) }
         }
 
-    private fun undo(deletion: NoteDeletion, deleted: DeletedNote) {
+    private fun undo(deletion: NoteDeletion, deleted: List<DeletedNote>) {
         deletion.undo(deleted).whenComplete { _, error ->
             onEdt { if (error == null) publishChanged() else ToolWindowNotifier.restoreFailed(project, (error as? CompletionException)?.cause ?: error) }
         }

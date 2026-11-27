@@ -171,35 +171,40 @@ class NoteRepository(
         }
     }
 
-    fun restore(note: Note, tagIds: List<Long>): CompletableFuture<Note> = database.submit { c ->
+    fun restore(note: Note, tagIds: List<Long>): CompletableFuture<Note> = restoreAll(listOf(note to tagIds)).thenApply { it.single() }
+
+    /** 지운 노트들을 한 트랜잭션으로 되살린다. 하나라도 실패하면 아무것도 되살리지 않는다. */
+    fun restoreAll(deleted: List<Pair<Note, List<Long>>>): CompletableFuture<List<Note>> = database.submit { c ->
         c.autoCommit = false
         try {
-            c.prepareStatement(RESTORE).use { s ->
-                var i = 1
-                s.setLong(i++, note.id)
-                s.setString(i++, note.uid)
-                s.setString(i++, note.kind.name)
-                s.setString(i++, note.project)
-                s.setString(i++, note.relPath)
-                s.setString(i++, note.className)
-                s.setObject(i++, note.startLine)
-                s.setObject(i++, note.endLine)
-                s.setString(i++, note.snapshot)
-                s.setString(i++, note.status.name)
-                s.setString(i++, note.title)
-                s.setString(i++, note.body)
-                s.setString(i++, note.aiSource)
-                s.setString(i++, note.sourceUrl)
-                s.setString(i++, note.prompt)
-                s.setLong(i++, note.createdAt)
-                s.setLong(i, note.updatedAt)
-                s.executeUpdate()
-            }
-            c.prepareStatement("INSERT OR IGNORE INTO note_tag (note_id, tag_id) SELECT ?, id FROM tag WHERE id = ?").use { s ->
-                for (tagId in tagIds) {
-                    s.setLong(1, note.id)
-                    s.setLong(2, tagId)
+            for ((note, tagIds) in deleted) {
+                c.prepareStatement(RESTORE).use { s ->
+                    var i = 1
+                    s.setLong(i++, note.id)
+                    s.setString(i++, note.uid)
+                    s.setString(i++, note.kind.name)
+                    s.setString(i++, note.project)
+                    s.setString(i++, note.relPath)
+                    s.setString(i++, note.className)
+                    s.setObject(i++, note.startLine)
+                    s.setObject(i++, note.endLine)
+                    s.setString(i++, note.snapshot)
+                    s.setString(i++, note.status.name)
+                    s.setString(i++, note.title)
+                    s.setString(i++, note.body)
+                    s.setString(i++, note.aiSource)
+                    s.setString(i++, note.sourceUrl)
+                    s.setString(i++, note.prompt)
+                    s.setLong(i++, note.createdAt)
+                    s.setLong(i, note.updatedAt)
                     s.executeUpdate()
+                }
+                c.prepareStatement("INSERT OR IGNORE INTO note_tag (note_id, tag_id) SELECT ?, id FROM tag WHERE id = ?").use { s ->
+                    for (tagId in tagIds) {
+                        s.setLong(1, note.id)
+                        s.setLong(2, tagId)
+                        s.executeUpdate()
+                    }
                 }
             }
             c.commit()
@@ -209,7 +214,7 @@ class NoteRepository(
         } finally {
             c.autoCommit = true
         }
-        requireNotNull(findById(c, note.id))
+        deleted.map { (note, _) -> requireNotNull(findById(c, note.id)) }
     }
 
     fun delete(id: Long): CompletableFuture<Boolean> = database.submit { c ->
@@ -219,22 +224,21 @@ class NoteRepository(
         }
     }
 
-    internal fun deleteReturningTagIds(id: Long): CompletableFuture<Pair<Note, List<Long>>?> = database.submit { c ->
+    internal fun deleteReturningTagIds(ids: List<Long>): CompletableFuture<List<Pair<Note, List<Long>>>> = database.submit { c ->
         c.createStatement().use { it.execute("BEGIN IMMEDIATE") }
         try {
-            val note = findById(c, id)
-            val result = if (note == null) {
-                null
-            } else {
-                val tagIds = c.prepareStatement("SELECT tag_id FROM note_tag WHERE note_id = ? ORDER BY tag_id").use { s ->
-                    s.setLong(1, id)
-                    s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getLong(1) else null }.toList() }
+            val result = ids.mapNotNull { id ->
+                findById(c, id)?.let { note ->
+                    val tagIds = c.prepareStatement("SELECT tag_id FROM note_tag WHERE note_id = ? ORDER BY tag_id").use { s ->
+                        s.setLong(1, id)
+                        s.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getLong(1) else null }.toList() }
+                    }
+                    c.prepareStatement("DELETE FROM note WHERE id = ?").use { s ->
+                        s.setLong(1, id)
+                        s.executeUpdate()
+                    }
+                    note to tagIds
                 }
-                c.prepareStatement("DELETE FROM note WHERE id = ?").use { s ->
-                    s.setLong(1, id)
-                    s.executeUpdate()
-                }
-                note to tagIds
             }
             c.createStatement().use { it.execute("COMMIT") }
             result
