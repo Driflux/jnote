@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #19
-- PR: #93 (copy as Markdown / JSON), copy format instructions (later PR)
+- PR: #93 (copy as Markdown / JSON), #95 (copy format instructions)
 
 ## Context
 intent.md sections 7 and 10.4 ask for two clipboard features. People paste notes into an AI chat, so selected notes are copied as Markdown (title, file location, snippet, note text) or as JSON format v1. Web AIs such as ChatGPT and Gemini cannot use the Claude Code skill, so "Copy format instructions for AI" copies a prompt that teaches them JSON format v1. The issue requires one source for that text: `docs/ai-format.md` (ADR 0016), bundled as a resource at build time.
@@ -17,7 +17,7 @@ Constraints from intent.md section 2: no startup work, no DB or file I/O on the 
 - **Threads.** Reading runs on the DB executor, turning the notes into text runs on the application pool, and the EDT only writes the finished string to the clipboard once through `CopyPasteManager`. Each copy takes a ticket from one counter that all panels share, because the clipboard is one per IDE while every project window has its own panel; a copy that finishes after a newer one started is dropped, so an older, slower copy never overwrites a newer one. A failed read shows a notification instead of touching the clipboard.
 - **Markdown shape.** Per note: `## title`, the location as inline code (`src/A.kt:L3-5`, the same form as the detail panel), the snippet in a fenced block whose info string is the file extension, then the note text. FREE notes have no location or snippet; empty parts are left out. The fence is one backtick longer than the longest backtick run inside the snippet, so a snippet that contains a fence (a README, a Markdown file) cannot close the block early. The location inline code is built the same way, with padding spaces only when the path starts or ends with a backtick, so a path that contains backticks cannot end the span early. Tags and AI provenance stay out: the issue names four parts, and the JSON copy carries everything.
 - **JSON shape.** The same document an export writes (`NoteFormatCodec.encode`), including `uid`, so a web AI can send back updates that import as upserts.
-- **Instruction text (second PR).** `docs/ai-format.md` is copied into the plugin resources by `processResources`, so the copied prompt is always the spec of the build. The copied text is the spec's own "For a web AI" prompt example followed by the whole spec; nothing is written in Kotlin or the message bundle, so the spec stays the only source.
+- **Instruction text (#95).** `docs/ai-format.md` is the only copy of the spec; `processResources` in `build.gradle.kts` places it in the plugin resources as `ai/ai-format.md`, so the copied prompt is always the spec of the build. `AiInstructions.text()` returns the spec's own "For a web AI" prompt example (the quote markers removed, a multi-line quote joined) followed by the whole spec; if that section is missing, the spec alone. Nothing is written in Kotlin or the message bundle, so the spec stays the only source. The menu item sits below a separator, is always enabled, and needs no selection. The resource is read on the application pool because it is file I/O; the item shares `copyToClipboard` with the note copies, so it takes a ticket from the same counter and an older, slower copy cannot overwrite a newer one. A text of `null` (all selected notes were deleted meanwhile) leaves the clipboard untouched.
 
 ## Alternatives considered
 - Copy only the one selected note and keep single selection: smallest change, but copying several notes for one question would take several round trips. Rejected.
@@ -36,4 +36,5 @@ Constraints from intent.md section 2: no startup work, no DB or file I/O on the 
   - Two review findings are left as follow-up issues: a note body with an unclosed code fence can swallow the next note in a multi-note Markdown copy, and a slow copy can overwrite text the user copied elsewhere in the meantime (the ticket only orders JNote copies).
   - The source files carry no comments by project decision, so the reasons above live here.
 - Follow-up work
-  - Second PR of #19: copy format instructions. #21 skill reuses `docs/ai-format.md` the same way.
+  - #21 skill reuses `docs/ai-format.md` the same way.
+  - Two low review findings of #95 were held: fence-aware heading parsing (the real-spec test already fails if the prompt is lost) and a dedicated error for a missing bundled resource (that is a broken build, not a runtime state).

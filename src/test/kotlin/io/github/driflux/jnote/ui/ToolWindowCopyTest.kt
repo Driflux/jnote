@@ -202,6 +202,16 @@ class ToolWindowCopyTest : BasePlatformTestCase() {
         assertEquals("newer copy", clipboard())
     }
 
+    fun testCopyFormatInstructionsWorksWithoutASelection() {
+        val panel = loadedPanel(0)
+        val item = menuItem(panel, "toolWindow.copy.instructions")
+        assertTrue(item.isEnabled)
+
+        copyWith(panel, "toolWindow.copy.instructions")
+
+        assertEquals(ApplicationManager.getApplication().executeOnPooledThread<String> { io.github.driflux.jnote.ai.AiInstructions.text() }.get(), clipboard())
+    }
+
     fun testReloadKeepsEverySelectedNoteSelected() {
         val panel = threeNotes()
         panel.list.selectedIndices = intArrayOf(0, 2)

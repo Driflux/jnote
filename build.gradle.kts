@@ -26,6 +26,10 @@ kotlin {
     jvmToolchain(21)
 }
 
+tasks.processResources {
+    from("docs/ai-format.md") { into("ai") }
+}
+
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
