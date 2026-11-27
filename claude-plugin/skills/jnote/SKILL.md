@@ -12,7 +12,7 @@ The format is JNote JSON format v1. Its full rules are in `${CLAUDE_PLUGIN_ROOT}
 ## Rules
 
 - Write only new files in `~/.jnote/inbox/`. Never create, change, or delete `~/.jnote/jnote.db` or any other file under `~/.jnote/`.
-- Never overwrite an inbox file. Pick a name that does not exist yet.
+- Never overwrite an inbox file. Create it with the shell's no-clobber mode (see Capture step 4), never with a tool that replaces existing files.
 - Output strict JSON: double quotes, no comments, no trailing commas.
 
 ## Capture
@@ -21,13 +21,20 @@ Save something from the conversation as one or more notes.
 
 1. Choose the kind. A note about specific lines of a file is `CODE`. Anything else (a query, a command, a decision, a memo) is `FREE`.
 2. For a `CODE` note, collect the anchor from the files, not from memory:
-   - `repo_url`: run `git -C <file's folder> remote get-url origin`. If there is no origin, or it is a local path, leave `repo_url` out and set `project_path` to the absolute path of the folder the user opens in the IDE (usually `git rev-parse --show-toplevel`; ask if unsure).
-   - `path`: the file path relative to the folder opened in the IDE, with `/` separators. This is usually the repository root.
+   - First fix the project root: the folder the user opens in the IDE. It is usually the top of the repository you are working in (`git rev-parse --show-toplevel` from the working directory). For a file inside a nested repository or submodule, the project root is still the outer folder the IDE opens, not the nested repository; ask if unsure.
+   - `repo_url`: run `git -C <project root> remote get-url origin`. If there is no origin, or it is a local path, leave `repo_url` out and set `project_path` to the absolute path of the project root.
+   - `path`: the file path relative to the project root, with `/` separators.
    - `start_line`, `end_line`: 1-based, inclusive, plain integers.
    - `snapshot`: the exact text of those lines, read from the file (for example `sed -n '<start>,<end>p' <file>`). Copy it verbatim, keeping indentation.
    - `class_name`: the enclosing class, or the file name without extension when there is none.
 3. Write the note: a short `title`; `body` in plain text (no Markdown rendering in JNote); `tags` as short names without commas; `ai_source` set to `"Claude"`; `prompt` set to the user's request that led to the note. Leave `uid` out, because these are new notes.
-4. Save one document per request as `~/.jnote/inbox/<YYYY-MM-DD>-<short-topic>.json` (create the folder if needed). If `python3` is available, check the file with `python3 -m json.tool <file> > /dev/null`.
+4. Save one document per request as `~/.jnote/inbox/<YYYY-MM-DD>-<short-topic>.json` (create the folder with `mkdir -p`). Write it with no-clobber so that a file another session created at the same moment is never replaced:
+   ```sh
+   (set -C; cat > ~/.jnote/inbox/2026-11-27-retry-backoff.json) <<'EOF'
+   { ...the document... }
+   EOF
+   ```
+   If the command fails because the file exists, add `-2`, `-3`, ... before `.json` and try again. If `python3` is available, check the file with `python3 -m json.tool <file> > /dev/null`.
 5. Tell the user the file name and that JNote shows it for review when its Tool Window gains focus. Nothing is saved until they click Apply there.
 
 ### Example

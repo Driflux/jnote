@@ -10,9 +10,10 @@ import java.nio.file.Path
 /** claude-plugin/은 스킬을 배포하는 Claude Code 플러그인이다. 명세 사본과 스킬의 예시가 실제 명세와 코덱에 맞는지 확인한다. */
 class ClaudePluginTest {
     private val root = Path.of("claude-plugin")
-    private val skill = Files.readString(root.resolve("skills/jnote/SKILL.md"))
-
     private fun normalized(text: String) = text.replace("\r\n", "\n")
+
+    // CRLF로 체크아웃해도 같은 결과가 나오도록 줄바꿈을 맞춘 뒤 읽는다
+    private val skill = normalized(Files.readString(root.resolve("skills/jnote/SKILL.md")))
 
     @Test
     fun theSpecCopyIsTheMarkerLineFollowedByDocsAiFormat() {
