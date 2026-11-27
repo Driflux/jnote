@@ -145,7 +145,7 @@ class JNoteConfigurableTest : BasePlatformTestCase() {
         release.countDown()
     }
 
-    fun testDisposingBeforeTheStoredPathArrivesDropsTheLoad() {
+    fun testDisposingBeforeTheSettingArrivesDropsTheLoad() {
         val release = CountDownLatch(1)
         val read = CountDownLatch(1)
         val configurable = JNoteConfigurable()
@@ -158,9 +158,33 @@ class JNoteConfigurableTest : BasePlatformTestCase() {
 
         release.countDown()
         assertTrue(read.await(10, TimeUnit.SECONDS))
+        repeat(20) {
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            Thread.sleep(10)
+        }
+
+        assertFalse(field.isEnabled)
+        assertEquals("", field.text)
+    }
+
+    fun testARecreatedPanelWaitsForItsOwnLoad() {
+        DbPathSettings.getInstance().store(dir.resolve("stored.db"))
+        val configurable = JNoteConfigurable()
+        awaitLoaded(fieldOf(configurable))
+        configurable.disposeUIResources()
+        val release = CountDownLatch(1)
+        configurable.loadSettings = { release.await(10, TimeUnit.SECONDS) }
+
+        val field = fieldOf(configurable)
+        configurable.reset()
         PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
 
         assertFalse(field.isEnabled)
         assertEquals("", field.text)
+        assertFalse(configurable.isModified)
+        release.countDown()
+        awaitLoaded(field)
+        assertEquals(dir.resolve("stored.db").toString(), field.text)
+        configurable.disposeUIResources()
     }
 }
