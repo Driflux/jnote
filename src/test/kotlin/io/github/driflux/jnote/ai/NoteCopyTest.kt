@@ -7,6 +7,7 @@ import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.NoteStatus
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
@@ -94,11 +95,15 @@ class NoteCopyTest {
             |}
             |```
             |
+            |```text
             |Rate limits.
+            |```
             |
             |## Stuck orders
             |
+            |```text
             |SELECT 1;
+            |```
         """.trimMargin()
         assertEquals(expected, NoteCopy.markdown(listOf(code, free)))
     }
@@ -124,5 +129,48 @@ class NoteCopyTest {
         val block = NoteCopy.markdown(listOf(note)).substringAfter("`README.md:L1-3`\n\n")
 
         assertEquals("````md\n```kotlin\nx\n```\n````", block)
+    }
+
+    @Test
+    fun aBodyWithAnUnclosedFenceDoesNotSwallowTheNextNote() {
+        val broken = FormatNote(uid = "u1", title = "Broken", body = "```kotlin\nval x = 1")
+        val next = FormatNote(uid = "u2", title = "Next", body = "after")
+
+        val expected = """
+            |## Broken
+            |
+            |````text
+            |```kotlin
+            |val x = 1
+            |````
+            |
+            |## Next
+            |
+            |```text
+            |after
+            |```
+        """.trimMargin()
+        assertEquals(expected, NoteCopy.markdown(listOf(broken, next)))
+    }
+
+    @Test
+    fun noBodyCanCloseItsFenceEarly() {
+        val bodies = listOf(
+            "```",
+            "`````\n```",
+            "   ````\ntext ``` inline",
+            "~~~\nnot closed",
+            "~~~~~\n```\n~~~",
+            "<!-- unclosed comment",
+            "<pre>\nunclosed",
+            "trailing newlines\n\n",
+        )
+        for (body in bodies) {
+            val markdown = NoteCopy.markdown(listOf(FormatNote(uid = "u1", title = "a", body = body), FormatNote(uid = "u2", title = "b")))
+
+            val fence = markdown.removePrefix("## a\n\n").takeWhile { it == '`' }
+            assertTrue("fence for ${body}", fence.length >= 3 && fence !in body)
+            assertEquals("${fence}text\n${body.trimEnd('\n')}\n$fence\n\n## b", markdown.removePrefix("## a\n\n"))
+        }
     }
 }

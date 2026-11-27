@@ -119,7 +119,7 @@ class ToolWindowCopyTest : BasePlatformTestCase() {
 
         copyWith(panel, "toolWindow.copy.markdown")
 
-        assertEquals("## second\n\nSELECT 1;\n\n## first\n\n`src/A.kt:L1-2`\n\n```kt\na\nb\n```", clipboard())
+        assertEquals("## second\n\n```text\nSELECT 1;\n```\n\n## first\n\n`src/A.kt:L1-2`\n\n```kt\na\nb\n```", clipboard())
     }
 
     fun testCopyReadsTheLatestTextFromTheDatabase() {
