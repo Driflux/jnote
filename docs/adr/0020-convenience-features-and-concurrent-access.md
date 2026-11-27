@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #20
-- PRs: #79 copy snippet and keyboard control, then current file toggle, syntax highlighting, refresh on focus, AI notes filter (stacked)
+- PRs: #79 copy snippet and keyboard control, #84 current file toggle, then syntax highlighting, refresh on focus, AI notes filter (stacked)
 
 ## Context
 The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011, 0062). The 1.0 usability list in intent.md section 7 still lacks copying a snippet, keyboard control, a current-file view, highlighted snippets, a refresh for multi-window use, and an AI filter. Every one of them must keep the top principle: no startup work, no DB or file I/O on the EDT, no new dependency.
@@ -15,7 +15,12 @@ The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011,
   - Enter on the list presses the detail's "Go to Code" button. Delete presses its "Delete" button.
   - Pressing the detail's own buttons keeps one code path (navigation with recovery, delete with undo). The detail is cleared the moment the selection changes, so a key pressed while the next note loads does nothing instead of acting on the previous note. Hidden buttons are skipped, so Enter on a free note does nothing.
   - While a mouse drag is still adjusting the selection, the list ignores the change and the previous detail stays visible. A key pressed then must not act on it, so a key acts only when the selected row's uid equals the uid of the detail on screen (`shownDetailUid`). Found in the review of PR #79 and covered by a test that sets `valueIsAdjusting`.
-- **Current file only.** A check box that filters the already-loaded rows in memory: CODE notes of the current project whose `rel_path` equals the file selected in the editor. It needs no DB read. The panel listens to editor selection changes only while it exists. With nothing open, no note matches and the empty state says so.
+- **Current file only.** A check box that filters the already-loaded rows in memory: CODE notes of the current project whose `rel_path` equals the file selected in the editor. It needs no DB read. The panel listens to editor selection changes only while it exists (PR #84).
+  - The listener acts only while the toggle is on, and does nothing when the relative path did not change, because re-rendering would re-read the detail. The subscription is made before the first load so a change that arrives during that load is not missed.
+  - The relative path is a string computation, so it runs on the EDT without I/O. A reload recomputes it while the toggle is on, so a renamed open file keeps matching. A reload that carries no search result keeps the latest search match instead of erasing it.
+  - A note matches only when it is a CODE note, belongs to this project (`projectName` is only filled for other projects' notes), and its `rel_path` equals the open file. With nothing open or a file outside the project, no note matches.
+  - The "No file is open" empty state wins over the tag and search messages, because it is the reason the list is empty regardless of other filters. The tag message in turn comes before the search message, since a chip may be what emptied the list.
+  - The header controls use `WrapLayout` so three controls do not clip in a narrow tool window.
 - **Syntax highlighting.** The snippet is shown in a read-only editor that is created when a note with a snippet is selected, gets the highlighter of the note's file type (from the extension), and is released when the selection changes or the panel is disposed. No editor exists while nothing is selected, so the list costs nothing. The file type is looked up by file name only, never by reading the file.
 - **Refresh on focus.** One reload when keyboard focus moves into the panel from outside it, to see changes other IDE windows wrote. A focus listener lives only as long as the panel and compares the old and new focus owner. Moving focus between the list and the search box does not reload. There is no timer and no polling.
 - **AI notes only.** A check box that keeps rows with an AI source, filtered in memory like the kind filter. It combines with the kind, tag, search, and current-file filters.
@@ -27,6 +32,7 @@ The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011,
 - A `ToolWindowManagerListener` or `ApplicationActivationListener` for refresh: the first misses focus changes inside the window, and the second would have to be registered in plugin.xml, which is startup work. A listener created with the panel is not. Rejected.
 - Polling or a file watcher on the DB: violates "no polling" and costs idle CPU. Rejected.
 - Always keep one editor for the snippet: an editor is expensive and the intent is "created only on selection". Rejected.
+- Track the current file with a second DB query path or by listening on a project-level file listener registered in plugin.xml: the second diverges from search and tag filtering, the first is startup work. Rejected.
 - Load notes of the current file with a SQL filter: the list is already in memory and small, and a second query path would diverge from search and tag filtering. Rejected.
 
 ## Consequences
@@ -35,6 +41,7 @@ The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011,
   - Several IDE windows see each other's notes after one focus.
 - Cons and what we accept
   - A key pressed before the new detail has loaded, or during a mouse drag on the list, is ignored.
+  - With split editors the filter uses the first selected file of `selectedFiles`, which may not be the active split. Tracked as a follow-up issue because the light test fixture has no split windows to reproduce it.
   - Focusing the panel from the editor reloads each time. The reload is a summary query (ADR 0062), so the cost is small, and it is measured in the refresh PR.
   - Highlighting needs the editor machinery, so selecting a note with a snippet does a little more EDT work than a text area. It is measured in the highlighting PR.
 - Follow-up work

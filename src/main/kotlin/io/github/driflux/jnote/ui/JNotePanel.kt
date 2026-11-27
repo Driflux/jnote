@@ -6,6 +6,9 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
@@ -32,6 +35,7 @@ import io.github.driflux.jnote.NoteSelectRequestedListener
 import io.github.driflux.jnote.NotesChangedListener
 import io.github.driflux.jnote.action.NoteSaver
 import io.github.driflux.jnote.action.RelocateNotesTask
+import io.github.driflux.jnote.anchor.AnchorLines
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.db.SearchRepository
@@ -111,6 +115,12 @@ class JNotePanel internal constructor(
             render()
         }
     }
+    internal val currentFileBox = JBCheckBox(JNoteBundle.message("toolWindow.currentFile")).apply {
+        addActionListener {
+            state = state.copy(currentFileOnly = isSelected, currentRelPath = currentRelPath())
+            render()
+        }
+    }
     internal val tagBar = JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 2)).apply { isVisible = false }
     internal val searchField = SearchTextField(false).apply {
         textEditor.emptyText.text = JNoteBundle.message("toolWindow.search.placeholder")
@@ -160,10 +170,11 @@ class JNotePanel internal constructor(
         list.addListSelectionListener { if (!it.valueIsAdjusting && !renderingSelection) showDetailOf(list.selectedValue?.summary) }
         val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(2, 8)
-            add(JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            add(JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 0)).apply {
                 add(allProjectsBox)
+                add(currentFileBox)
                 add(filterCombo)
-            }, BorderLayout.WEST)
+            }, BorderLayout.CENTER)
             add(spinnerIcon, BorderLayout.EAST)
         }
         add(JBPanel<JBPanel<*>>(BorderLayout()).apply {
@@ -176,11 +187,25 @@ class JNotePanel internal constructor(
             firstComponent = JBScrollPane(list)
             secondComponent = detail
         }, BorderLayout.CENTER)
+        project.messageBus.connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
+            override fun selectionChanged(event: FileEditorManagerEvent) = onEditorSelectionChanged()
+        })
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(NotesChanged.TOPIC, NotesChangedListener { reload() })
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(NoteSelectRequested.TOPIC, NoteSelectRequestedListener { requested, noteId -> onSelectRequested(requested, noteId) })
         reload()
+    }
+
+    private fun currentRelPath(): String? =
+        FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.let { AnchorLines.relativePath(project.basePath, it.path) }
+
+    private fun onEditorSelectionChanged() {
+        if (disposed || !state.currentFileOnly) return
+        val relPath = currentRelPath()
+        if (relPath == state.currentRelPath) return
+        state = state.copy(currentRelPath = relPath)
+        render()
     }
 
     internal fun focusSearch() {
@@ -327,7 +352,8 @@ class JNotePanel internal constructor(
         val free = JNoteBundle.message("toolWindow.subtitle.free")
         val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free, loaded.noteTags[it.id].orEmpty()) }
         shownProjectKey = loaded.projectKey
-        state = state.copy(notes = rows, allProjects = allProjects, match = loaded.match ?: state.match).withTags(loaded.dictionary)
+        val relPath = if (state.currentFileOnly) currentRelPath() else state.currentRelPath
+        state = state.copy(notes = rows, allProjects = allProjects, match = loaded.match ?: state.match, currentRelPath = relPath).withTags(loaded.dictionary)
         rebuildTagBar()
         render()
     }
@@ -438,12 +464,18 @@ class JNotePanel internal constructor(
 
     private fun showEmptyText() {
         val text = list.emptyText
-        if (state.showEmptyState && state.tagFilterActive) {
+        if (state.showEmptyState && state.currentFileOnly && state.currentRelPath == null) {
+            text.text = JNoteBundle.message("toolWindow.empty.currentFile.none.title")
+            text.appendLine(JNoteBundle.message("toolWindow.empty.currentFile.none.hint"))
+        } else if (state.showEmptyState && state.tagFilterActive) {
             text.text = JNoteBundle.message("toolWindow.empty.tags.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.tags.hint"))
         } else if (state.noSearchResults) {
             text.text = JNoteBundle.message("toolWindow.search.empty.title", state.query)
             text.appendLine(JNoteBundle.message(if (state.allProjects) "toolWindow.search.empty.hint.all" else "toolWindow.search.empty.hint"))
+        } else if (state.showEmptyState && state.currentFileOnly) {
+            text.text = JNoteBundle.message("toolWindow.empty.currentFile.title")
+            text.appendLine(JNoteBundle.message("toolWindow.empty.currentFile.hint"))
         } else if (state.showEmptyState) {
             text.text = JNoteBundle.message(state.filter.emptyTitleKey)
             text.appendLine(if (state.filter == NoteFilter.FREE) JNoteBundle.message("toolWindow.empty.free.hint") else emptyHint())

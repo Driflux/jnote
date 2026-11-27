@@ -1,5 +1,6 @@
 package io.github.driflux.jnote.ui
 
+import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.Tag
 
 data class SearchMatch(val query: String, val ids: Set<Long>)
@@ -12,6 +13,8 @@ data class ToolWindowState(
     val selectedTagIds: Set<Long> = emptySet(),
     val query: String = "",
     val match: SearchMatch? = null,
+    val currentFileOnly: Boolean = false,
+    val currentRelPath: String? = null,
 ) {
     val searching: Boolean get() = SearchQuery.isSearchable(query)
 
@@ -20,10 +23,14 @@ data class ToolWindowState(
             val ids = if (searching) match?.ids else null
             return notes.orEmpty().filter { row ->
                 filter.accepts(row.summary.kind) &&
+                    inCurrentFile(row) &&
                     selectedTagIds.all { id -> row.tags.any { it.id == id } } &&
                     (ids == null || row.summary.id in ids)
             }
         }
+
+    private fun inCurrentFile(row: NoteRow): Boolean =
+        !currentFileOnly || (row.summary.kind == NoteKind.CODE && row.projectName == null && row.summary.relPath == currentRelPath && currentRelPath != null)
 
     val tagFilterActive: Boolean get() = selectedTagIds.isNotEmpty()
 
