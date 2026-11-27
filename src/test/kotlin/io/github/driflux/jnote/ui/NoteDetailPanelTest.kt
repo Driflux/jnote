@@ -99,7 +99,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         assertEquals("why locked", d.titleLabel.text)
         assertEquals("Foo", d.classLabel.text)
         assertEquals("src/Foo.kt:L3-5", d.locationLabel.text)
-        assertEquals("lock()", d.snippetArea.text)
+        assertEquals("lock()", d.snippetViewer.text.orEmpty())
         assertEquals("because", d.bodyArea.text)
         assertEquals("Claude", d.aiSourceLabel.text)
         assertEquals("explain", d.aiPromptArea.text)
@@ -492,7 +492,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
     }
 
     private fun detailPanel(confirmed: MutableList<Note>) =
-        NoteDetailPanel(onGoToCode = {}, onDelete = {}, onEdit = {}, onRelocate = {}, canRelocate = { false }, onConfirm = { confirmed += it })
+        NoteDetailPanel(project, onGoToCode = {}, onDelete = {}, onEdit = {}, onRelocate = {}, canRelocate = { false }, onConfirm = { confirmed += it })
 
     fun testConfirmLocationAndApproxHintShowOnlyForApproxNotes() {
         val key = projectKey()
@@ -529,7 +529,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         val stored = repo.get(note.id).get()!!
         assertEquals(NoteStatus.OK, stored.status)
         assertEquals("b\nc", stored.snapshot)
-        assertEquals("b\nc", panel.detail.snippetArea.text)
+        assertEquals("b\nc", panel.detail.snippetViewer.text.orEmpty())
     }
 
     fun testConfirmFailureShowsAnErrorNotificationNamingTheFile() {

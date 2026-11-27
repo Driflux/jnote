@@ -45,8 +45,9 @@ class PlainTextTest : BasePlatformTestCase() {
             1, "u", NoteKind.CODE, "p", markup, markup, 1, 2, "code", NoteStatus.OK, markup, "body",
             markup, markup, "prompt", 1, 1,
         )
-        val panel = NoteDetailPanel({}, {}, {}, {}, { false }, {})
+        val panel = NoteDetailPanel(project, {}, {}, {}, {}, { false }, {})
         panel.show(note)
+        panel.snippetViewer.release()
         listOf(panel.titleLabel, panel.classLabel, panel.locationLabel, panel.aiSourceLabel, panel.aiUrlLabel).forEach {
             assertTrue("the markup is shown as text: '${it.text}'", it.text.startsWith(markup))
             assertFalse("html view on '${it.text}'", hasHtmlView(it))

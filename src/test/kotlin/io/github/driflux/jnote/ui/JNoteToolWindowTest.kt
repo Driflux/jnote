@@ -293,7 +293,7 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
 
         awaitUntil("detail shown") { panel.detail.isVisible }
         assertEquals("mine", panel.detail.titleLabel.text)
-        assertEquals("val snap = 1", panel.detail.snippetArea.text)
+        assertEquals("val snap = 1", panel.detail.snippetViewer.text)
         assertEquals("the body", panel.detail.bodyArea.text)
         assertEquals("why", panel.detail.aiPromptArea.text)
     }

@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #20
-- PRs: #79 copy snippet and keyboard control, #84 current file toggle, then syntax highlighting, refresh on focus, AI notes filter (stacked)
+- PRs: #79 copy snippet and keyboard control, #84 current file toggle, #90 syntax highlighting, then refresh on focus, AI notes filter (stacked)
 
 ## Context
 The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011, 0062). The 1.0 usability list in intent.md section 7 still lacks copying a snippet, keyboard control, a current-file view, highlighted snippets, a refresh for multi-window use, and an AI filter. Every one of them must keep the top principle: no startup work, no DB or file I/O on the EDT, no new dependency.
@@ -21,7 +21,12 @@ The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011,
   - A note matches only when it is a CODE note, belongs to this project (`projectName` is only filled for other projects' notes), and its `rel_path` equals the open file. With nothing open or a file outside the project, no note matches.
   - The "No file is open" empty state wins over the tag and search messages, because it is the reason the list is empty regardless of other filters. The tag message in turn comes before the search message, since a chip may be what emptied the list.
   - The header controls use `WrapLayout` so three controls do not clip in a narrow tool window.
-- **Syntax highlighting.** The snippet is shown in a read-only editor that is created when a note with a snippet is selected, gets the highlighter of the note's file type (from the extension), and is released when the selection changes or the panel is disposed. No editor exists while nothing is selected, so the list costs nothing. The file type is looked up by file name only, never by reading the file.
+- **Syntax highlighting.** The snippet is shown in a read-only editor that is created when a note with a snippet is selected, gets the highlighter of the note's file type (from the extension), and is released when the selection changes or the panel is disposed. No editor exists while nothing is selected, so the list costs nothing. The file type is looked up by file name only, never by reading the file (PR #90).
+  - Selecting the same snippet again (a re-read of the detail) keeps the editor, so a reload does not flicker or rebuild it. Without a file name the highlighter falls back to plain text.
+  - The document needs \n line endings, but imported notes can carry \r\n, so the text is normalized for display. Copy still uses the original stored text.
+  - The created editor is recorded before it is configured. If configuration throws, `release()` can still free it, so no editor leaks.
+  - A long line makes the horizontal scrollbar take room, so its height is added to the preferred height. The height is capped at 12 lines.
+  - The editor is released on the EDT when the panel is disposed, so an open snippet editor never outlives a closed panel. `NoteDetailPanel.show(null)` also releases it.
 - **Refresh on focus.** One reload when keyboard focus moves into the panel from outside it, to see changes other IDE windows wrote. A focus listener lives only as long as the panel and compares the old and new focus owner. Moving focus between the list and the search box does not reload. There is no timer and no polling.
 - **AI notes only.** A check box that keeps rows with an AI source, filtered in memory like the kind filter. It combines with the kind, tag, search, and current-file filters.
 
@@ -31,6 +36,7 @@ The Tool Window lists, filters, searches, and shows notes (ADR 0006, 0010, 0011,
 - Rely only on the detail being cleared when the selection changes: it is not cleared while a drag is adjusting the selection, so the uid comparison is also needed. Rejected as insufficient.
 - A `ToolWindowManagerListener` or `ApplicationActivationListener` for refresh: the first misses focus changes inside the window, and the second would have to be registered in plugin.xml, which is startup work. A listener created with the panel is not. Rejected.
 - Polling or a file watcher on the DB: violates "no polling" and costs idle CPU. Rejected.
+- A read-only text area with no coloring: it needs no editor but gives no syntax colors. Rejected for the highlighting feature.
 - Always keep one editor for the snippet: an editor is expensive and the intent is "created only on selection". Rejected.
 - Track the current file with a second DB query path or by listening on a project-level file listener registered in plugin.xml: the second diverges from search and tag filtering, the first is startup work. Rejected.
 - Load notes of the current file with a SQL filter: the list is already in memory and small, and a second query path would diverge from search and tag filtering. Rejected.
