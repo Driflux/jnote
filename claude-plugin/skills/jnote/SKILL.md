@@ -82,12 +82,15 @@ Save something from the conversation as one or more notes.
 Look up saved notes that relate to the current question, code, or file.
 
 1. The database is `~/.jnote/jnote.db` unless the user has moved it (Settings > Tools > JNote in the IDE); use the path they give you. The view needs `sqlite3` 3.44 or newer (`sqlite3 --version`); with an older one or none, say so and stop.
-2. Run read-only queries on `v_notes_export`, one statement per call, with JSON output:
+2. Run read-only queries on `v_notes_export`, one statement per call, with JSON output. Pass the query through a quoted heredoc so the shell never expands `$`, backticks, or `\` in it:
    ```sh
-   sqlite3 -readonly -json ~/.jnote/jnote.db "<query>"
+   sqlite3 -readonly -json ~/.jnote/jnote.db <<'SQL'
+   <query>
+   SQL
    ```
-   The database uses WAL mode. When JNote is not running, a read-only open can fail with `unable to open database file`. Then, only if no `jnote.db-wal` file sits next to the database, open it as immutable instead: `sqlite3 -json "file:$HOME/.jnote/jnote.db?immutable=1" "<query>"`. If `jnote.db-wal` exists, do not use `immutable`, because it would skip recent changes; ask the user to open the JNote Tool Window and try again.
-   Put the user's words into the query only inside single-quoted SQL strings, doubling any `'` in them. Columns, as in the spec: `uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, status, title, body, ai_source, source_url, prompt, created_at, updated_at, tags` (`tags` comma-separated, times in epoch milliseconds, `project` is the normalized key such as `github.com/acme/shop`).
+   The database uses WAL mode, so a read-only open works only while JNote has it open. If it fails with `unable to open database file`, ask the user to open the JNote Tool Window in the IDE and try again. Do not work around it with `immutable=1` or by opening without `-readonly`.
+   Put the user's words into the query only inside single-quoted SQL strings, doubling any `'` in them.
+   The project key of a repository is its origin URL with the host in lower case, then the path, without scheme, user, port, and trailing `.git`: `git@github.com:acme/shop.git` and `https://github.com/acme/shop` both become `github.com/acme/shop`. A project without a remote origin uses the absolute path of its folder. If a project filter finds nothing, list `SELECT DISTINCT project FROM v_notes_export;` and compare. Columns, as in the spec: `uid, kind, project, rel_path, class_name, start_line, end_line, snapshot, status, title, body, ai_source, source_url, prompt, created_at, updated_at, tags` (`tags` comma-separated, times in epoch milliseconds, `project` is the normalized key such as `github.com/acme/shop`).
 3. Useful queries:
 
    Search every text column for a word:
@@ -100,11 +103,12 @@ Look up saved notes that relate to the current question, code, or file.
    LIMIT 20;
    ```
 
-   Notes on one file, with the path relative to the project root:
+   Notes on one file of the current project, with the path relative to the project root (the same path can exist in other projects):
    ```sql
-   SELECT uid, title, start_line, end_line, status, body
+   SELECT uid, project, title, start_line, end_line, status, body
    FROM v_notes_export
-   WHERE rel_path = 'src/main/kotlin/shop/payment/Retry.kt'
+   WHERE project = 'github.com/acme/shop'
+     AND rel_path = 'src/main/kotlin/shop/payment/Retry.kt'
    ORDER BY start_line;
    ```
 

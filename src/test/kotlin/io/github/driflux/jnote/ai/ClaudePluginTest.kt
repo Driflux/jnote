@@ -63,6 +63,7 @@ class ClaudePluginTest {
             ).get()
             TagRepository(db).replaceTags(retry.id, listOf("payments")).get()
             notes.create(NewNote.free("unrelated", body = "nothing here")).get()
+            notes.create(NewNote.code("github.com/other/shop", "src/main/kotlin/shop/payment/Retry.kt", 1, 1, "unrelated", body = "same path elsewhere")).get()
             notes.restore(retry.copy(id = retry.id + 100, uid = "0b6f7f0e-8a43-4d7e-9a39-2f0c5d1f6a10", title = "Pinned retry note"), emptyList()).get()
 
             for (query in queries) {
