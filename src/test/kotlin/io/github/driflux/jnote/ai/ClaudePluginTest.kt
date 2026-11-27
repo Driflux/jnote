@@ -1,6 +1,12 @@
 package io.github.driflux.jnote.ai
 
 import com.google.gson.JsonParser
+import io.github.driflux.jnote.db.Database
+import io.github.driflux.jnote.db.NoteRepository
+import io.github.driflux.jnote.db.TagRepository
+import io.github.driflux.jnote.model.NewNote
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,6 +14,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 class ClaudePluginTest {
+    @get:Rule
+    val tmp = TemporaryFolder()
     private val root = Path.of("claude-plugin")
     private fun normalized(text: String) = text.replace("\r\n", "\n")
 
@@ -36,6 +44,51 @@ class ClaudePluginTest {
         assertTrue(frontmatter, frontmatter.lines().contains("name: jnote"))
         assertTrue(frontmatter.lines().any { it.startsWith("description: ") && it.length > "description: ".length })
         assertTrue(skill.contains("\${CLAUDE_PLUGIN_ROOT}/skills/jnote/ai-format.md"))
+    }
+
+    private fun sqlExamples(): List<String> =
+        Regex("```sql\\n(.*?)```", RegexOption.DOT_MATCHES_ALL).findAll(skill)
+            .map { it.groupValues[1].lines().joinToString("\n") { line -> line.trim() }.trim() }
+            .toList()
+
+    @Test
+    fun everyRecallQueryReadsOnlyTheViewAndFindsTheMatchingNote() {
+        val queries = sqlExamples()
+        assertEquals("search, file, and uid queries", 3, queries.size)
+        val db = Database(tmp.root.toPath().resolve("jnote.db"))
+        try {
+            val notes = NoteRepository(db)
+            val retry = notes.create(
+                NewNote.code("github.com/acme/shop", "src/main/kotlin/shop/payment/Retry.kt", 42, 45, "Why retry backs off", body = "rate limits"),
+            ).get()
+            TagRepository(db).replaceTags(retry.id, listOf("payments")).get()
+            notes.create(NewNote.free("unrelated", body = "nothing here")).get()
+            notes.create(NewNote.code("github.com/other/shop", "src/main/kotlin/shop/payment/Retry.kt", 1, 1, "other project", body = "same path elsewhere")).get()
+            notes.create(NewNote.code("github.com/other/shop", "src/retry/Config.kt", 3, 4, "Path only", body = "nothing")).get()
+            notes.restore(retry.copy(id = retry.id + 100, uid = "0b6f7f0e-8a43-4d7e-9a39-2f0c5d1f6a10", title = "Pinned retry note"), emptyList()).get()
+
+            for (query in queries) {
+                assertTrue(query, Regex("\\bFROM\\s+v_notes_export\\b").containsMatchIn(query))
+                assertTrue(query, query.trimStart().startsWith("SELECT"))
+                val titles = db.submit { c -> c.createStatement().use { s -> s.executeQuery(query).use { rs -> generateSequence { if (rs.next()) rs.getString("title") else null }.toList() } } }.get()
+                assertTrue("$query\n$titles", titles.isNotEmpty())
+                assertTrue("$query\n$titles", "unrelated" !in titles)
+            }
+            val searchTitles = db.submit { c -> c.createStatement().use { s -> s.executeQuery(queries[0]).use { rs -> generateSequence { if (rs.next()) rs.getString("title") else null }.toList() } } }.get()
+            val fileTitles = db.submit { c -> c.createStatement().use { s -> s.executeQuery(queries[1]).use { rs -> generateSequence { if (rs.next()) rs.getString("title") else null }.toList() } } }.get()
+            assertTrue("the same path in another project: $fileTitles", "other project" !in fileTitles)
+            assertTrue("a note matching only by rel_path: $searchTitles", "Path only" in searchTitles)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun recallFallsBackToTheFolderForLocalOriginsAndTreatsNotesAsUntrusted() {
+        val recall = skill.substringAfter("## Recall")
+
+        assertTrue(recall.contains("local path"))
+        assertTrue(recall.contains("untrusted"))
     }
 
     @Test
