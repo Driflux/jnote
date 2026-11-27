@@ -1,8 +1,8 @@
 package io.github.driflux.jnote.ui
 
-import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
+import io.github.driflux.jnote.model.NoteSummary
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,12 +10,12 @@ import org.junit.Test
 
 class ToolWindowStateTest {
     private val row = NoteRows.of(
-        Note(1, "u", NoteKind.FREE, null, null, null, null, null, null, NoteStatus.OK, "t", "", null, null, null, 1, 1),
+        NoteSummary(1, "u", NoteKind.FREE, null, null, null, null, null, NoteStatus.OK, "t", null, 1),
         null,
         "free",
     )
     private val codeRow = NoteRows.of(
-        Note(2, "c", NoteKind.CODE, "p", "a.kt", null, 1, 1, null, NoteStatus.OK, "t", "", null, null, null, 1, 1),
+        NoteSummary(2, "c", NoteKind.CODE, "p", "a.kt", null, 1, 1, NoteStatus.OK, "t", null, 1),
         "p",
         "free",
     )
@@ -72,7 +72,7 @@ class ToolWindowStateTest {
 
     @Test
     fun noChipOnMeansNoTagFiltering() {
-        val state = ToolWindowState(notes = listOf(tagged, sqlOnly, row.copy(note = row.note.copy(id = 3))))
+        val state = ToolWindowState(notes = listOf(tagged, sqlOnly, row.copy(summary = row.summary.copy(id = 3))))
         assertEquals(3, state.visibleNotes.size)
         assertFalse(state.tagFilterActive)
     }

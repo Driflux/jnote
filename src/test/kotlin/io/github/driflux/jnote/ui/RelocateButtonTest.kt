@@ -76,8 +76,9 @@ class RelocateButtonTest : BasePlatformTestCase() {
         val panel = panelShowing(2)
         for (index in 0 until 2) {
             panel.list.selectedIndex = index
-            val note = panel.list.selectedValue.note
-            assertEquals(note.title, note.relPath != null, panel.detail.relocateButton.isVisible)
+            val summary = panel.list.selectedValue.summary
+            awaitUntil("detail shown") { panel.detail.titleLabel.text == summary.title }
+            assertEquals(summary.title, summary.relPath != null, panel.detail.relocateButton.isVisible)
         }
     }
 
@@ -87,6 +88,7 @@ class RelocateButtonTest : BasePlatformTestCase() {
         panel.allProjectsBox.doClick()
         awaitUntil("all projects loaded") { panel.list.model.size == 1 }
         panel.list.selectedIndex = 0
+        awaitUntil("detail shown") { panel.detail.isVisible }
         assertTrue(panel.detail.goToCodeButton.isVisible)
         assertFalse(panel.detail.relocateButton.isVisible)
     }
@@ -99,6 +101,7 @@ class RelocateButtonTest : BasePlatformTestCase() {
         val note = repo.create(NewNote.code(projectKey(), "src/R.kt", 1, 1, "moved", snapshot = "fun moved() = 42")).get()
         val panel = panelShowing(1)
         panel.list.selectedIndex = 0
+        awaitUntil("detail shown") { panel.detail.titleLabel.text == "moved" }
 
         panel.detail.relocateButton.doClick()
         awaitUntil("no notification") { notifications.isNotEmpty() }

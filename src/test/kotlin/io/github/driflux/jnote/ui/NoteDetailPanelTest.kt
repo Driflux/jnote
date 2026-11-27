@@ -40,7 +40,6 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         dbService.switchTo(dir.resolve("jnote.db"))
     }
 
-    // 테스트가 만든 패널. 닫고 읽기가 끝나야 DB 경로를 바꿔도 늦은 읽기가 엉뚱한 DB를 열지 않는다
     private val panels = mutableListOf<JNotePanel>()
 
     override fun tearDown() {
@@ -77,6 +76,12 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         return panel
     }
 
+    private fun select(panel: JNotePanel, index: Int) {
+        panel.list.selectedIndex = index
+        val title = panel.list.selectedValue.title
+        awaitUntil("detail shows $title") { panel.detail.titleLabel.text == title }
+    }
+
     fun testSelectingANoteShowsItsDetail() {
         val key = projectKey()
         repo.create(
@@ -88,7 +93,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         val panel = newPanel(1)
         assertFalse(panel.detail.isVisible)
 
-        panel.list.selectedIndex = 0
+        select(panel, 0)
         val d = panel.detail
         assertTrue(d.isVisible)
         assertEquals("why locked", d.titleLabel.text)
@@ -104,7 +109,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
     fun testFreeNoteHidesGoToCodeAndUsesMonospaceBody() {
         repo.create(NewNote.free("query", "select 1")).get()
         val panel = newPanel(1)
-        panel.list.selectedIndex = 0
+        select(panel, 0)
         assertFalse(panel.detail.goToCodeButton.isVisible)
         assertEquals("select 1", panel.detail.bodyArea.text)
         assertFalse(panel.detail.locationLabel.isVisible)
@@ -112,7 +117,6 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
 
     fun testGoToCodeOpensTheFileAtTheStartLine() {
         val key = projectKey()
-        // 노트 경로는 basePath 기준이므로 라이트 픽스처의 temp:// 파일이 아니라 basePath 아래 실제 파일을 쓴다
         val real = Path.of(project.basePath!!, "src", "Foo.kt")
         Files.createDirectories(real.parent)
         Files.writeString(real, "line1\nline2\nline3\nline4\n")
@@ -165,7 +169,6 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
             val found = CodeTargets.findUnder(otherBase.toString(), "src/X.kt")!!
             assertEquals(otherBase.resolve("src/X.kt").toString(), found.path)
             assertNull(CodeTargets.findUnder(project.basePath!!, "src/X.kt"))
-            // VFS가 아직 모르는 파일도 같은 기준으로 새로 확인한다
             Files.writeString(otherBase.resolve("src/Late.kt"), "class Late")
             assertNotNull(CodeTargets.findUnder(otherBase.toString(), "src/Late.kt"))
         } finally {
@@ -220,7 +223,6 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         assertEquals(NotificationType.WARNING, shown.single().type)
     }
 
-    // 닫힌 프로젝트는 건드리면 안 되므로 호출된 메서드를 기록하는 프록시를 쓴다
     private fun closedProject(touched: MutableList<String>, flag: java.util.concurrent.atomic.AtomicBoolean) =
         java.lang.reflect.Proxy.newProxyInstance(Project::class.java.classLoader, arrayOf(Project::class.java)) { _, method, _ ->
             when (method.name) {
@@ -291,7 +293,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         val note = repo.create(NewNote.code(key, "src/Foo.kt", 2, 3, "doomed", body = "b", aiSource = "Claude")).get()
         tags.attach(note.id, tag.id).get()
         val panel = newPanel(1)
-        panel.list.selectedIndex = 0
+        select(panel, 0)
 
         panel.detail.deleteButton.doClick()
 
@@ -357,7 +359,6 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
     private val futures = mutableListOf<java.util.concurrent.ScheduledFuture<*>>()
     private val pending by lazy { java.util.concurrent.ScheduledThreadPoolExecutor(1) }
 
-    // 시간을 기다리지 않고 만료 작업을 직접 돌리기 위한 스케줄러
     private fun recordingSchedule(task: Runnable, delayMs: Long): java.util.concurrent.ScheduledFuture<*> {
         delays += delayMs
         tasks += task
@@ -401,7 +402,6 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
             Disposer.register(testRootDisposable, it)
         }
 
-    // 람다는 JUnit3 러너가 테스트로 오인하지 않도록 도우미 함수에서 만든다
     private fun answering(draft: NoteDraft?, seen: MutableList<Note>): (Project, Note, List<String>) -> NoteDraft? = { _, note, _ ->
         seen += note
         draft
@@ -420,7 +420,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         repo.create(NewNote.free("free")).get()
         val panel = newPanel(2)
         (0 until 2).forEach {
-            panel.list.selectedIndex = it
+            select(panel, it)
             assertTrue(panel.detail.editButton.isVisible)
         }
     }
@@ -434,7 +434,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         val seen = mutableListOf<Note>()
         val panel = panelWith(NoteSaver(), answering(NoteDraft("New title", "new body", "Claude", "http://x", "why", tags = listOf("keep")), seen))
         awaitUntil("list loaded") { panel.list.model.size == 1 }
-        panel.list.selectedIndex = 0
+        select(panel, 0)
         val events = countNotifications()
 
         panel.detail.editButton.doClick()
@@ -446,7 +446,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         assertTrue(updated.updatedAt >= note.updatedAt)
         assertEquals(listOf(tag), tags.tagsOf(note.id).get())
         assertEquals(1, events.get())
-        assertEquals("new body", panel.detail.bodyArea.text)
+        awaitUntil("detail shows the edit") { panel.detail.bodyArea.text == "new body" }
     }
 
     fun testEditOfAFreeNoteKeepsItGlobal() {
@@ -491,7 +491,6 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         assertEquals(note, repo.get(note.id).get())
     }
 
-    // 람다는 JUnit3 러너가 테스트로 오인하지 않도록 도우미 함수에서 만든다
     private fun detailPanel(confirmed: MutableList<Note>) =
         NoteDetailPanel(onGoToCode = {}, onDelete = {}, onEdit = {}, onRelocate = {}, canRelocate = { false }, onConfirm = { confirmed += it })
 
@@ -521,7 +520,7 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         Disposer.register(testRootDisposable) { real.toFile().delete() }
         val note = repo.create(NewNote.code(key, "src/Approx.kt", 2, 3, "n", snapshot = "old", status = NoteStatus.APPROX)).get()
         val panel = newPanel(1)
-        panel.list.selectedIndex = 0
+        select(panel, 0)
         assertTrue(panel.detail.confirmButton.isVisible)
 
         panel.detail.confirmButton.doClick()

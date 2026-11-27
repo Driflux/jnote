@@ -5,6 +5,7 @@ import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
+import io.github.driflux.jnote.model.NoteSummary
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -160,6 +161,31 @@ class NoteRepositoryTest {
     }
 
     @Test
+    fun listSummariesMatchListInOrderAndCarryTheSameFields() {
+        val a = repo.create(code("a")).get()
+        val free = repo.create(NewNote.free("free", aiSource = "Claude")).get()
+        now = 2_000
+        repo.update(a.copy(title = "a2")).get()
+
+        val notes = repo.list("p1", true).get()
+        val summaries = repo.listSummaries("p1", true).get()
+
+        assertEquals(notes.map { it.id }, summaries.map { it.id })
+        assertEquals(listOf(a.id, free.id), summaries.map { it.id })
+        notes.zip(summaries).forEach { (note, summary) ->
+            assertEquals(
+                NoteSummary(
+                    note.id, note.uid, note.kind, note.project, note.relPath, note.className, note.startLine, note.endLine,
+                    note.status, note.title, note.aiSource, note.updatedAt,
+                ),
+                summary,
+            )
+        }
+        assertEquals(repo.list("p1", false).get().map { it.id }, repo.listSummaries("p1", false).get().map { it.id })
+        assertEquals(repo.list(null, false).get().map { it.id }, repo.listSummaries(null, false).get().map { it.id })
+    }
+
+    @Test
     fun listByProjectIncludesGlobalFreeNotesButNotOtherProjects() {
         val mine = repo.create(code("mine", project = "p1")).get()
         val other = repo.create(code("other", project = "p2")).get()
@@ -172,7 +198,6 @@ class NoteRepositoryTest {
 
     @Test
     fun constraintFailureSurfacesAsFailedFuture() {
-        // 모델이 막는 상태는 DB 제약이 마지막 방어선이다. 우회로 잘못된 행을 넣어 오류가 future로 드러나는지 본다
         val created = repo.create(code()).get()
         val failed = db.submit { c ->
             c.createStatement().use { it.executeUpdate("UPDATE note SET status = 'BAD' WHERE id = ${created.id}") }
@@ -241,7 +266,6 @@ class NoteRepositoryTest {
         assertTrue(e.cause is java.sql.SQLException)
         assertEquals(created, repo.get(created.id).get())
         assertTrue(tags.tagsOf(created.id).get().isEmpty())
-        // 실패한 뒤에도 연결이 자동 커밋으로 돌아와 다음 쓰기가 된다
         assertNotNull(repo.create(code("next")).get())
     }
 
@@ -304,7 +328,6 @@ class NoteRepositoryTest {
         val changed = repo.updateAnchors(listOf(AnchorUpdate(created.uid, "src/B.kt", 10, 12, NoteStatus.APPROX))).get()
         assertEquals(1, changed)
         val expected = created.copy(relPath = "src/B.kt", startLine = 10, endLine = 12, status = NoteStatus.APPROX)
-        // 사용자가 고친 것이 아니므로 updated_at도 그대로다
         assertEquals(expected, repo.get(created.id).get())
     }
 
@@ -347,7 +370,6 @@ class NoteRepositoryTest {
         val kept = repo.create(code("kept")).get()
         val gone = repo.create(code("gone")).get()
         repo.delete(gone.id).get()
-        // 지운 id가 새 노트에 다시 쓰여도 uid가 다르므로 새 노트는 바뀌지 않는다
         val reused = repo.create(code("new")).get()
         assertEquals(gone.id, reused.id)
         val changed = repo.updateAnchors(

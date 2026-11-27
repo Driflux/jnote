@@ -1,8 +1,8 @@
 package io.github.driflux.jnote.ui
 
-import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
+import io.github.driflux.jnote.model.NoteSummary
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -17,15 +17,10 @@ class NoteRowsTest {
         end: Int = 5,
         aiSource: String? = null,
         relPath: String = "src/Foo.kt",
-    ) = Note(
-        1, "u", NoteKind.CODE, project, relPath, className, start, end, null, NoteStatus.OK,
-        "title", "", aiSource, null, null, 1, 1,
-    )
+    ) = NoteSummary(1, "u", NoteKind.CODE, project, relPath, className, start, end, NoteStatus.OK, "title", aiSource, 1)
 
-    private fun free(aiSource: String? = null) = Note(
-        2, "u2", NoteKind.FREE, null, null, null, null, null, null, NoteStatus.OK,
-        "q", "", aiSource, null, null, 1, 1,
-    )
+    private fun free(aiSource: String? = null) =
+        NoteSummary(2, "u2", NoteKind.FREE, null, null, null, null, null, NoteStatus.OK, "q", aiSource, 1)
 
     @Test
     fun codeSubtitleIsClassAndLineRange() {
@@ -71,10 +66,10 @@ class NoteRowsTest {
     }
 
     @Test
-    fun rowKeepsNoteAndTitle() {
-        val note = code()
-        val row = NoteRows.of(note, "k", "f")
-        assertEquals(note, row.note)
+    fun rowKeepsSummaryAndTitle() {
+        val summary = code()
+        val row = NoteRows.of(summary, "k", "f")
+        assertEquals(summary, row.summary)
         assertEquals("title", row.title)
     }
 

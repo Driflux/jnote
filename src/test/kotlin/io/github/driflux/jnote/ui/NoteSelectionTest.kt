@@ -26,7 +26,6 @@ class NoteSelectionTest : BasePlatformTestCase() {
         dbService.switchTo(dir.resolve("jnote.db"))
     }
 
-    // 테스트가 만든 패널. 닫고 읽기가 끝나야 DB 경로를 바꿔도 늦은 읽기가 엉뚱한 DB를 열지 않는다
     private val panels = mutableListOf<JNotePanel>()
 
     override fun tearDown() {
@@ -73,7 +72,7 @@ class NoteSelectionTest : BasePlatformTestCase() {
 
         NoteSelection.request(project, ids[0]) { }
 
-        awaitUntil("selected") { panel.list.selectedValue?.note?.id == ids[0] }
+        awaitUntil("selected") { panel.list.selectedValue?.summary?.id == ids[0] }
         assertNull(project.service<PendingNoteSelection>().peek())
     }
 
@@ -85,7 +84,7 @@ class NoteSelectionTest : BasePlatformTestCase() {
 
         val panel = newPanel()
 
-        awaitUntil("selected after first load") { panel.list.selectedValue?.note?.id == ids[1] }
+        awaitUntil("selected after first load") { panel.list.selectedValue?.summary?.id == ids[1] }
         assertNull(project.service<PendingNoteSelection>().peek())
     }
 
@@ -94,12 +93,12 @@ class NoteSelectionTest : BasePlatformTestCase() {
         val panel = newPanel()
         awaitUntil("list loaded") { panel.list.model.size == 3 }
         NoteSelection.request(project, ids[2]) { }
-        awaitUntil("selected") { panel.list.selectedValue?.note?.id == ids[2] }
+        awaitUntil("selected") { panel.list.selectedValue?.summary?.id == ids[2] }
 
         NoteSelection.request(project, 9_999L) { }
         PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
 
-        assertEquals(ids[2], panel.list.selectedValue?.note?.id)
+        assertEquals(ids[2], panel.list.selectedValue?.summary?.id)
     }
 
     fun testRequestPublishesTheTopicWithProjectAndId() {
