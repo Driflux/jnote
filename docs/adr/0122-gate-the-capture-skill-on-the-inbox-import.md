@@ -9,7 +9,7 @@
 The `jnote` Claude Code skill (ADR 0021, intent.md section 10.5) writes JSON documents into `~/.jnote/inbox/`. Its introduction and Capture step 5 told the user that JNote shows the file for review when the Tool Window gains focus. The IDE side of that promise (intent.md section 10.3) is file and clipboard import (#17) and the inbox check (#18). Both are still in open PRs, so the plugin built from `main` never reads the inbox. A user who installs the skill today is told a review will appear, and none does. The plugin version is `0.1.0-SNAPSHOT` with no release, so no version number can name the build that has the import.
 
 ## Decision
-The skill states the gate in words. Capture step 5 tells the user the file name and what happens next in each case. In a JNote build with the inbox import, the review opens when the Tool Window gains focus and nothing is saved until Apply. In a build without it, JNote does not read the inbox, and the file stays there until a build with the import processes it. The introduction says the same in one sentence. The feature is named, not a version. The rule that the skill never writes the database, and the agreed design in intent.md section 10.3, do not change.
+The skill states the gate in words. Capture step 5 tells the user the file name and what happens next in each case. In a JNote build with the inbox import, the order follows intent.md section 10.3: opening or re-activating the Tool Window checks the inbox and shows an "N AI notes waiting" notification, the user opens the preview from that notification, and the notes reach the database only when they click Apply. In a build without it, JNote does not read the inbox, and the file stays there until a build with the import processes it. Step 5 always gives the full path of the file. When the agent does not know which build the user runs, it names all three outcomes: review from the notification if it appears, import the file directly in a build that imports from a file, or, with neither, the file waits in the inbox and no note is saved yet. The file import and the inbox check are separate features (#17, #18), so one cannot be inferred from the other. The introduction says that no note is saved before Apply, and `claude-plugin/README.md` makes the same promise with the same gate. The skill does not name buttons or menu items from the open PRs, because their labels can still change. The feature is named, not a version. The rule that the skill never writes the database, and the agreed design in intent.md section 10.3, do not change.
 
 ## Alternatives considered
 - **Wait for the import PRs to merge.** The skill would then be correct without edits, but it ships wrong until #17 and #18 land, and their timing is not tied to this track. Rejected.
@@ -18,7 +18,7 @@ The skill states the gate in words. Capture step 5 tells the user the file name 
 
 ## Consequences
 - Pros
-  - The skill no longer promises a review the installed plugin cannot show.
+  - The skill and the plugin README no longer promise a review the installed plugin cannot show.
   - Capture keeps working as a way to queue notes for a later build.
 - Cons and what we accept
   - The user reads two cases and has to know which build they run.

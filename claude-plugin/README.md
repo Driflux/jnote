@@ -1,6 +1,6 @@
 # JNote plugin for Claude Code
 
-This folder is a Claude Code plugin with one skill, `jnote`. The skill writes JNote JSON format v1 documents into `~/.jnote/inbox/`; the JNote IntelliJ plugin shows them for review before anything is saved. The plugin never touches the database file and starts no process.
+This folder is a Claude Code plugin with one skill, `jnote`. The skill writes JNote JSON format v1 documents into `~/.jnote/inbox/`. A JNote IntelliJ build with the inbox import notifies the user when the Tool Window opens or is re-activated, and saves nothing until they click Apply in its preview. A build without it leaves the files waiting in the inbox. The plugin never touches the database file and starts no process.
 
 ## Layout
 
