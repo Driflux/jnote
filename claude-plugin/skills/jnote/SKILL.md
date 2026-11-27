@@ -125,10 +125,11 @@ Look up saved notes that relate to the current question, code, or file.
 Propose better tags, clearer titles, and merges of duplicate notes, and hand them to JNote as updates by `uid`.
 
 1. Read the notes to organize with the Recall queries, then the whole row of each note you will change (`SELECT * FROM v_notes_export WHERE uid = '...'`).
-2. Show the user the proposal first: for each note, its current title and what you would change. Write nothing until they agree, and drop what they reject.
+2. Show the user the proposal first: for each note, its current title, its location (project and file lines) or a short excerpt for a free note, its `uid`, and what you would change. Write nothing until they agree, and drop what they reject.
 3. Turn each agreed note into a note object as the spec's "Turning a view row into a note" says, then apply the change. Send every field of the row, because an update clears every field it leaves out. Put `project` into `anchor.project_path` (never `repo_url`), and keep `path`, `start_line`, `end_line`, `class_name`, and `snapshot` exactly as the row has them, so the note keeps its location status. Include only the notes you change.
-4. A merge updates one note, the one to keep, with the combined text and tags. Import never deletes, so list the duplicates' titles for the user to delete in the IDE after they apply the update.
-5. Publish the document exactly as in Capture step 4, with a topic such as `organize-tags`, and tell the user to review it in JNote.
+4. A merge updates one note, the one to keep, with the combined text and tags. Import never deletes, so the user deletes the others in the IDE after applying the update. In the proposal, mark which note is kept and which are to be deleted by `uid` and location (titles can be identical), and point out anything that exists only on a note to be deleted, such as a different anchor or `source_url`.
+5. Right before publishing, read each agreed note again by `uid`. If one is gone or its `updated_at` changed since step 1, rebuild it from the new row and ask again; an update built from an old row would undo the newer edit, and one for a deleted note would recreate it.
+6. Publish the document exactly as in Capture step 4, with a topic such as `organize-tags`, and tell the user to review it in JNote.
 
 ### Example
 
