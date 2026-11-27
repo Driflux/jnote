@@ -12,6 +12,7 @@ import com.intellij.openapi.project.Project
 import io.github.driflux.jnote.action.AddNoteAction
 import io.github.driflux.jnote.anchor.AnchorDraft
 import io.github.driflux.jnote.anchor.CodeAnchors
+import java.awt.event.InputEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 
@@ -84,7 +85,8 @@ internal class GutterAddNoteListener(
 
     override fun mouseDragged(e: MouseEvent) {
         if (editor.isDisposed) return
-        if (!drag.active) return
+        // 왼쪽 release를 잃은 뒤 다른 버튼만 누른 드래그가 이전 시작 줄로 선택을 바꾸지 않게 한다(ADR 0115).
+        if (!drag.active || (e.modifiersEx and InputEvent.BUTTON1_DOWN_MASK) == 0) return
         val range = drag.drag(clamp(geometry.lineAt(e)))
         if (range == null) {
             if (selecting) editor.selectionModel.removeSelection()

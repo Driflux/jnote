@@ -10,6 +10,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.driflux.jnote.anchor.AnchorDraft
+import java.awt.event.InputEvent
 import java.awt.event.MouseEvent
 import java.nio.file.Files
 import java.nio.file.Path
@@ -50,7 +51,7 @@ class GutterAddNoteListenerTest : BasePlatformTestCase() {
     }
 
     private fun mouse(editor: EditorEx, id: Int, line: Int, x: Int = 5, button: Int = MouseEvent.BUTTON1) =
-        MouseEvent(editor.gutterComponentEx, id, 0L, 0, x, line, 1, false, button)
+        MouseEvent(editor.gutterComponentEx, id, 0L, if (id == MouseEvent.MOUSE_DRAGGED) InputEvent.BUTTON1_DOWN_MASK else 0, x, line, 1, false, button)
 
     fun testHoveringAnIconAreaLineShowsThePlusOnThatLine() {
         val editor = openFile("GutterAddHover.txt", lines(10))

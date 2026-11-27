@@ -103,9 +103,9 @@ class GutterDragReleaseTest : BasePlatformTestCase() {
         at: Point,
         button: Int = if (id == MouseEvent.MOUSE_MOVED || id == MouseEvent.MOUSE_DRAGGED) MouseEvent.NOBUTTON else MouseEvent.BUTTON1,
         held: Int = if (id == MouseEvent.MOUSE_PRESSED || id == MouseEvent.MOUSE_DRAGGED) InputEvent.BUTTON1_DOWN_MASK else 0,
-    ) {
+    ): MouseEvent {
         val gutter = editor.gutterComponentEx
-        gutter.dispatchEvent(MouseEvent(gutter, id, 0L, held, at.x, at.y, 1, false, button))
+        return MouseEvent(gutter, id, 0L, held, at.x, at.y, 1, false, button).also { gutter.dispatchEvent(it) }
     }
 
     private fun click(editor: EditorEx, at: Point) {
@@ -202,12 +202,29 @@ class GutterDragReleaseTest : BasePlatformTestCase() {
         send(editor, MouseEvent.MOUSE_DRAGGED, at)
 
         send(editor, MouseEvent.MOUSE_PRESSED, at, MouseEvent.BUTTON3, InputEvent.BUTTON1_DOWN_MASK or InputEvent.BUTTON3_DOWN_MASK)
-        send(editor, MouseEvent.MOUSE_RELEASED, at, MouseEvent.BUTTON3, InputEvent.BUTTON1_DOWN_MASK)
+        val rightRelease = send(editor, MouseEvent.MOUSE_RELEASED, at, MouseEvent.BUTTON3, InputEvent.BUTTON1_DOWN_MASK)
+        assertFalse(rightRelease.isConsumed)
         assertTrue(added.isEmpty())
         send(editor, MouseEvent.MOUSE_RELEASED, at)
 
         assertEquals(emptyList<String>(), ran)
         assertEquals(3 to 7, added.single().let { it.startLine to it.endLine })
+    }
+
+    fun testADragWithoutTheLeftButtonAfterALostReleaseLeavesTheSelection() {
+        val editor = openFile("ReleaseLostRightDrag.txt")
+        install(editor)
+        val plus = showPlus(editor, 2)
+        val y = { line: Int -> editor.logicalPositionToXY(LogicalPosition(line, 0)).y + editor.lineHeight / 2 }
+        send(editor, MouseEvent.MOUSE_PRESSED, plus)
+        send(editor, MouseEvent.MOUSE_DRAGGED, Point(plus.x, y(6)))
+        val document = editor.document
+        assertEquals(document.getLineStartOffset(2) to document.getLineEndOffset(6), editor.selectionModel.let { it.selectionStart to it.selectionEnd })
+
+        send(editor, MouseEvent.MOUSE_PRESSED, Point(plus.x, y(6)), MouseEvent.BUTTON3, InputEvent.BUTTON3_DOWN_MASK)
+        send(editor, MouseEvent.MOUSE_DRAGGED, Point(plus.x, y(8)), held = InputEvent.BUTTON3_DOWN_MASK)
+
+        assertEquals(document.getLineStartOffset(2) to document.getLineEndOffset(6), editor.selectionModel.let { it.selectionStart to it.selectionEnd })
     }
 
     fun testARangeReleasedOutsideTheGutterAddsTheRangeAndEndsTheDrag() {
