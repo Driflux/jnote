@@ -23,7 +23,6 @@ import java.nio.file.Path
 import javax.swing.JComponent
 import javax.swing.KeyStroke
 
-/** 스니펫 복사와 키보드 조작(검색창으로 이동, Enter로 코드 이동, Delete로 삭제). */
 class ToolWindowKeyboardTest : BasePlatformTestCase() {
     private lateinit var dir: Path
     private val dbService get() = DatabaseService.getInstance()
@@ -78,8 +77,6 @@ class ToolWindowKeyboardTest : BasePlatformTestCase() {
         panel.list.selectedIndex = (0 until panel.list.model.size).first { panel.list.model.getElementAt(it).title == title }
         awaitUntil("detail shown") { panel.detail.isVisible && panel.detail.titleLabel.text == title }
     }
-
-    // 실제 키 바인딩을 거친다: 입력 맵의 키 이름으로 액션 맵의 동작을 찾아 실행한다
     private fun press(panel: JNotePanel, keyCode: Int) {
         val name = panel.list.getInputMap(JComponent.WHEN_FOCUSED).get(KeyStroke.getKeyStroke(keyCode, 0))
         assertNotNull("no binding for key $keyCode", name)
@@ -152,6 +149,21 @@ class ToolWindowKeyboardTest : BasePlatformTestCase() {
 
         assertTrue("the old note's detail must not act", opened.isEmpty())
         awaitUntil("b shown") { panel.detail.isVisible && panel.detail.titleLabel.text == "b" }
+        assertEquals(2, repo.list(projectKey(), false).get().size)
+    }
+
+    fun testKeysDoNothingWhileTheSelectionIsStillBeingDragged() {
+        repo.create(NewNote.code(projectKey(), "src/A.kt", 1, 1, "a")).get()
+        val b = repo.create(NewNote.code(projectKey(), "src/B.kt", 1, 1, "b")).get()
+        val panel = newPanel()
+        showNote(panel, "a")
+
+        panel.list.valueIsAdjusting = true
+        panel.list.selectedIndex = (0 until panel.list.model.size).first { panel.list.model.getElementAt(it).summary.id == b.id }
+        press(panel, KeyEvent.VK_ENTER)
+        press(panel, KeyEvent.VK_DELETE)
+
+        assertTrue(opened.isEmpty())
         assertEquals(2, repo.list(projectKey(), false).get().size)
     }
 

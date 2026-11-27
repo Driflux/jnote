@@ -150,8 +150,6 @@ class JNotePanel internal constructor(
 
     @Volatile
     private var disposed = false
-
-    // 검색창으로 가는 단축키는 이 패널 안에 포커스가 있을 때만 듣는다. 편집기의 찾기와 겹치지 않는다
     internal val focusSearchAction = DumbAwareAction.create { focusSearch() }
 
     init {
@@ -194,7 +192,8 @@ class JNotePanel internal constructor(
         list.actionMap.put(name, object : AbstractAction() {
             override fun actionPerformed(e: ActionEvent) {
                 val target = button()
-                if (detail.isVisible && target.isVisible) target.doClick(0)
+                val selectedUid = list.selectedValue?.summary?.uid
+                if (selectedUid != null && selectedUid == shownDetailUid && detail.isVisible && target.isVisible) target.doClick(0)
             }
         })
     }
