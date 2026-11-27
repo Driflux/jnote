@@ -4,6 +4,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.logger
 import java.nio.file.Path
 
 @Service(Service.Level.APP)
@@ -70,10 +71,21 @@ class DatabaseService : Disposable {
             disposed = true
             current.also { current = null }
         }
-        if (old != null) ApplicationManager.getApplication().executeOnPooledThread { old.close() }
+        if (old != null) ApplicationManager.getApplication().executeOnPooledThread { closeAndLog(old) }
     }
 
     companion object {
         fun getInstance(): DatabaseService = service()
+        internal fun closeAndLog(
+            database: AutoCloseable,
+            warn: (String, Throwable) -> Unit = { message, e -> logger<DatabaseService>().warn(message, e) },
+        ) {
+            try {
+                database.close()
+            } catch (e: Exception) {
+                if (e is InterruptedException) Thread.currentThread().interrupt()
+                warn("Closing the JNote database failed", e)
+            }
+        }
     }
 }

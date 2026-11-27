@@ -1,5 +1,6 @@
 package io.github.driflux.jnote.db
 
+import com.intellij.openapi.diagnostic.logger
 import org.sqlite.JDBC
 import org.sqlite.SQLiteConfig
 import org.sqlite.SQLiteErrorCode
@@ -12,6 +13,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
 class DatabaseClosedException : IllegalStateException("database is closed")
@@ -89,12 +91,18 @@ class Database internal constructor(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        val job = CompletableFuture.runAsync({
+            connection?.close()
+            connection = null
+            closeJobDone = true
+        }, executor)
         try {
-            executor.submit {
-                connection?.close()
-                connection = null
-                closeJobDone = true
-            }.get(closeTimeoutMillis, TimeUnit.MILLISECONDS)
+            job.get(closeTimeoutMillis, TimeUnit.MILLISECONDS)
+        } catch (e: Exception) {
+            if (e is TimeoutException || e is InterruptedException) {
+                job.whenComplete { _, error -> if (error != null) logger<Database>().warn("Closing the database failed after the wait ended", error) }
+            }
+            throw e
         } finally {
             executor.shutdown()
             isOpen = false

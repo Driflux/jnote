@@ -190,6 +190,42 @@ class DatabaseServiceTest : BasePlatformTestCase() {
         service.dispose()
     }
 
+    fun testCloseThatTimesOutBehindARunningJobIsLoggedNotThrownAndClosesTheConnectionLater() {
+        val database = Database(dir.resolve("slow.db"), closeTimeoutMillis = 100)
+        val gate = CountDownLatch(1)
+        val running = database.submit { c -> gate.await(); c }
+        val warnings = mutableListOf<Throwable>()
+        try {
+            PlatformTestUtil.waitWithEventsDispatching("database did not open", { database.isOpen }, 10)
+            DatabaseService.closeAndLog(database) { _, e -> warnings += e }
+            assertTrue(warnings.toString(), warnings.single() is java.util.concurrent.TimeoutException)
+            assertThrows(java.util.concurrent.ExecutionException::class.java) { database.submit { 1 }.get(5, TimeUnit.SECONDS) }
+        } finally {
+            gate.countDown()
+        }
+        val connection = running.get(5, TimeUnit.SECONDS)
+        PlatformTestUtil.waitWithEventsDispatching("connection was not closed", { connection.isClosed }, 10)
+    }
+
+    fun testFailingCloseIsLoggedNotThrown() {
+        val failure = java.util.concurrent.ExecutionException(java.sql.SQLException("close failed"))
+        val warnings = mutableListOf<Throwable>()
+        DatabaseService.closeAndLog({ throw failure }) { _, e -> warnings += e }
+        assertEquals(listOf<Throwable>(failure), warnings)
+    }
+
+    fun testInterruptedCloseKeepsTheInterruptFlag() {
+        var interrupted = false
+        val thread = Thread {
+            closeInterrupted()
+            interrupted = Thread.currentThread().isInterrupted
+        }.apply { start() }
+        thread.join(5_000)
+        assertTrue(interrupted)
+    }
+
+    private fun closeInterrupted() = DatabaseService.closeAndLog({ throw InterruptedException() }) { _, _ -> }
+
     fun testDisposeDoesNotWaitForABusyDatabaseAndClosesItLater() {
         val service = DatabaseService()
         service.switchTo(dir.resolve("busy.db"))
