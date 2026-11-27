@@ -6,6 +6,8 @@ import com.intellij.openapi.wm.IdeFrame
 import com.intellij.openapi.actionSystem.CommonShortcuts
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.wm.IdeFocusManager
+import com.intellij.openapi.actionSystem.DataSink
+import com.intellij.openapi.actionSystem.UiDataProvider
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -36,6 +38,7 @@ import io.github.driflux.jnote.NoteSelectRequested
 import io.github.driflux.jnote.NoteSelectRequestedListener
 import io.github.driflux.jnote.NotesChangedListener
 import io.github.driflux.jnote.action.NoteSaver
+import io.github.driflux.jnote.ai.SELECTED_NOTES
 import io.github.driflux.jnote.action.RelocateNotesTask
 import io.github.driflux.jnote.anchor.AnchorLines
 import io.github.driflux.jnote.db.DatabaseService
@@ -76,7 +79,7 @@ class JNotePanel internal constructor(
     private val askTagName: (Project, Tag, List<Tag>) -> String? = TagDialogs::askNewName,
     private val confirmTagDelete: (Project, Tag) -> Boolean = TagDialogs::confirmDelete,
     private val goToCode: (Project, Note) -> Unit = { target, note -> CodeNavigator.goTo(target, note) },
-) : JBPanel<JNotePanel>(BorderLayout()), Disposable {
+) : JBPanel<JNotePanel>(BorderLayout()), Disposable, UiDataProvider {
     constructor(project: Project) : this(project, AppDelayScheduler)
 
     private class Loaded(
@@ -514,6 +517,10 @@ class JNotePanel internal constructor(
         } else {
             JNoteBundle.message("toolWindow.empty.hint", action, shortcut)
         }
+    }
+
+    override fun uiDataSnapshot(sink: DataSink) {
+        sink[SELECTED_NOTES] = list.selectedValuesList.map { it.note }
     }
 
     override fun dispose() {
