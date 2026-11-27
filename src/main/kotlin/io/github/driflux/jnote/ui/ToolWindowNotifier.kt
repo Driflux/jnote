@@ -82,6 +82,7 @@ internal object ToolWindowNotifier {
 
     fun deleted(
         project: Project,
+        count: Int = 1,
         expireAfterMs: Long = NoteDeletion.UNDO_TIMEOUT_MS,
         schedule: (Runnable, Long) -> ScheduledFuture<*> = { task, delayMs ->
             AppExecutorUtil.getAppScheduledExecutorService().schedule(task, delayMs, TimeUnit.MILLISECONDS)
@@ -89,7 +90,7 @@ internal object ToolWindowNotifier {
         onUndo: () -> Unit,
     ): Notification {
         val notification = group().createNotification(
-            JNoteBundle.message("toolWindow.notification.deleted"),
+            if (count == 1) JNoteBundle.message("toolWindow.notification.deleted") else JNoteBundle.message("toolWindow.notification.deletedMany", count),
             NotificationType.INFORMATION,
         )
         notification.addAction(NotificationAction.createSimpleExpiring(JNoteBundle.message("toolWindow.notification.undo")) { onUndo() })

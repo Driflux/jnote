@@ -1,5 +1,8 @@
 package io.github.driflux.jnote.ui
 
+import com.intellij.notification.Notification
+import com.intellij.notification.NotificationAction
+import com.intellij.notification.Notifications
 import com.intellij.openapi.actionSystem.CommonShortcuts
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
@@ -9,6 +12,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.TestActionEvent
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
@@ -164,6 +168,58 @@ class ToolWindowKeyboardTest : BasePlatformTestCase() {
         press(panel, KeyEvent.VK_DELETE)
 
         assertTrue(opened.isEmpty())
+        assertEquals(2, repo.list(projectKey(), false).get().size)
+    }
+
+    fun testDeleteWithSeveralNotesSelectedDeletesThemAllWithOneUndo() {
+        val shown = mutableListOf<Notification>()
+        project.messageBus.connect(testRootDisposable).subscribe(Notifications.TOPIC, object : Notifications {
+            override fun notify(notification: Notification) {
+                shown += notification
+            }
+        })
+        val a = repo.create(NewNote.code(projectKey(), "src/A.kt", 1, 1, "a")).get()
+        repo.create(NewNote.code(projectKey(), "src/B.kt", 1, 1, "keep")).get()
+        val c = repo.create(NewNote.free("c")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { panel.list.model.size == 3 }
+        panel.list.selectedIndices = (0 until panel.list.model.size).filter { panel.list.model.getElementAt(it).title != "keep" }.toIntArray()
+
+        press(panel, KeyEvent.VK_DELETE)
+
+        awaitUntil("both deleted") { repo.get(a.id).get() == null && repo.get(c.id).get() == null }
+        awaitUntil("list refreshed") { (0 until panel.list.model.size).map { panel.list.model.getElementAt(it).title } == listOf("keep") }
+        val notification = shown.single()
+        assertEquals(JNoteBundle.message("toolWindow.notification.deletedMany", 2), notification.content)
+        val undo = notification.actions.single() as NotificationAction
+
+        undo.actionPerformed(TestActionEvent.createTestEvent(undo), notification)
+
+        awaitUntil("both restored") { repo.get(a.id).get() == a && repo.get(c.id).get() == c }
+    }
+
+    fun testDeleteWhileTheShownRowIsStillBeingDraggedDoesNothing() {
+        repo.create(NewNote.code(projectKey(), "src/A.kt", 1, 1, "a")).get()
+        repo.create(NewNote.free("b")).get()
+        val panel = newPanel()
+        showNote(panel, "a")
+
+        panel.list.valueIsAdjusting = true
+        press(panel, KeyEvent.VK_DELETE)
+
+        assertEquals(2, repo.list(projectKey(), false).get().size)
+    }
+
+    fun testDeleteWhileSeveralRowsAreStillBeingDraggedDoesNothing() {
+        repo.create(NewNote.code(projectKey(), "src/A.kt", 1, 1, "a")).get()
+        repo.create(NewNote.free("b")).get()
+        val panel = newPanel()
+        awaitUntil("listed") { panel.list.model.size == 2 }
+
+        panel.list.valueIsAdjusting = true
+        panel.list.selectedIndices = intArrayOf(0, 1)
+        press(panel, KeyEvent.VK_DELETE)
+
         assertEquals(2, repo.list(projectKey(), false).get().size)
     }
 
