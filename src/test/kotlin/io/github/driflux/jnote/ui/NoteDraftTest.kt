@@ -4,6 +4,7 @@ import io.github.driflux.jnote.anchor.CodeAnchor
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
+import io.github.driflux.jnote.model.NoteText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -74,17 +75,12 @@ class NoteDraftTest {
         assertEquals(NoteDraft("T"), NoteDraft.of(saved.copy(title = "T", body = "", aiSource = null, sourceUrl = null, prompt = null)))
     }
 
-    @Test fun applyToChangesOnlyTextFieldsAndKeepsTheAnchor() {
-        val edited = NoteDraft(" New ", " new body ", "Gemini", "", " ").applyTo(saved)
-        assertEquals(saved.copy(title = "New", body = "new body", aiSource = "Gemini", sourceUrl = null, prompt = null), edited)
-        // 앵커, 상태, 식별자, 타임스탬프는 그대로다(updatedAt은 저장소가 올린다)
-        assertEquals(20, edited.updatedAt)
-        assertEquals(NoteStatus.APPROX, edited.status)
-        assertEquals("uid-1", edited.uid)
+    @Test fun toTextTrimsAndDropsBlankAiFields() {
+        assertEquals(NoteText("New", "new body", "Gemini", null, null), NoteDraft(" New ", " new body ", "Gemini", "", " ").toText())
     }
 
-    @Test fun applyToRejectsBlankTitle() {
-        assertThrows(IllegalArgumentException::class.java) { NoteDraft(" ").applyTo(saved) }
+    @Test fun toTextRejectsBlankTitle() {
+        assertThrows(IllegalArgumentException::class.java) { NoteDraft(" ").toText() }
     }
 
     @Test fun anchorOrNullFollowsTheKind() {

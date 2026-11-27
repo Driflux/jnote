@@ -4,6 +4,7 @@ import io.github.driflux.jnote.anchor.CodeAnchor
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
+import io.github.driflux.jnote.model.NoteText
 
 data class NoteDraft(
     val title: String,
@@ -42,19 +43,10 @@ data class NoteDraft(
         )
     }
 
-    /**
-     * 편집 결과를 [note]에 덮어쓴 노트. 앵커, 종류, 프로젝트, 상태는 그대로 두고 제목, 본문, AI 출처만 바꾼다.
-     * 태그는 노트 행에 없으므로 건드리지 않고, updatedAt은 저장소가 갱신한다.
-     */
-    fun applyTo(note: Note): Note {
+    /** 편집 결과의 글 부분. 태그는 노트 행에 없으므로 들어 있지 않다. */
+    fun toText(): NoteText {
         require(title.isNotBlank()) { "title is blank" }
-        return note.copy(
-            title = title.trim(),
-            body = body.trim(),
-            aiSource = aiSource.trimToNull(),
-            sourceUrl = sourceUrl.trimToNull(),
-            prompt = prompt.trimToNull(),
-        )
+        return NoteText(title.trim(), body.trim(), aiSource.trimToNull(), sourceUrl.trimToNull(), prompt.trimToNull())
     }
 
     /** 저장할 태그 이름. 다듬고 빈 이름과 중복은 뺀다. 저장소가 사전 등록을 맡는다. */

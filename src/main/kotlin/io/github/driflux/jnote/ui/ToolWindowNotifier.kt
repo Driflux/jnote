@@ -31,6 +31,14 @@ internal object ToolWindowNotifier {
     }
 
     fun copyFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.copy", cause)
+    /** 확인하려던 위치가 그 사이 파일 열기 검증이나 다른 IDE에서 바뀌어 확인을 적용하지 않았을 때. */
+    fun locationMoved(project: Project, textSaved: Boolean) {
+        group().createNotification(
+            JNoteBundle.message("toolWindow.locationMoved.title"),
+            JNoteBundle.message(if (textSaved) "toolWindow.locationMoved.contentEdited" else "toolWindow.locationMoved.content"),
+            NotificationType.WARNING,
+        ).notify(project)
+    }
 
     fun renameTagFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.tagRename", cause)
 

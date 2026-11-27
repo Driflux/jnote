@@ -10,6 +10,7 @@ import io.github.driflux.jnote.anchor.CodeAnchor
 import io.github.driflux.jnote.db.Database
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.db.TagRepository
+import io.github.driflux.jnote.model.AnchorUpdate
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
@@ -109,7 +110,7 @@ class NoteSaverTest : BasePlatformTestCase() {
             .update(project, created, NoteDraft(" New ", "nb", "Gemini", tags = listOf("x")))
         await(future)
 
-        val updated = future.get()!!
+        val updated = future.get()!!.note
         assertEquals(updated, repo.get(created.id).get())
         assertEquals("New", updated.title)
         assertEquals("Gemini", updated.aiSource)
@@ -292,7 +293,8 @@ class NoteSaverTest : BasePlatformTestCase() {
         await(future)
 
         val stored = repo.get(created.id).get()!!
-        assertEquals(stored, future.get())
+        assertEquals(stored, future.get()!!.note)
+        assertFalse(future.get()!!.locationMoved)
         assertEquals(NoteStatus.OK, stored.status)
         assertEquals("two\nthree", stored.snapshot)
         assertEquals(created.copy(status = NoteStatus.OK, snapshot = "two\nthree", updatedAt = stored.updatedAt), stored)
@@ -310,6 +312,77 @@ class NoteSaverTest : BasePlatformTestCase() {
         val stored = repo.get(created.id).get()!!
         assertEquals(created.copy(title = "New", body = "nb", status = NoteStatus.OK, snapshot = "c", updatedAt = stored.updatedAt), stored)
         assertEquals(1, published.get())
+    }
+
+    // 다른 IDE 프로세스(또는 파일 열기 검증)가 목록을 읽은 뒤 노트를 옮긴다
+    private fun moveElsewhere(uid: String, relPath: String, start: Int, end: Int, status: NoteStatus) {
+        val other = Database(dir.resolve("jnote.db"))
+        try {
+            NoteRepository(other).updateAnchors(listOf(AnchorUpdate(uid, relPath, start, end, status))).get()
+        } finally {
+            other.close()
+        }
+    }
+
+    fun testEditKeepsAnchorColumnsThatChangedAfterTheListWasRead() {
+        val repo = NoteRepository(db)
+        val read = repo.create(NewNote.code("k", "src/A.kt", 3, 5, "Old", snapshot = "snap")).get()
+        moveElsewhere(read.uid, "src/B.kt", 7, 9, NoteStatus.APPROX)
+
+        val future = NoteSaver(repository = { repo }).update(project, read, NoteDraft("New"))
+        await(future)
+
+        val stored = repo.get(read.id).get()!!
+        assertEquals(read.copy(relPath = "src/B.kt", startLine = 7, endLine = 9, status = NoteStatus.APPROX, title = "New", updatedAt = stored.updatedAt), stored)
+        assertEquals(1, published.get())
+    }
+
+    fun testConfirmingANoteThatMovedMeanwhileChangesNothingAndSaysSo() {
+        val relPath = sourceFile("ConfirmMoved.kt", "one\ntwo\nthree\nfour\n")
+        val repo = NoteRepository(db)
+        val read = approx(repo, relPath, 2, 3)
+        moveElsewhere(read.uid, relPath, 3, 4, NoteStatus.APPROX)
+
+        val future = NoteSaver(repository = { repo }).confirmLocation(project, read)
+        await(future)
+
+        assertTrue(future.get()!!.locationMoved)
+        assertEquals(read.copy(startLine = 3, endLine = 4), repo.get(read.id).get())
+        assertEquals(1, published.get())
+    }
+
+    fun testEditingAnApproxNoteThatMovedMeanwhileSavesTheTextButDoesNotConfirm() {
+        val relPath = sourceFile("EditMoved.kt", "a\nb\nc\nd\n")
+        val repo = NoteRepository(db)
+        val read = approx(repo, relPath, 2, 2)
+        moveElsewhere(read.uid, relPath, 4, 4, NoteStatus.APPROX)
+
+        val future = NoteSaver(repository = { repo }).update(project, read, NoteDraft("New"))
+        await(future)
+
+        assertTrue(future.get()!!.locationMoved)
+        val stored = repo.get(read.id).get()!!
+        assertEquals(read.copy(startLine = 4, endLine = 4, title = "New", body = "", updatedAt = stored.updatedAt), stored)
+    }
+
+    fun testUpdateResolvesRepositoriesOnBackgroundExecutor() {
+        val threads = mutableListOf<String>()
+        val repo = NoteRepository(db)
+        val tags = TagRepository(db)
+        val created = repo.create(NewNote.free("q")).get()
+        val saver = NoteSaver(
+            repository = {
+                threads += Thread.currentThread().name
+                repo
+            },
+            tags = {
+                threads += Thread.currentThread().name
+                tags
+            },
+            background = joiningBackground,
+        )
+        await(saver.update(project, created, NoteDraft("x")))
+        assertEquals(listOf("fake-background", "fake-background"), threads)
     }
 
     fun testEditingAnOkNoteKeepsItsSnapshotEvenWhenTheCodeChanged() {

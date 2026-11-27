@@ -1,11 +1,13 @@
 package io.github.driflux.jnote.db
 
 import io.github.driflux.jnote.model.AnchorUpdate
+import io.github.driflux.jnote.model.LocationConfirmation
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
 import io.github.driflux.jnote.model.NoteSummary
+import io.github.driflux.jnote.model.NoteText
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -76,6 +78,55 @@ class NoteRepositoryTest {
         val e = assertThrows(ExecutionException::class.java) { repo.create(code(), listOf("a,b")).get() }
         assertTrue(e.cause is IllegalArgumentException)
         assertTrue(repo.list(null, true).get().isEmpty())
+    }
+
+    @Test
+    fun updateTextKeepsAnchorColumnsThatChangedAfterTheNoteWasRead() {
+        val read = repo.create(code()).get()
+        repo.updateAnchors(listOf(AnchorUpdate(read.uid, "src/B.kt", 7, 9, NoteStatus.APPROX))).get()
+        now = 2_000
+
+        val saved = repo.updateText(read.uid, NoteText("New", "nb", "Claude", null, null)).get()!!
+
+        val expected = read.copy(
+            relPath = "src/B.kt", startLine = 7, endLine = 9, status = NoteStatus.APPROX,
+            title = "New", body = "nb", aiSource = "Claude", updatedAt = 2_000,
+        )
+        assertEquals(expected, saved.note)
+        assertEquals(expected, repo.get(read.id).get())
+        assertFalse(saved.locationMoved)
+    }
+
+    @Test
+    fun updateTextOfAMissingNoteIsNull() {
+        assertNull(repo.updateText("no-such-uid", NoteText("t", "", null, null, null)).get())
+    }
+
+    @Test
+    fun confirmLocationAppliesOnlyWhileTheStoredAnchorIsTheOneConfirmed() {
+        val read = repo.create(NewNote.code("p1", "src/A.kt", 3, 5, "t", snapshot = "old", status = NoteStatus.APPROX)).get()
+        val other = Database(tmp.root.toPath().resolve("jnote.db"))
+        try {
+            // 다른 IDE 프로세스가 파일을 열어 노트를 옮긴 상황
+            NoteRepository(other).updateAnchors(listOf(AnchorUpdate(read.uid, "src/A.kt", 4, 6, NoteStatus.APPROX))).get()
+        } finally {
+            other.close()
+        }
+
+        val missed = repo.confirmLocation(read.uid, LocationConfirmation("src/A.kt", 3, 5, "seen")).get()!!
+        assertTrue(missed.locationMoved)
+        assertEquals(read.copy(startLine = 4, endLine = 6), missed.note)
+
+        val applied = repo.confirmLocation(read.uid, LocationConfirmation("src/A.kt", 4, 6, "current")).get()!!
+        assertFalse(applied.locationMoved)
+        assertEquals(NoteStatus.OK, applied.note.status)
+        assertEquals("current", applied.note.snapshot)
+        assertEquals(applied.note, repo.get(read.id).get())
+    }
+
+    @Test
+    fun confirmLocationOfAMissingNoteIsNull() {
+        assertNull(repo.confirmLocation("no-such-uid", LocationConfirmation("src/A.kt", 1, 1, "s")).get())
     }
 
     @Test

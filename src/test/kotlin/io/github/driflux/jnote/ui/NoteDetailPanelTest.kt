@@ -22,6 +22,7 @@ import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.db.TagRepository
+import io.github.driflux.jnote.model.AnchorUpdate
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
@@ -530,6 +531,25 @@ class NoteDetailPanelTest : BasePlatformTestCase() {
         assertEquals(NoteStatus.OK, stored.status)
         assertEquals("b\nc", stored.snapshot)
         assertEquals("b\nc", panel.detail.snippetViewer.text.orEmpty())
+    }
+
+    fun testConfirmingANoteThatMovedMeanwhileShowsAWarningAndKeepsTheNewLocation() {
+        captureNotifications()
+        val key = projectKey()
+        val real = Path.of(project.basePath!!, "src", "Moved.kt")
+        Files.createDirectories(real.parent)
+        Files.writeString(real, "a\nb\n")
+        Disposer.register(testRootDisposable) { real.toFile().delete() }
+        val read = repo.create(NewNote.code(key, "src/Moved.kt", 1, 1, "n", status = NoteStatus.APPROX)).get()
+        repo.updateAnchors(listOf(AnchorUpdate(read.uid, "src/Moved.kt", 2, 2, NoteStatus.APPROX))).get()
+        val panel = newPanel(1)
+
+        panel.confirmLocation(read)
+
+        val title = JNoteBundle.message("toolWindow.locationMoved.title")
+        awaitUntil("moved warning shown") { shownNotifications().any { it.title == title } }
+        assertEquals(NotificationType.WARNING, shownNotifications().single { it.title == title }.type)
+        assertEquals(read.copy(startLine = 2, endLine = 2), repo.get(read.id).get())
     }
 
     fun testConfirmFailureShowsAnErrorNotificationNamingTheFile() {
