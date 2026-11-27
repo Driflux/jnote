@@ -133,7 +133,7 @@ class JNotePanel internal constructor(
     }
     internal val currentFileBox = JBCheckBox(JNoteBundle.message("toolWindow.currentFile")).apply {
         addActionListener {
-            state = state.copy(currentFileOnly = isSelected, currentRelPath = currentRelPath())
+            state = state.copy(currentFileOnly = isSelected, currentFile = currentFile())
             render()
         }
     }
@@ -248,14 +248,16 @@ class JNotePanel internal constructor(
         reload()
     }
 
-    private fun currentRelPath(): String? =
-        FileEditorManager.getInstance(project).selectedEditor?.file?.let { AnchorLines.relativePath(project.basePath, it.path) }
+    private fun currentFile(): CurrentFile {
+        val file = FileEditorManager.getInstance(project).selectedEditor?.file ?: return CurrentFile.None
+        return AnchorLines.relativePath(project.basePath, file.path)?.let { CurrentFile.InProject(it) } ?: CurrentFile.OutsideProject
+    }
 
     private fun onEditorSelectionChanged() {
         if (disposed || !state.currentFileOnly) return
-        val relPath = currentRelPath()
-        if (relPath == state.currentRelPath) return
-        state = state.copy(currentRelPath = relPath)
+        val current = currentFile()
+        if (current == state.currentFile) return
+        state = state.copy(currentFile = current)
         render()
     }
 
@@ -430,9 +432,9 @@ class JNotePanel internal constructor(
         val free = JNoteBundle.message("toolWindow.subtitle.free")
         val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free, loaded.noteTags[it.id].orEmpty()) }
         shownProjectKey = loaded.projectKey
-        val relPath = if (state.currentFileOnly) currentRelPath() else state.currentRelPath
+        val current = if (state.currentFileOnly) currentFile() else state.currentFile
         val match = loaded.match?.takeIf { it.query == state.query } ?: state.match
-        state = state.copy(notes = rows, allProjects = allProjects, match = match, currentRelPath = relPath).withTags(loaded.dictionary)
+        state = state.copy(notes = rows, allProjects = allProjects, match = match, currentFile = current).withTags(loaded.dictionary)
         val tagKey = state.tags to state.selectedTagIds
         if (tagKey != tagBarKey) rebuildTagBar()
         render()
@@ -587,9 +589,12 @@ class JNotePanel internal constructor(
 
     private fun showEmptyText() {
         val text = list.emptyText
-        if (state.showEmptyState && state.currentFileOnly && state.currentRelPath == null) {
+        if (state.showEmptyState && state.currentFileOnly && state.currentFile == CurrentFile.None) {
             text.text = JNoteBundle.message("toolWindow.empty.currentFile.none.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.currentFile.none.hint"))
+        } else if (state.showEmptyState && state.currentFileOnly && state.currentFile == CurrentFile.OutsideProject) {
+            text.text = JNoteBundle.message("toolWindow.empty.currentFile.outside.title")
+            text.appendLine(JNoteBundle.message("toolWindow.empty.currentFile.outside.hint"))
         } else if (state.aiFilterEmptiedTheList) {
             text.text = JNoteBundle.message(if (state.currentFileOnly) "toolWindow.empty.ai.currentFile.title" else "toolWindow.empty.ai.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.ai.hint"))

@@ -5,6 +5,13 @@ import io.github.driflux.jnote.model.Tag
 
 data class SearchMatch(val query: String, val ids: Set<Long>)
 
+/** "현재 파일" 필터가 보는 활성 편집기. 편집기가 없는 것과 프로젝트 밖 파일은 안내가 달라서 나눈다. */
+sealed interface CurrentFile {
+    data object None : CurrentFile
+    data object OutsideProject : CurrentFile
+    data class InProject(val relPath: String) : CurrentFile
+}
+
 data class ToolWindowState(
     val notes: List<NoteRow>? = null,
     val allProjects: Boolean = false,
@@ -14,7 +21,7 @@ data class ToolWindowState(
     val query: String = "",
     val match: SearchMatch? = null,
     val currentFileOnly: Boolean = false,
-    val currentRelPath: String? = null,
+    val currentFile: CurrentFile = CurrentFile.None,
     val aiOnly: Boolean = false,
 ) {
     val searching: Boolean get() = SearchQuery.isSearchable(query)
@@ -32,7 +39,7 @@ data class ToolWindowState(
         }
 
     private fun inCurrentFile(row: NoteRow): Boolean =
-        !currentFileOnly || (row.summary.kind == NoteKind.CODE && row.projectName == null && row.summary.relPath == currentRelPath && currentRelPath != null)
+        !currentFileOnly || (row.summary.kind == NoteKind.CODE && row.projectName == null && row.summary.relPath == (currentFile as? CurrentFile.InProject)?.relPath)
 
     val aiFilterEmptiedTheList: Boolean get() = aiOnly && showEmptyState && copy(aiOnly = false).visibleNotes.isNotEmpty()
 

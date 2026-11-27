@@ -7,6 +7,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.newvfs.impl.VfsRootAccess
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import io.github.driflux.jnote.JNoteBundle
@@ -156,6 +157,23 @@ class CurrentFileFilterTest : BasePlatformTestCase() {
         FileEditorManager.getInstance(project).closeFile(file)
 
         assertEquals(JNoteBundle.message("toolWindow.empty.currentFile.none.title"), panel.list.emptyText.text)
+    }
+
+    fun testFileOutsideTheProjectShowsItsOwnMessage() {
+        seed()
+        val outside = dir.resolve("Outside.kt")
+        Files.writeString(outside, "class Outside\n")
+        VfsRootAccess.allowRootAccess(testRootDisposable, dir.toString())
+        val vFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(outside)!!
+        created += vFile
+        myFixture.openFileInEditor(vFile)
+        val panel = newPanel()
+        awaitUntil("listed") { titles(panel).size == 3 }
+
+        toggle(panel)
+
+        assertTrue(titles(panel).isEmpty())
+        assertEquals(JNoteBundle.message("toolWindow.empty.currentFile.outside.title"), panel.list.emptyText.text)
     }
 
     fun testOpenFileWithoutNotesShowsTheNoNotesInFileMessage() {

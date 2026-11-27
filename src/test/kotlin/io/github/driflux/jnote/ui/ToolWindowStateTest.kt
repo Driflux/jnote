@@ -157,26 +157,33 @@ class ToolWindowStateTest {
         val here = codeIn(10, "p", "src/A.kt")
         val otherFile = codeIn(11, "p", "src/B.kt")
         val otherProject = codeIn(12, "q", "src/A.kt")
-        val state = ToolWindowState(notes = listOf(row, here, otherFile, otherProject), currentFileOnly = true, currentRelPath = "src/A.kt")
+        val state = ToolWindowState(notes = listOf(row, here, otherFile, otherProject), currentFileOnly = true, currentFile = CurrentFile.InProject("src/A.kt"))
         assertEquals(listOf(10L), state.visibleNotes.map { it.summary.id })
     }
 
     @Test
     fun currentFileOffIgnoresThePath() {
-        val state = ToolWindowState(notes = listOf(row, codeIn(10, "p", "src/A.kt")), currentFileOnly = false, currentRelPath = "src/Z.kt")
+        val state = ToolWindowState(notes = listOf(row, codeIn(10, "p", "src/A.kt")), currentFileOnly = false, currentFile = CurrentFile.InProject("src/Z.kt"))
         assertEquals(2, state.visibleNotes.size)
     }
 
     @Test
     fun currentFileOnlyWithNoOpenFileMatchesNothingAndShowsTheEmptyState() {
-        val state = ToolWindowState(notes = listOf(row, codeIn(10, "p", "src/A.kt")), currentFileOnly = true, currentRelPath = null)
+        val state = ToolWindowState(notes = listOf(row, codeIn(10, "p", "src/A.kt")), currentFileOnly = true, currentFile = CurrentFile.None)
+        assertTrue(state.visibleNotes.isEmpty())
+        assertTrue(state.showEmptyState)
+    }
+
+    @Test
+    fun currentFileOnlyWithAFileOutsideTheProjectMatchesNothing() {
+        val state = ToolWindowState(notes = listOf(row, codeIn(10, "p", "src/A.kt")), currentFileOnly = true, currentFile = CurrentFile.OutsideProject)
         assertTrue(state.visibleNotes.isEmpty())
         assertTrue(state.showEmptyState)
     }
 
     @Test
     fun currentFileCombinesWithTheKindFilter() {
-        val state = ToolWindowState(notes = listOf(codeIn(10, "p", "src/A.kt")), filter = NoteFilter.FREE, currentFileOnly = true, currentRelPath = "src/A.kt")
+        val state = ToolWindowState(notes = listOf(codeIn(10, "p", "src/A.kt")), filter = NoteFilter.FREE, currentFileOnly = true, currentFile = CurrentFile.InProject("src/A.kt"))
         assertTrue(state.visibleNotes.isEmpty())
     }
 
