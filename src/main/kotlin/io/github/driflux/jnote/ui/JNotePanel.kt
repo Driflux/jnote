@@ -69,7 +69,9 @@ import javax.swing.KeyStroke
 import javax.swing.JPopupMenu
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import javax.swing.SwingUtilities
 import javax.swing.ListSelectionModel
 import javax.swing.event.DocumentEvent
 
@@ -132,6 +134,14 @@ class JNotePanel internal constructor(
             render()
         }
     }
+    internal val aiOnlyBox = JBCheckBox(JNoteBundle.message("toolWindow.aiOnly")).apply {
+        addActionListener {
+            state = state.copy(aiOnly = isSelected)
+            render()
+        }
+    }
+
+    private var tagBarKey: Pair<List<Tag>, Set<Long>>? = null
     internal val tagBar = JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 2)).apply { isVisible = false }
     internal val searchField = SearchTextField(false).apply {
         textEditor.emptyText.text = JNoteBundle.message("toolWindow.search.placeholder")
@@ -156,6 +166,12 @@ class JNotePanel internal constructor(
     })
 
     private val pendingLoads = AtomicInteger()
+
+    private val listLoads = AtomicInteger()
+    private val rerunAfterLoad = AtomicBoolean()
+    private val loadLock = Any()
+
+    internal val reloadsStarted = AtomicInteger()
     internal val isIdle: Boolean get() = pendingLoads.get() == 0
 
     internal var state = ToolWindowState()
@@ -196,6 +212,7 @@ class JNotePanel internal constructor(
             add(JBPanel<JBPanel<*>>(WrapLayout(FlowLayout.LEFT, 4, 0)).apply {
                 add(allProjectsBox)
                 add(currentFileBox)
+                add(aiOnlyBox)
                 add(filterCombo)
             }, BorderLayout.CENTER)
             add(spinnerIcon, BorderLayout.EAST)
@@ -219,7 +236,7 @@ class JNotePanel internal constructor(
         Disposer.register(this) { focusManager.removePropertyChangeListener(FOCUS_OWNER_PROPERTY, focusListener) }
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(ApplicationActivationListener.TOPIC, object : ApplicationActivationListener {
-                override fun applicationActivated(ideFrame: IdeFrame) = onApplicationActivated()
+                override fun applicationActivated(ideFrame: IdeFrame) = onApplicationActivated(ideFrame.component)
             })
         ApplicationManager.getApplication().messageBus.connect(this)
             .subscribe(NotesChanged.TOPIC, NotesChangedListener { reload() })
@@ -240,11 +257,24 @@ class JNotePanel internal constructor(
     }
 
     internal fun onFocusOwnerChanged(oldOwner: Component?, newOwner: Component?) {
-        if (!disposed && FocusEntry.entered(this, oldOwner, newOwner)) reload()
+        if (!disposed && FocusEntry.entered(this, oldOwner, newOwner)) reloadOnFocus()
     }
 
-    internal fun onApplicationActivated(focusOwner: Component? = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner) {
-        if (!disposed && FocusEntry.inside(this, focusOwner)) reload()
+    internal fun onApplicationActivated(
+        frame: Component?,
+        focusOwner: Component? = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner,
+    ) {
+        if (disposed || (frame != null && !SwingUtilities.isDescendingFrom(this, frame))) return
+        if (FocusEntry.inside(this, focusOwner)) reloadOnFocus()
+    }
+
+    private fun reloadOnFocus() {
+        val busy = synchronized(loadLock) {
+            val running = listLoads.get() > 0
+            if (running) rerunAfterLoad.set(true)
+            running
+        }
+        if (!busy) reload()
     }
 
     internal fun focusSearch() {
@@ -265,9 +295,13 @@ class JNotePanel internal constructor(
         val ticket = generation.incrementAndGet()
         val allProjects = allProjects
         val query = query
+        reloadsStarted.incrementAndGet()
+        listLoads.incrementAndGet()
         pendingLoads.incrementAndGet()
         onEdt { if (!disposed) spinner.start() }
         load(allProjects, query).whenComplete { loaded, error ->
+            val rerun = synchronized(loadLock) { listLoads.decrementAndGet() == 0 && rerunAfterLoad.compareAndSet(true, false) }
+            if (rerun && !disposed) reload()
             pendingLoads.decrementAndGet()
             onEdt {
                 if (disposed || ticket != generation.get()) return@onEdt
@@ -394,8 +428,10 @@ class JNotePanel internal constructor(
         val rows = loaded.notes.map { NoteRows.of(it, loaded.projectKey, free, loaded.noteTags[it.id].orEmpty()) }
         shownProjectKey = loaded.projectKey
         val relPath = if (state.currentFileOnly) currentRelPath() else state.currentRelPath
-        state = state.copy(notes = rows, allProjects = allProjects, match = loaded.match ?: state.match, currentRelPath = relPath).withTags(loaded.dictionary)
-        rebuildTagBar()
+        val match = loaded.match?.takeIf { it.query == state.query } ?: state.match
+        state = state.copy(notes = rows, allProjects = allProjects, match = match, currentRelPath = relPath).withTags(loaded.dictionary)
+        val tagKey = state.tags to state.selectedTagIds
+        if (tagKey != tagBarKey) rebuildTagBar()
         render()
     }
 
@@ -466,10 +502,12 @@ class JNotePanel internal constructor(
     }
 
     private fun rebuildTagBar() {
+        tagBarKey = state.tags to state.selectedTagIds
         tagBar.removeAll()
         state.tags.forEach { tag ->
             val chip = tagChip(tag.name, tag.id in state.selectedTagIds) {
                 state = state.toggleTag(tag.id)
+                tagBarKey = state.tags to state.selectedTagIds
                 render()
             }
             chip.addMouseListener(object : MouseAdapter() {
@@ -549,6 +587,9 @@ class JNotePanel internal constructor(
         if (state.showEmptyState && state.currentFileOnly && state.currentRelPath == null) {
             text.text = JNoteBundle.message("toolWindow.empty.currentFile.none.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.currentFile.none.hint"))
+        } else if (state.aiFilterEmptiedTheList) {
+            text.text = JNoteBundle.message(if (state.currentFileOnly) "toolWindow.empty.ai.currentFile.title" else "toolWindow.empty.ai.title")
+            text.appendLine(JNoteBundle.message("toolWindow.empty.ai.hint"))
         } else if (state.showEmptyState && state.tagFilterActive) {
             text.text = JNoteBundle.message("toolWindow.empty.tags.title")
             text.appendLine(JNoteBundle.message("toolWindow.empty.tags.hint"))

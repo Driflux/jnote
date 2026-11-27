@@ -111,7 +111,7 @@ class FocusRefreshTest : BasePlatformTestCase() {
         awaitUntil("first load") { panel.state.notes != null }
         writeFromAnotherWindow("seen after activation")
 
-        panel.onApplicationActivated(panel.list)
+        panel.onApplicationActivated(null, panel.list)
 
         awaitUntil("refreshed") { titles(panel) == listOf("seen after activation") }
     }
@@ -121,10 +121,68 @@ class FocusRefreshTest : BasePlatformTestCase() {
         awaitUntil("first load") { panel.state.notes != null }
         writeFromAnotherWindow("unseen")
 
-        panel.onApplicationActivated(outside)
+        panel.onApplicationActivated(null, outside)
         settle(panel)
 
         assertTrue(titles(panel).isEmpty())
+    }
+
+    fun testActivationOfAnotherIdeFrameIsIgnored() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        writeFromAnotherWindow("unseen")
+
+        panel.onApplicationActivated(JPanel(), panel.list)
+        settle(panel)
+
+        assertTrue(titles(panel).isEmpty())
+    }
+
+    fun testActivationOfTheFrameThatHoldsThePanelReloads() {
+        val panel = newPanel()
+        val frame = JPanel().also { it.add(panel) }
+        awaitUntil("first load") { panel.state.notes != null }
+        writeFromAnotherWindow("in my frame")
+
+        panel.onApplicationActivated(frame, panel.list)
+
+        awaitUntil("refreshed") { titles(panel) == listOf("in my frame") }
+    }
+
+    fun testManyFocusEntriesWhileALoadIsRunningCostOneMoreLoad() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        settle(panel)
+        val before = panel.reloadsStarted.get()
+        val release = java.util.concurrent.CountDownLatch(1)
+        dbService.database.submit { release.await(10, java.util.concurrent.TimeUnit.SECONDS) }
+
+        repeat(20) {
+            panel.onFocusOwnerChanged(outside, panel.list)
+            panel.onFocusOwnerChanged(panel.list, outside)
+        }
+        val write = repo.create(NewNote.code(projectKey(), "src/A.kt", 1, 1, "latest"))
+        release.countDown()
+        write.get()
+
+        awaitUntil("latest data shown") { titles(panel) == listOf("latest") }
+        settle(panel)
+        assertEquals("one load for the first entry and one rerun for the other 39", 2, panel.reloadsStarted.get() - before)
+    }
+
+    fun testTagChipsAreKeptWhenNothingAboutTheTagsChanged() {
+        val note = repo.create(NewNote.code(projectKey(), "src/A.kt", 1, 1, "tagged")).get()
+        val tags = io.github.driflux.jnote.db.TagRepository(dbService.database)
+        tags.attach(note.id, tags.getOrCreate("x").get().id).get()
+        val panel = newPanel()
+        awaitUntil("chip shown") { panel.tagBar.componentCount == 1 }
+        val chip = panel.tagBar.getComponent(0)
+
+        panel.onFocusOwnerChanged(outside, panel.list)
+        awaitUntil("reloaded") { panel.reloadsStarted.get() >= 2 }
+        settle(panel)
+
+        assertSame("the focused chip must not be replaced by a reload", chip, panel.tagBar.getComponent(0))
     }
 
     fun testNothingReloadsOnItsOwnWhileFocusIsInsideThePanel() {
