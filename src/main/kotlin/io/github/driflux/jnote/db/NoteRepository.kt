@@ -25,18 +25,19 @@ class NoteRepository(
         val now = clock()
         val uid = UUID.randomUUID().toString()
         c.autoCommit = false
-        val id = try {
+        try {
             val id = insert(c, draft, uid, now)
             if (names.isNotEmpty()) setNoteTags(c, id, names)
+            // 커밋 뒤에 읽으면 다른 프로세스가 그 사이 지우거나 id를 다시 쓸 수 있어 쓰기 잠금 안에서 읽는다
+            val note = requireNotNull(findById(c, id))
             c.commit()
-            id
+            note
         } catch (e: Throwable) {
             c.rollback()
             throw e
         } finally {
             c.autoCommit = true
         }
-        requireNotNull(findById(c, id))
     }
 
     private fun insert(c: Connection, draft: NewNote, uid: String, now: Long): Long =
