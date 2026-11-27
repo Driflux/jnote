@@ -86,7 +86,7 @@ class NoteRepositoryTest {
         repo.updateAnchors(listOf(AnchorUpdate(read.uid, "src/B.kt", 7, 9, NoteStatus.APPROX))).get()
         now = 2_000
 
-        val saved = repo.updateText(read.uid, NoteText("New", "nb", "Claude", null, null)).get()!!
+        val saved = repo.updateText(read.uid, NoteText("New", "nb", "Claude", null, null), emptyList()).get()!!
 
         val expected = read.copy(
             relPath = "src/B.kt", startLine = 7, endLine = 9, status = NoteStatus.APPROX,
@@ -99,7 +99,7 @@ class NoteRepositoryTest {
 
     @Test
     fun updateTextOfAMissingNoteIsNull() {
-        assertNull(repo.updateText("no-such-uid", NoteText("t", "", null, null, null)).get())
+        assertNull(repo.updateText("no-such-uid", NoteText("t", "", null, null, null), listOf("x")).get())
     }
 
     @Test
@@ -122,6 +122,25 @@ class NoteRepositoryTest {
         assertEquals(NoteStatus.OK, applied.note.status)
         assertEquals("current", applied.note.snapshot)
         assertEquals(applied.note, repo.get(read.id).get())
+    }
+
+    @Test
+    fun updateTextSetsTheTagsByUidInTheSameTransaction() {
+        val read = repo.create(code(), listOf("a", "b")).get()
+        val saved = repo.updateText(read.uid, NoteText("t", "b", null, null, null), listOf("b", "c")).get()!!
+        assertEquals(listOf("b", "c"), TagRepository(db).tagsOf(saved.note.id).get().map { it.name })
+    }
+
+    @Test
+    fun confirmLocationOverridesAStatusThatChangedAtTheSameLocation() {
+        val read = repo.create(NewNote.code("p1", "src/A.kt", 3, 5, "t", snapshot = "old", status = NoteStatus.APPROX)).get()
+        repo.updateAnchors(listOf(AnchorUpdate(read.uid, "src/A.kt", 3, 5, NoteStatus.ORPHAN))).get()
+
+        val saved = repo.confirmLocation(read.uid, LocationConfirmation("src/A.kt", 3, 5, "seen")).get()!!
+
+        assertFalse(saved.locationMoved)
+        assertEquals(NoteStatus.OK, saved.note.status)
+        assertEquals("seen", saved.note.snapshot)
     }
 
     @Test

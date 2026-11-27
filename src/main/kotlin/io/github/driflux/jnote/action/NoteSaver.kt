@@ -14,7 +14,6 @@ import io.github.driflux.jnote.anchor.CodeAnchors
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.db.SavedNote
-import io.github.driflux.jnote.db.TagRepository
 import io.github.driflux.jnote.model.LocationConfirmation
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteStatus
@@ -27,7 +26,6 @@ import java.util.concurrent.Executor
 
 class NoteSaver(
     private val repository: () -> NoteRepository = { NoteRepository(DatabaseService.getInstance().database) },
-    private val tags: () -> TagRepository = { TagRepository(DatabaseService.getInstance().database) },
     private val projectKey: (Project) -> String = { it.service<ProjectKeyService>().resolve().key },
     private val background: Executor = AppExecutorUtil.getAppExecutorService(),
     private val ui: Executor = Executor { ApplicationManager.getApplication().invokeLater(it, ModalityState.nonModal()) },
@@ -46,7 +44,7 @@ class NoteSaver(
             .thenApplyAsync({ note -> publish(); note }, ui)
 
     /**
-     * 편집한 글과 태그만 저장한다. 앵커와 상태는 목록을 읽은 뒤 위치 갱신이 바꿨을 수 있어 [note]의 값을 쓰지 않는다.
+     * 편집한 글과 태그만 한 트랜잭션으로 저장한다. 앵커와 상태는 목록을 읽은 뒤 위치 갱신이 바꿨을 수 있어 [note]의 값을 쓰지 않는다.
      * 그 사이 지워졌다면 null로 끝나며, 목록을 새로 고치도록 이때도 알린다. APPROX 노트는 편집이 곧 위치 확인이므로
      * [confirmLocation]처럼 함께 확인한다. 파일을 읽지 못하거나 위치가 그 사이 바뀌었으면 글만 저장하고 APPROX로 남긴다.
      */
@@ -55,10 +53,7 @@ class NoteSaver(
         CompletableFuture.supplyAsync({ draft.toText() }, background)
             .thenComposeAsync({ text ->
                 val confirm = if (note.status == NoteStatus.APPROX) confirmation(project, note) else null
-                repository().updateText(note.uid, text, confirm)
-            }, background)
-            .thenComposeAsync({ saved ->
-                if (saved == null) CompletableFuture.completedFuture(null) else tags().replaceTags(saved.note.id, draft.tagNames()).thenApply { saved }
+                repository().updateText(note.uid, text, draft.tagNames(), confirm)
             }, background)
             .thenApplyAsync({ saved -> publish(); saved }, ui)
 

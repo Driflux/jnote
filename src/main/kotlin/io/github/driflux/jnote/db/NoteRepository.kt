@@ -102,18 +102,21 @@ class NoteRepository(
     }
 
     /**
-     * 사용자가 고치는 열(제목, 본문, AI 출처)만 바꾸고 updated_at을 올린다. 앵커와 상태는 그 사이
-     * 위치 갱신이 바꿨을 수 있어 건드리지 않는다. [confirm]이 있으면 같은 트랜잭션에서 [confirmLocation]도 한다.
-     * 노트가 없으면 null.
+     * 사용자가 고치는 열(제목, 본문, AI 출처)만 바꾸고 updated_at을 올리며, 태그를 [tagNames]와 정확히 같게 맞춘다.
+     * 앵커와 상태는 그 사이 위치 갱신이 바꿨을 수 있어 건드리지 않는다. [confirm]이 있으면 [confirmLocation]도 한다.
+     * 모두 한 트랜잭션이다. 노트가 없으면 null, 쉼표가 든 태그 이름이면 아무것도 쓰지 않고 IllegalArgumentException.
      */
-    fun updateText(uid: String, text: NoteText, confirm: LocationConfirmation? = null): CompletableFuture<SavedNote?> =
-        database.submit { c -> transaction(c) { save(c, uid, text, confirm) } }
+    fun updateText(uid: String, text: NoteText, tagNames: List<String>, confirm: LocationConfirmation? = null): CompletableFuture<SavedNote?> =
+        database.submit { c ->
+            val names = cleanTagNames(tagNames)
+            transaction(c) { save(c, uid, text, names, confirm) }
+        }
 
     /** 저장된 위치가 [confirm]의 위치와 아직 같을 때만 OK와 그 스냅샷으로 굳힌다. 노트가 없으면 null. */
     fun confirmLocation(uid: String, confirm: LocationConfirmation): CompletableFuture<SavedNote?> =
-        database.submit { c -> transaction(c) { save(c, uid, null, confirm) } }
+        database.submit { c -> transaction(c) { save(c, uid, null, null, confirm) } }
 
-    private fun save(c: Connection, uid: String, text: NoteText?, confirm: LocationConfirmation?): SavedNote? {
+    private fun save(c: Connection, uid: String, text: NoteText?, tagNames: List<String>?, confirm: LocationConfirmation?): SavedNote? {
         val now = clock()
         if (text != null) {
             val changed = c.prepareStatement(UPDATE_TEXT).use { s ->
@@ -128,6 +131,8 @@ class NoteRepository(
             }
             if (changed == 0) return null
         }
+        // 숫자 id는 지워진 노트의 것이 다시 쓰일 수 있어, 쓰기 잠금을 쥔 이 트랜잭션 안에서 uid로 찾는다
+        if (tagNames != null) setNoteTags(c, checkNotNull(findByUid(c, uid)).id, tagNames)
         val confirmed = confirm == null || c.prepareStatement(CONFIRM_LOCATION).use { s ->
             s.setString(1, confirm.snapshot)
             s.setLong(2, now)

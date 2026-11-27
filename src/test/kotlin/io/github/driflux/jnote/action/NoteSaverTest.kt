@@ -106,7 +106,7 @@ class NoteSaverTest : BasePlatformTestCase() {
         tags.attach(created.id, tag.id).get()
         now = 2_000L
 
-        val future = NoteSaver(repository = { repo }, tags = { tags }, projectKey = { "k" })
+        val future = NoteSaver(repository = { repo }, projectKey = { "k" })
             .update(project, created, NoteDraft(" New ", "nb", "Gemini", tags = listOf("x")))
         await(future)
 
@@ -125,7 +125,7 @@ class NoteSaverTest : BasePlatformTestCase() {
         val repo = NoteRepository(db)
         val tags = TagRepository(db)
         val existing = tags.getOrCreate("old").get()
-        val saver = NoteSaver(repository = { repo }, tags = { tags }, projectKey = { "k" })
+        val saver = NoteSaver(repository = { repo }, projectKey = { "k" })
 
         val future = saver.save(project, anchor, NoteDraft("T", tags = listOf("old", " fresh ", "old", "")))
         await(future)
@@ -158,7 +158,7 @@ class NoteSaverTest : BasePlatformTestCase() {
     fun testSaveFreeAttachesTags() {
         val repo = NoteRepository(db)
         val tags = TagRepository(db)
-        val future = NoteSaver(repository = { repo }, tags = { tags }).saveFree(NoteDraft("q", tags = listOf("sql")))
+        val future = NoteSaver(repository = { repo }).saveFree(NoteDraft("q", tags = listOf("sql")))
         await(future)
         assertEquals(listOf("sql"), tags.tagsOf(future.get().id).get().map { it.name })
     }
@@ -169,7 +169,7 @@ class NoteSaverTest : BasePlatformTestCase() {
         val created = repo.create(NewNote.free("q")).get()
         tags.replaceTags(created.id, listOf("a", "b")).get()
 
-        val future = NoteSaver(repository = { repo }, tags = { tags }).update(project, created, NoteDraft("q", tags = listOf("b", "c")))
+        val future = NoteSaver(repository = { repo }).update(project, created, NoteDraft("q", tags = listOf("b", "c")))
         await(future)
 
         assertEquals(listOf("b", "c"), tags.tagsOf(created.id).get().map { it.name })
@@ -181,7 +181,7 @@ class NoteSaverTest : BasePlatformTestCase() {
         val tags = TagRepository(db)
         val created = repo.create(NewNote.free("q")).get()
         tags.replaceTags(created.id, listOf("a")).get()
-        await(NoteSaver(repository = { repo }, tags = { tags }).update(project, created, NoteDraft("q")))
+        await(NoteSaver(repository = { repo }).update(project, created, NoteDraft("q")))
         assertTrue(tags.tagsOf(created.id).get().isEmpty())
     }
 
@@ -365,24 +365,32 @@ class NoteSaverTest : BasePlatformTestCase() {
         assertEquals(read.copy(startLine = 4, endLine = 4, title = "New", body = "", updatedAt = stored.updatedAt), stored)
     }
 
-    fun testUpdateResolvesRepositoriesOnBackgroundExecutor() {
-        val threads = mutableListOf<String>()
+    fun testUpdateResolvesRepositoryOnBackgroundExecutor() {
+        var repoThread: String? = null
         val repo = NoteRepository(db)
-        val tags = TagRepository(db)
         val created = repo.create(NewNote.free("q")).get()
         val saver = NoteSaver(
             repository = {
-                threads += Thread.currentThread().name
+                repoThread = Thread.currentThread().name
                 repo
-            },
-            tags = {
-                threads += Thread.currentThread().name
-                tags
             },
             background = joiningBackground,
         )
         await(saver.update(project, created, NoteDraft("x")))
-        assertEquals(listOf("fake-background", "fake-background"), threads)
+        assertEquals("fake-background", repoThread)
+    }
+
+    fun testUpdateWithACommaTagChangesNothing() {
+        val repo = NoteRepository(db)
+        val tags = TagRepository(db)
+        val created = repo.create(NewNote.free("q"), listOf("a")).get()
+
+        val future = NoteSaver(repository = { repo }).update(project, created, NoteDraft("x", tags = listOf("b,c")))
+        await(future)
+
+        assertTrue(future.isCompletedExceptionally)
+        assertEquals(created, repo.get(created.id).get())
+        assertEquals(listOf("a"), tags.tagsOf(created.id).get().map { it.name })
     }
 
     fun testEditingAnOkNoteKeepsItsSnapshotEvenWhenTheCodeChanged() {
