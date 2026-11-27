@@ -17,6 +17,7 @@ dependencies {
     intellijPlatform {
         intellijIdeaCommunity(providers.gradleProperty("platformVersion"))
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
+        pluginVerifier()
     }
     implementation("org.xerial:sqlite-jdbc:3.54.1.0")
     testImplementation("junit:junit:4.13.2")
@@ -36,6 +37,15 @@ tasks.test {
     inputs.dir(".claude-plugin")
     inputs.file("src/main/resources/META-INF/plugin.xml")
     inputs.file("LICENSE")
+    inputs.file("gradle.properties")
+}
+
+// 개발용 버전(-SNAPSHOT)이 Marketplace에 올라가는 일을 막는다
+val releaseVersion = version.toString()
+tasks.named("publishPlugin") {
+    doFirst {
+        check(!releaseVersion.endsWith("-SNAPSHOT")) { "pluginVersion in gradle.properties is $releaseVersion; set the release version first (docs/release.md)" }
+    }
 }
 
 tasks.register("syncSkillSpec") {
@@ -53,6 +63,17 @@ intellijPlatform {
         ideaVersion {
             sinceBuild = "242"
             untilBuild = provider { null }
+        }
+    }
+    // 토큰은 저장소에 두지 않고 환경 변수로만 받는다
+    publishing {
+        token = providers.environmentVariable("PUBLISH_TOKEN")
+    }
+    pluginVerification {
+        ides {
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity, providers.gradleProperty("platformVersion"))
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity, "2025.2")
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdea, "2026.1")
         }
     }
 }

@@ -16,7 +16,10 @@ Registering on JetBrains Marketplace (intent.md section 3) needs a description, 
 - **Description layout.** The English block comes first, then a single `<hr/>`, then the Korean block. `MarketplaceMetadataTest` splits on that rule and expects exactly two parts, so a second `<hr/>` breaks it.
 - **Gutter provider language.** `codeInsight.lineMarkerProvider` in `plugin.xml` uses `language=""`, which means every language (`Language.ANY`), so notes show in any file type.
 - **README.** A short `README.md` for the GitHub page repeats the local-only statement and the skill install steps.
-- **Release procedure and versioning** (second PR). Semantic versions `MAJOR.MINOR.PATCH`; the first Marketplace release is `1.0.0`; `pluginVersion` in `gradle.properties` carries the number and `-SNAPSHOT` only on development builds. The signing certificate and the Marketplace token come from environment variables, never from files in the repository. Upload is manual for 1.0; the steps are in `docs/release.md`.
+- **Versioning** (second PR). Semantic versions `MAJOR.MINOR.PATCH`; the first Marketplace release is `1.0.0`; `pluginVersion` in `gradle.properties` is the only place the number is set, with `-SNAPSHOT` on development builds. `publishPlugin` refuses a `-SNAPSHOT` version, and `MarketplaceMetadataTest` requires a release version to have its own `<h4>` heading in the change notes. Major means an incompatible change to the DB or to the JSON format.
+- **Verifier** (second PR). `pluginVerification` in `build.gradle.kts` checks the zip against IntelliJ IDEA 2024.2 (the lower bound), 2025.2, and 2026.1 (the newest at the time). The result is compatible on all three, with deprecation notes only. They stay: each replacement API is missing in 242 (checked by compiling against 242), so removing them would raise `sinceBuild`. `docs/release.md` lists them to revisit then.
+- **Tooling, not product.** `pluginVerifier()` is the Plugin Verifier tool that the IntelliJ Platform Gradle Plugin resolves for `verifyPlugin`. It is not in the plugin zip and not a runtime dependency; the shipped dependency stays `sqlite-jdbc` only.
+- **Publishing.** The Marketplace token comes from the `PUBLISH_TOKEN` environment variable, never from a file in the repository. Upload is manual for 1.0; the steps and the checklist are in `docs/release.md`. Plugin signing is left out of 1.0: it needs a certificate and the signer tool, and nothing here requires it.
 - **Release preconditions.** The description and change notes describe the finished 1.0. The zip is uploaded only from a build that contains every feature they name: JSON import with preview and the inbox check (#17, #18), the gutter "+" button and hover preview (#23), and the rest of the Step 1 to 6 issues. `docs/release.md` (second PR) turns this into a checklist that compares the description with the build before upload.
 - **Not done by an agent.** Screenshots, the final check that the name `JNote` is free, and the first upload need a person. They are a checklist in the PR body, not invented content.
 
@@ -28,6 +31,8 @@ Registering on JetBrains Marketplace (intent.md section 3) needs a description, 
 - Separate Korean listing: the Marketplace has one description per plugin, so both languages share it.
 - `CHANGELOG.md` plus the Gradle changelog plugin: a new plugin dependency, which CLAUDE.md forbids without asking.
 - Publish from CI on tag: needs secrets in CI and adds a way to ship by accident; for a first release a person uploads.
+- Verify only against 242: misses breakage in newer IDEs, which the "242 and later" range promises. The cost is a one-time 800 MB download.
+- Replace the deprecated calls now: each replacement is missing in 242, so it would break the supported range.
 
 ## Consequences
 - Pros

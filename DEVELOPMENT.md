@@ -12,7 +12,7 @@
 ./gradlew runIde          # run the plugin in a sandbox IDE
 ./gradlew test            # unit / integration tests
 ./gradlew verifyPluginProjectConfiguration  # validate the plugin project configuration
-./gradlew verifyPlugin    # compatibility check with Plugin Verifier (needs pluginVerification IDEs, not configured yet)
+./gradlew verifyPlugin    # compatibility check with Plugin Verifier against IDEA 2024.2, 2025.2, 2026.1 (first run downloads about 800 MB)
 ./gradlew buildPlugin     # build the distribution zip (build/distributions)
 ```
 
