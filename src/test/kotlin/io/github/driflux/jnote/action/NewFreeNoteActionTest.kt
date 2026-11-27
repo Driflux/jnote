@@ -68,7 +68,7 @@ class NewFreeNoteActionTest : BasePlatformTestCase() {
 
     fun testFactoryDoesNotFailWhenAddingTheToolbarAction() {
         val window = ToolWindowHeadlessManagerImpl.MockToolWindow(project)
-        io.github.driflux.jnote.ui.JNoteToolWindowFactory().createToolWindowContent(project, window)
+        io.github.driflux.jnote.ui.JNoteToolWindowFactory {}.createToolWindowContent(project, window)
         assertEquals(1, window.contentManager.contentCount)
         com.intellij.openapi.util.Disposer.dispose(window.contentManager.getContent(0)!!.component as io.github.driflux.jnote.ui.JNotePanel)
     }
