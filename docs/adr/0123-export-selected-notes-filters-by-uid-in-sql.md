@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-27
 - Issue: #123
-- PR: (this PR)
+- PR: #129
 
 ## Context
 `NoteExporter.export` read every note, body, snapshot, and tag link of every project in one read transaction on the single DB executor, then kept only the selected `uid`s in memory (ADR 0016 left this as a follow-up from the review of #81). Exporting two selected notes therefore cost as much DB time as exporting everything, and every other DB job (gutter loading, Tool Window, saves) waited behind it.
