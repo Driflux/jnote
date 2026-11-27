@@ -94,6 +94,21 @@ class FocusRefreshTest : BasePlatformTestCase() {
         assertTrue(titles(panel).isEmpty())
     }
 
+    fun testAnInPanelMoveReportedThroughNoOwnerDoesNotReload() {
+        val panel = newPanel()
+        awaitUntil("first load") { panel.state.notes != null }
+        panel.onFocusOwnerChanged(outside, panel.list)
+        awaitUntil("entry reload done") { panel.reloadsStarted.get() >= 2 }
+        settle(panel)
+        val before = panel.reloadsStarted.get()
+
+        panel.onFocusOwnerChanged(panel.list, null)
+        panel.onFocusOwnerChanged(null, panel.searchField.textEditor)
+        settle(panel)
+
+        assertEquals(before, panel.reloadsStarted.get())
+    }
+
     fun testFocusLeavingThePanelDoesNotReload() {
         val panel = newPanel()
         awaitUntil("first load") { panel.state.notes != null }

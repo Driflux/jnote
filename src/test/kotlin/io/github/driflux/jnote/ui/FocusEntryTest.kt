@@ -11,16 +11,44 @@ class FocusEntryTest {
     private val inner = JButton().also { panel.add(it) }
     private val other = JButton().also { panel.add(it) }
     private val outside = JButton()
+    private val entry = FocusEntry(panel)
 
-    @Test fun fromOutsideToInsideIsAnEntry() = assertTrue(FocusEntry.entered(panel, outside, inner))
+    @Test fun fromOutsideToInsideIsAnEntry() = assertTrue(entry.entered(outside, inner))
 
-    @Test fun fromNothingToInsideIsAnEntry() = assertTrue(FocusEntry.entered(panel, null, inner))
+    @Test fun fromNothingToInsideIsAnEntry() = assertTrue(entry.entered(null, inner))
 
-    @Test fun betweenTwoInsideComponentsIsNotAnEntry() = assertFalse(FocusEntry.entered(panel, inner, other))
+    @Test fun betweenTwoInsideComponentsIsNotAnEntry() = assertFalse(entry.entered(inner, other))
 
-    @Test fun leavingIsNotAnEntry() = assertFalse(FocusEntry.entered(panel, inner, outside))
+    @Test fun leavingIsNotAnEntry() = assertFalse(entry.entered(inner, outside))
 
-    @Test fun outsideToOutsideIsNotAnEntry() = assertFalse(FocusEntry.entered(panel, outside, JButton()))
+    @Test fun outsideToOutsideIsNotAnEntry() = assertFalse(entry.entered(outside, JButton()))
 
-    @Test fun losingFocusEntirelyIsNotAnEntry() = assertFalse(FocusEntry.entered(panel, inner, null))
+    @Test fun losingFocusEntirelyIsNotAnEntry() = assertFalse(entry.entered(inner, null))
+
+    @Test
+    fun anInsideMoveReportedThroughNothingIsNotAnEntry() {
+        entry.entered(outside, inner)
+        entry.entered(inner, null)
+        assertFalse(entry.entered(null, other))
+    }
+
+    @Test
+    fun aFirstReportFromInsideToNothingIsRemembered() {
+        entry.entered(inner, null)
+        assertFalse(entry.entered(null, other))
+    }
+
+    @Test
+    fun aReportFromOutsideToNothingIsRemembered() {
+        entry.entered(outside, inner)
+        entry.entered(outside, null)
+        assertTrue(entry.entered(null, inner))
+    }
+
+    @Test
+    fun comingInFromOutsideThroughNothingIsAnEntry() {
+        entry.entered(inner, outside)
+        entry.entered(outside, null)
+        assertTrue(entry.entered(null, inner))
+    }
 }
