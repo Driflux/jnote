@@ -1,0 +1,45 @@
+# 0016. JSON format v1, versioning, and uid semantics
+
+- Status: Proposed
+- Date: 2026-11-27
+- Issue: #16
+- PR: #67 (format model and codec), (export action), (`docs/ai-format.md`)
+
+## Context
+AI agents and humans need one way to write notes that JNote can read, and JNote needs a way to hand notes out (intent.md sections 4 and 10). intent.md section 10.2 fixes the contract: a versioned JSON format (`format_version`) is the only official way for an AI to write notes, anchors carry the raw git `repo_url`, and the plugin normalizes it into the project key on import. Import (#17) upserts by `uid`, the inbox (#18) feeds the same importer, and the Claude Code skill (#21) and the clipboard instructions (#19) are built from `docs/ai-format.md`.
+
+Constraints from intent.md section 2: no startup work, no DB or file I/O on the EDT, no new dependency besides `sqlite-jdbc`.
+
+## Decision
+- **Document shape.** `{"format_version": 1, "notes": [ ... ]}`. `format_version` is an integer. A document with a missing `format_version`, a value other than `1`, or a missing `notes` array is rejected as a whole. Unknown fields at any level are ignored, so a later minor addition does not break older readers; anything that changes the meaning of an existing field bumps the version. A field whose value is `null` counts as absent, because agents and JSON libraries often write `null` for an empty optional value. Integers must be written without a fraction or exponent: `1.0` and `1e0` are not accepted as line numbers.
+- **Note fields.** `uid` (string, optional on input), `kind` (`CODE` or `FREE`, required), `title` (non-blank, required), `body` (default empty), `tags` (array of names, trimmed and deduplicated; a blank name or a comma is invalid because the comma separates tags in `v_notes_export`), `ai_source`, `source_url`, `prompt` (optional). A `CODE` note needs an `anchor`, a `FREE` note must not have one.
+- **Anchor.** `repo_url` or `project_path` (exactly one), `path` (relative to the project root; an absolute path, a `..` segment, or a string the local filesystem cannot parse as a path, such as one containing NUL, makes the item invalid; the first two are the rule `CodeTargets.isSafeRelPath` applies when navigating, and the last keeps `CodeTargets.findUnder` from throwing `InvalidPathException` after import), `start_line` and `end_line` (1-based, inclusive, integers written without a fraction or exponent), optional `class_name` and `snapshot`.
+  - Agents write `repo_url` as the raw origin (`git remote get-url origin`). The codec normalizes it with `RepoUrl.normalize` (ADR 0004); a URL that does not normalize makes the item invalid. No agent reimplements the key rules.
+  - The DB keeps only the normalized key, so export cannot restore the original origin. It writes `"https://" + key` when that normalizes back to the same key. This is an equivalent spelling of the key, not the user's real remote.
+  - A project without an origin has a path key (or, without a base path, a name key). Export writes it as `project_path`, which import uses verbatim. This exists only so such exports round-trip; agents should not need it.
+- **Export-only fields.** Export also writes `status`, `created_at`, and `updated_at` (ISO-8601 UTC) for humans reading the file. Import ignores them: a new code note starts as `OK`, and the DB owns its timestamps.
+- **Item validation.** Each item is parsed into a typed `FormatNote` at the boundary (`NoteFormatCodec.decode`). An invalid item is skipped and reported as `SkippedItem(index, uid, field, problem)` with `problem` one of `MISSING`, `WRONG_TYPE`, `INVALID`; valid items in the same document are kept. `index` is the 0-based position in the `notes` array and `field` is the name used in the format document (`anchor.path`, not `relPath`). The UI turns these into one notification with bundle strings (#17).
+- **`uid` semantics.** `uid` is the identity across export, AI edits, and import. A note that comes back with an existing `uid` updates that note (#17). An item without `uid` is a new note and gets a generated one on import. Two items with the same `uid` in one document are both skipped and reported rather than letting the last one win (#17). Import never deletes, so leaving a note out of a document never removes it.
+- **JSON library.** The IntelliJ platform ships Gson in its core jar (`lib/util-8.jar`, Gson 2.10.1 in 2024.2), so it is on the compile classpath already. JNote uses it for parsing and writing. This is not a new dependency: `build.gradle.kts` is unchanged and no jar is added to the plugin zip. Parsing is strict (no comments, unquoted keys or strings, single quotes, or trailing documents); `JsonParser.parseString` would switch to lenient mode, so the codec reads with a strict `JsonReader`. That reader is called through the type adapter, which does not wrap every failure: a malformed unicode escape surfaces as `NumberFormatException`, so the codec catches it together with `IOException`, `JsonParseException`, and `IllegalStateException` and reports `MALFORMED_JSON`; decode never throws on bad input. Gson 2.10's strict mode still accepts two things standard JSON forbids: raw control characters (such as a newline) inside a string, and literals in other cases (`TRUE`). Both have one obvious meaning, so the codec accepts them instead of adding its own tokenizer; the spec does not promise either. Gson classes load only when an export or import runs.
+- **Export (second PR).** A `Tools > JNote` group with "Export All Notes..." and "Export Selected Notes...". The selected variant uses the notes selected in the Tool Window list (one today; the list may allow several later) and is disabled without a selection. The target file is chosen on the EDT, then a cancellable `Task.Backgroundable` reads notes and tags through the DB executor, writes a temp file next to the target, and moves it into place, so a cancelled or failed export never leaves a partial file.
+- **Spec (third PR).** `docs/ai-format.md` is the single source for the skill (#21), the clipboard instructions (#19), and the docs: every field, examples, and prompt examples.
+
+## Alternatives considered
+- Hand-written JSON reader and writer: no reliance on a bundled library, but about 200 lines of escaping, number, and nesting code to own. Rejected because the platform already provides a mature parser at no size cost.
+- kotlinx.serialization: needs the compiler plugin in the build, which is a build dependency change. Rejected.
+- A `project` field carrying the key verbatim next to an optional raw `repo_url`: two ways to say one thing, and agents would have to learn the key rules. Rejected.
+- Export only `repo_url`: notes of projects without an origin could not be imported back. Rejected.
+- Let the last duplicate `uid` in a document win: silently drops an item the user may have meant. Rejected.
+- Lenient parsing: friendlier to sloppy JSON, but makes "valid" depend on Gson quirks that the spec cannot describe. Rejected.
+
+## Consequences
+- Pros
+  - One typed model with validation at the boundary; the importer, inbox, skill, and clipboard copy share it.
+  - Export and import round-trip every field the importer reads.
+  - No build change, no startup cost.
+- Cons and what we accept
+  - Gson is a bundled library, not a stable platform API. A future platform could change its version; the codec uses only long-stable APIs (`JsonReader`, `JsonWriter`, `JsonElement`).
+  - An exported `repo_url` is the https form of the key even when the real origin is ssh.
+  - `path` is relative to the IDE project root. When the project is opened from a subfolder of the repository, an agent that writes paths relative to the repository root gets a path that does not resolve; relocation then marks the note ORPHAN.
+- Follow-up work
+  - #17 import engine, preview, backup; #18 inbox; #19 copy as JSON; #21 skill.
