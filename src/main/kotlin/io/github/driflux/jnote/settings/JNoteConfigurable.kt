@@ -1,26 +1,51 @@
 package io.github.driflux.jnote.settings
 
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.options.BoundConfigurable
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.panel
+import com.intellij.util.concurrency.AppExecutorUtil
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.db.DatabasePaths
 import java.nio.file.InvalidPathException
+import java.util.concurrent.CompletableFuture
 
 class JNoteConfigurable : BoundConfigurable(JNoteBundle.message("settings.displayName")) {
+    internal var loadSettings: () -> Unit = { DbPathSettings.getInstance() }
+
+    private var loaded = false
+    private var generation = 0
+
     override fun createPanel(): DialogPanel = panel {
+        loaded = false
+        val current = ++generation
         row(JNoteBundle.message("settings.dbPath.label")) {
-            textFieldWithBrowseButton(JNoteBundle.message("settings.dbPath.browse.title"))
+            val cell = textFieldWithBrowseButton(JNoteBundle.message("settings.dbPath.browse.title"))
                 .align(AlignX.FILL)
+                .enabled(false)
                 .bindText(
-                    { DatabasePaths.default().toString() },
-                    { DbPathChanger.request(DatabasePaths.resolve(it)) },
+                    { if (loaded) DatabasePaths.default().toString() else "" },
+                    { text -> if (loaded) DbPathChanger.request(DatabasePaths.resolve(text)) },
                 )
                 .validationOnInput { field -> invalidMessage(field.text)?.let { error(it) } }
                 .validationOnApply { field -> invalidMessage(field.text)?.let { error(it) } }
+            // 설정 서비스는 처음 만들어질 때 jnote.xml을 읽으므로 백그라운드에서 먼저 만들고, 그 전에는 필드를 잠가 둔다
+            CompletableFuture.runAsync(loadSettings, AppExecutorUtil.getAppExecutorService())
+                .thenRunAsync({
+                    if (current != generation) return@thenRunAsync
+                    loaded = true
+                    cell.component.isEnabled = true
+                    reset()
+                }) { ApplicationManager.getApplication().invokeLater(it, ModalityState.any()) }
         }
+    }
+
+    override fun disposeUIResources() {
+        generation++
+        super.disposeUIResources()
     }
 
     private fun invalidMessage(text: String): String? = invalidReason(text)?.let { JNoteBundle.message(it.messageKey) }

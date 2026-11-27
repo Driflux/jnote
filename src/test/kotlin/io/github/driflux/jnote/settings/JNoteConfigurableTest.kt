@@ -1,5 +1,6 @@
 package io.github.driflux.jnote.settings
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -9,6 +10,8 @@ import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class JNoteConfigurableTest : BasePlatformTestCase() {
     private lateinit var dir: Path
@@ -32,6 +35,9 @@ class JNoteConfigurableTest : BasePlatformTestCase() {
 
     private fun fieldOf(configurable: JNoteConfigurable): TextFieldWithBrowseButton =
         UIUtil.findComponentOfType(configurable.createComponent(), TextFieldWithBrowseButton::class.java)!!
+
+    private fun awaitLoaded(field: TextFieldWithBrowseButton) =
+        PlatformTestUtil.waitWithEventsDispatching("stored path was not loaded", { field.isEnabled }, 20)
 
     fun testExtensionIsRegisteredUnderTools() {
         val ep = Configurable.APPLICATION_CONFIGURABLE.extensionList
@@ -62,6 +68,7 @@ class JNoteConfigurableTest : BasePlatformTestCase() {
         val configurable = JNoteConfigurable()
         val field = fieldOf(configurable)
         configurable.reset()
+        awaitLoaded(field)
         assertEquals(DatabasePaths.builtInDefault().toString(), field.text)
         assertFalse(configurable.isModified)
         configurable.disposeUIResources()
@@ -74,6 +81,7 @@ class JNoteConfigurableTest : BasePlatformTestCase() {
         val configurable = JNoteConfigurable()
         val field = fieldOf(configurable)
         configurable.reset()
+        awaitLoaded(field)
         assertEquals(stored.toString(), field.text)
         assertFalse(configurable.isModified)
 
@@ -89,6 +97,94 @@ class JNoteConfigurableTest : BasePlatformTestCase() {
         )
         assertEquals(next, DatabaseService.getInstance().currentPath())
         assertFalse(configurable.isModified)
+        configurable.disposeUIResources()
+    }
+
+    fun testReadsTheSettingOffTheEdtAndIsNotModifiedUntilItArrives() {
+        val stored = dir.resolve("stored.db")
+        DbPathSettings.getInstance().store(stored)
+        val release = CountDownLatch(1)
+        var loadedOnEdt: Boolean? = null
+        val configurable = JNoteConfigurable()
+        configurable.loadSettings = {
+            loadedOnEdt = ApplicationManager.getApplication().isDispatchThread
+            release.await(10, TimeUnit.SECONDS)
+        }
+        val field = fieldOf(configurable)
+        configurable.reset()
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertFalse(field.isEnabled)
+        assertEquals("", field.text)
+        assertFalse(configurable.isModified)
+
+        release.countDown()
+        awaitLoaded(field)
+
+        assertEquals(false, loadedOnEdt)
+        assertEquals(stored.toString(), field.text)
+        assertFalse(configurable.isModified)
+        field.text = dir.resolve("next.db").toString()
+        assertTrue(configurable.isModified)
+        configurable.disposeUIResources()
+    }
+
+    fun testApplyBeforeTheStoredPathArrivesChangesNothing() {
+        val storedNow = DbPathSettings.getInstance().state.dbPath
+        val release = CountDownLatch(1)
+        val configurable = JNoteConfigurable()
+        configurable.loadSettings = { release.await(10, TimeUnit.SECONDS) }
+        fieldOf(configurable)
+        configurable.reset()
+
+        configurable.apply()
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertEquals(storedNow, DbPathSettings.getInstance().state.dbPath)
+        configurable.disposeUIResources()
+        release.countDown()
+    }
+
+    fun testDisposingBeforeTheSettingArrivesDropsTheLoad() {
+        val release = CountDownLatch(1)
+        val read = CountDownLatch(1)
+        val configurable = JNoteConfigurable()
+        configurable.loadSettings = {
+            release.await(10, TimeUnit.SECONDS)
+            read.countDown()
+        }
+        val field = fieldOf(configurable)
+        configurable.disposeUIResources()
+
+        release.countDown()
+        assertTrue(read.await(10, TimeUnit.SECONDS))
+        repeat(20) {
+            PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+            Thread.sleep(10)
+        }
+
+        assertFalse(field.isEnabled)
+        assertEquals("", field.text)
+    }
+
+    fun testARecreatedPanelWaitsForItsOwnLoad() {
+        DbPathSettings.getInstance().store(dir.resolve("stored.db"))
+        val configurable = JNoteConfigurable()
+        awaitLoaded(fieldOf(configurable))
+        configurable.disposeUIResources()
+        val release = CountDownLatch(1)
+        configurable.loadSettings = { release.await(10, TimeUnit.SECONDS) }
+
+        val field = fieldOf(configurable)
+        configurable.reset()
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        assertFalse(field.isEnabled)
+        assertEquals("", field.text)
+        assertFalse(configurable.isModified)
+        release.countDown()
+        awaitLoaded(field)
+        assertEquals(dir.resolve("stored.db").toString(), field.text)
         configurable.disposeUIResources()
     }
 }
