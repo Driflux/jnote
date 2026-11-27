@@ -22,7 +22,7 @@ Save something from the conversation as one or more notes.
 1. Choose the kind. A note about specific lines of a file is `CODE`. Anything else (a query, a command, a decision, a memo) is `FREE`.
 2. For a `CODE` note, collect the anchor from the files, not from memory:
    - First fix the project root: the folder the user opens in the IDE. It is usually the top of the repository you are working in (`git rev-parse --show-toplevel` from the working directory). For a file inside a nested repository or submodule, the project root is still the outer folder the IDE opens, not the nested repository; ask if unsure.
-   - `repo_url`: run `git -C <project root> remote get-url origin`. If there is no origin, or it is a local path, leave `repo_url` out and set `project_path` to the absolute path of the project root.
+   - `repo_url`: run `git -C <project root> config --get remote.origin.url`, not `git remote get-url origin`: JNote reads the URL as configured, and the second command applies `url.*.insteadOf` rewrites, which would anchor the note to a different project. Drop any user name, password, or token from an `https://user:token@host/...` URL. If there is no origin, or it is a local path, leave `repo_url` out and set `project_path` to the absolute path of the project root.
    - `path`: the file path relative to the project root, with `/` separators.
    - `start_line`, `end_line`: 1-based, inclusive, plain integers.
    - `snapshot`: the exact text of those lines, read from the file (for example `sed -n '<start>,<end>p' <file>`). Copy it verbatim, keeping indentation.
@@ -35,10 +35,10 @@ Save something from the conversation as one or more notes.
    cat > "$tmp" <<'EOF'
    { ...the document... }
    EOF
-   { ! command -v python3 > /dev/null || python3 -m json.tool "$tmp" > /dev/null; } &&
+   { python3 -m json.tool "$tmp" || jq empty "$tmp"; } > /dev/null 2>&1 &&
      ln "$tmp" "$inbox/2026-11-27-retry-backoff.json" && rm "$tmp"
    ```
-   If the check fails, fix the temporary file and run the last command again; never publish a document that does not parse.
+   If neither `python3` nor `jq` is installed, the check fails and nothing is published; tell the user instead of publishing unchecked. If the check fails, fix the temporary file and run the last command again; never publish a document that does not parse.
    If `ln` fails because the name exists, publish the same temporary file again with `-2`, `-3`, ... before `.json`, then remove the temporary file.
 5. Tell the user the file name and that JNote shows it for review when its Tool Window gains focus. Nothing is saved until they click Apply there.
 

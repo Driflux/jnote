@@ -7,12 +7,10 @@ import org.junit.Test
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** claude-plugin/은 스킬을 배포하는 Claude Code 플러그인이다. 명세 사본과 스킬의 예시가 실제 명세와 코덱에 맞는지 확인한다. */
 class ClaudePluginTest {
     private val root = Path.of("claude-plugin")
     private fun normalized(text: String) = text.replace("\r\n", "\n")
 
-    // CRLF로 체크아웃해도 같은 결과가 나오도록 줄바꿈을 맞춘 뒤 읽는다
     private val skill = normalized(Files.readString(root.resolve("skills/jnote/SKILL.md")))
 
     @Test
@@ -38,6 +36,18 @@ class ClaudePluginTest {
         assertTrue(frontmatter, frontmatter.lines().contains("name: jnote"))
         assertTrue(frontmatter.lines().any { it.startsWith("description: ") && it.length > "description: ".length })
         assertTrue(skill.contains("\${CLAUDE_PLUGIN_ROOT}/skills/jnote/ai-format.md"))
+    }
+
+    @Test
+    fun theCaptureReadsTheRawOriginUrlLikeTheIde() {
+        assertTrue(skill.contains("config --get remote.origin.url"))
+        assertTrue(!skill.contains("<project root> remote get-url origin"))
+    }
+
+    @Test
+    fun thePublishStepNeedsARealJsonValidatorAndNeverPassesWithoutOne() {
+        assertTrue(!skill.contains("! command -v python3"))
+        assertTrue(skill.contains("jq empty"))
     }
 
     @Test
