@@ -281,6 +281,39 @@ class NoteImporterTest {
         }
     }
 
+    @Test fun applyBacksUpTheDatabaseRightBeforeWritingAndOverwritesTheOldBackup() {
+        val before = notes.create(NewNote.free("before first import")).get()
+        val backup = dir.resolve("jnote.pre-import.bak")
+
+        importer.importNow(listOf(FormatNote(uid = null, title = "first import"))).get()
+        assertEquals(listOf(before.uid), backupUids(backup))
+
+        importer.importNow(listOf(FormatNote(uid = null, title = "second import"))).get()
+        assertEquals(2, backupUids(backup).size)
+        assertEquals(listOf("jnote.db", "jnote.db-shm", "jnote.db-wal", "jnote.pre-import.bak"), Files.list(dir).use { s -> s.map { it.fileName.toString() }.sorted().toList() })
+    }
+
+    @Test fun failedBackupImportsNothing() {
+        Files.createDirectories(dir.resolve("jnote.pre-import.bak").resolve("blocker"))
+
+        try {
+            importer.importNow(listOf(FormatNote(uid = null, title = "never"))).get()
+            fail("expected failure")
+        } catch (_: ExecutionException) {
+        }
+
+        assertEquals(emptyList<Note>(), all())
+    }
+
+    private fun backupUids(backup: Path): List<String> {
+        val copy = Database(backup)
+        try {
+            return NoteRepository(copy).list(null, allProjects = true).get().map { it.uid }
+        } finally {
+            copy.close()
+        }
+    }
+
     @Test fun twoProcessesImportingTheSameNewUidsDoNotCollide() {
         val other = Database(dir.resolve("jnote.db"))
         try {

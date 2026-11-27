@@ -55,6 +55,7 @@
             <action id="JNote.ExportSelectedNotes" class="io.github.driflux.jnote.ai.ExportSelectedNotesAction"/>
             <separator/>
             <action id="JNote.ImportFromFile" class="io.github.driflux.jnote.ai.ImportFromFileAction"/>
+            <action id="JNote.ImportFromClipboard" class="io.github.driflux.jnote.ai.ImportFromClipboardAction"/>
         </group>
     </actions>
 </idea-plugin>

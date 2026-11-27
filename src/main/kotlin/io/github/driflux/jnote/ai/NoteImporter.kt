@@ -6,6 +6,9 @@ import io.github.driflux.jnote.db.toNote
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 import java.sql.Connection
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -64,6 +67,9 @@ class NoteImporter(
      * [PlanOutdatedException]으로 끝난다. [checkCanceled]가 던지면 아무것도 쓰지 않은 채 되돌린다.
      */
     fun apply(plan: ImportPlan, checkCanceled: () -> Unit = {}): CompletableFuture<ImportResult> = database.submit { c ->
+        checkCanceled()
+        // 백업을 만들지 못하면 가져오지 않는다
+        backup(c)
         c.createStatement().use { it.execute("BEGIN IMMEDIATE") }
         try {
             var created = 0
@@ -93,6 +99,37 @@ class NoteImporter(
         } catch (e: Throwable) {
             runCatching { c.createStatement().use { it.execute("ROLLBACK") } }.exceptionOrNull()?.let(e::addSuppressed)
             throw e
+        }
+    }
+
+    /**
+     * DB 파일 옆에 `<이름>.pre-import.bak`(기본 DB면 jnote.pre-import.bak)을 만들고 이전 것을 덮어쓴다.
+     * VACUUM INTO는 한 읽기 스냅샷을 통째로 복사하므로 WAL을 비우지 않아도, 다른 프로세스가 쓰는 중이어도 일관된 사본이 된다.
+     * 다 쓴 임시 파일을 한 번에 바꿔 끼워 실패해도 이전 백업이 남는다.
+     */
+    private fun backup(c: Connection) {
+        val file = c.createStatement().use { s ->
+            s.executeQuery("PRAGMA database_list").use { rs ->
+                var found: String? = null
+                while (rs.next()) if (rs.getString("name") == "main") found = rs.getString("file")
+                found
+            }
+        }
+        if (file.isNullOrEmpty()) return
+        val source = Paths.get(file)
+        val stem = source.fileName.toString().substringBeforeLast('.')
+        val backup = source.resolveSibling("$stem.pre-import.bak")
+        // 다른 IDE가 동시에 백업해도 서로의 임시 파일을 건드리지 않도록 이름을 따로 받는다. VACUUM INTO는 없는 파일에만 쓴다
+        val partial = Files.createTempFile(source.toAbsolutePath().parent, "$stem.pre-import.", ".tmp")
+        try {
+            Files.delete(partial)
+            c.prepareStatement("VACUUM INTO ?").use { s ->
+                s.setString(1, partial.toString())
+                s.execute()
+            }
+            Files.move(partial, backup, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(partial)
         }
     }
 
