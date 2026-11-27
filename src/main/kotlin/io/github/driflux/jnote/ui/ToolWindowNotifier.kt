@@ -31,6 +31,13 @@ internal object ToolWindowNotifier {
     }
 
     fun copyFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.copy", cause)
+    fun locationMoved(project: Project, textSaved: Boolean) {
+        group().createNotification(
+            JNoteBundle.message("toolWindow.locationMoved.title"),
+            JNoteBundle.message(if (textSaved) "toolWindow.locationMoved.contentEdited" else "toolWindow.locationMoved.content"),
+            NotificationType.WARNING,
+        ).notify(project)
+    }
 
     fun renameTagFailed(project: Project, cause: Throwable) = failed(project, "toolWindow.error.tagRename", cause)
 

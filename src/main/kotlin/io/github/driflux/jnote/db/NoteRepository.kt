@@ -1,16 +1,20 @@
 package io.github.driflux.jnote.db
 
 import io.github.driflux.jnote.model.AnchorUpdate
+import io.github.driflux.jnote.model.LocationConfirmation
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
 import io.github.driflux.jnote.model.NoteSummary
+import io.github.driflux.jnote.model.NoteText
 import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.Statement
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+
+data class SavedNote(val note: Note, val locationMoved: Boolean = false)
 
 class NoteRepository(
     private val database: Database,
@@ -60,12 +64,13 @@ class NoteRepository(
 
     fun get(id: Long): CompletableFuture<Note?> = database.submit { c -> findById(c, id) }
 
-    fun getByUid(uid: String): CompletableFuture<Note?> = database.submit { c ->
+    fun getByUid(uid: String): CompletableFuture<Note?> = database.submit { c -> findByUid(c, uid) }
+
+    private fun findByUid(c: Connection, uid: String): Note? =
         c.prepareStatement("SELECT $COLUMNS FROM note WHERE uid = ?").use { s ->
             s.setString(1, uid)
             s.executeQuery().use { if (it.next()) it.toNote() else null }
         }
-    }
 
     fun update(note: Note): CompletableFuture<Note?> = database.submit { c ->
         val now = clock()
@@ -89,6 +94,58 @@ class NoteRepository(
             s.executeUpdate()
         }
         if (changed == 0) null else findById(c, note.id)
+    }
+
+    fun updateText(uid: String, text: NoteText, tagNames: List<String>, confirm: LocationConfirmation? = null): CompletableFuture<SavedNote?> =
+        database.submit { c ->
+            val names = cleanTagNames(tagNames)
+            transaction(c) { save(c, uid, text, names, confirm) }
+        }
+
+    fun confirmLocation(uid: String, confirm: LocationConfirmation): CompletableFuture<SavedNote?> =
+        database.submit { c -> transaction(c) { save(c, uid, null, null, confirm) } }
+
+    private fun save(c: Connection, uid: String, text: NoteText?, tagNames: List<String>?, confirm: LocationConfirmation?): SavedNote? {
+        val now = clock()
+        if (text != null) {
+            val changed = c.prepareStatement(UPDATE_TEXT).use { s ->
+                s.setString(1, text.title)
+                s.setString(2, text.body)
+                s.setString(3, text.aiSource)
+                s.setString(4, text.sourceUrl)
+                s.setString(5, text.prompt)
+                s.setLong(6, now)
+                s.setString(7, uid)
+                s.executeUpdate()
+            }
+            if (changed == 0) return null
+        }
+        if (tagNames != null) setNoteTags(c, checkNotNull(findByUid(c, uid)).id, tagNames)
+        val confirmed = confirm == null || c.prepareStatement(CONFIRM_LOCATION).use { s ->
+            s.setString(1, confirm.snapshot)
+            s.setLong(2, now)
+            s.setString(3, uid)
+            s.setString(4, confirm.relPath)
+            s.setInt(5, confirm.startLine)
+            s.setInt(6, confirm.endLine)
+            s.executeUpdate()
+        } > 0
+        val note = findByUid(c, uid) ?: return null
+        return SavedNote(note, locationMoved = !confirmed)
+    }
+
+    private fun <T> transaction(c: Connection, block: () -> T): T {
+        c.autoCommit = false
+        try {
+            val result = block()
+            c.commit()
+            return result
+        } catch (e: Throwable) {
+            c.rollback()
+            throw e
+        } finally {
+            c.autoCommit = true
+        }
     }
 
     fun updateAnchors(updates: List<AnchorUpdate>): CompletableFuture<Int> = database.submit { c ->
@@ -220,6 +277,11 @@ class NoteRepository(
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         const val UPDATE = "UPDATE note SET kind=?, project=?, rel_path=?, class_name=?, start_line=?, end_line=?, " +
             "snapshot=?, status=?, title=?, body=?, ai_source=?, source_url=?, prompt=?, updated_at=? WHERE id=?"
+
+        const val UPDATE_TEXT = "UPDATE note SET title=?, body=?, ai_source=?, source_url=?, prompt=?, updated_at=? WHERE uid=?"
+
+        const val CONFIRM_LOCATION = "UPDATE note SET status='OK', snapshot=?, updated_at=? " +
+            "WHERE uid=? AND rel_path=? AND start_line=? AND end_line=?"
 
         const val UPDATE_ANCHOR = "UPDATE note SET rel_path=?1, start_line=?2, end_line=?3, status=?4 " +
             "WHERE uid=?5 AND (rel_path, start_line, end_line, status) IS NOT (?1, ?2, ?3, ?4)"

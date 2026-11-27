@@ -10,6 +10,7 @@ import io.github.driflux.jnote.anchor.CodeAnchor
 import io.github.driflux.jnote.db.Database
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.db.TagRepository
+import io.github.driflux.jnote.model.AnchorUpdate
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
@@ -105,11 +106,11 @@ class NoteSaverTest : BasePlatformTestCase() {
         tags.attach(created.id, tag.id).get()
         now = 2_000L
 
-        val future = NoteSaver(repository = { repo }, tags = { tags }, projectKey = { "k" })
+        val future = NoteSaver(repository = { repo }, projectKey = { "k" })
             .update(project, created, NoteDraft(" New ", "nb", "Gemini", tags = listOf("x")))
         await(future)
 
-        val updated = future.get()!!
+        val updated = future.get()!!.note
         assertEquals(updated, repo.get(created.id).get())
         assertEquals("New", updated.title)
         assertEquals("Gemini", updated.aiSource)
@@ -124,7 +125,7 @@ class NoteSaverTest : BasePlatformTestCase() {
         val repo = NoteRepository(db)
         val tags = TagRepository(db)
         val existing = tags.getOrCreate("old").get()
-        val saver = NoteSaver(repository = { repo }, tags = { tags }, projectKey = { "k" })
+        val saver = NoteSaver(repository = { repo }, projectKey = { "k" })
 
         val future = saver.save(project, anchor, NoteDraft("T", tags = listOf("old", " fresh ", "old", "")))
         await(future)
@@ -157,7 +158,7 @@ class NoteSaverTest : BasePlatformTestCase() {
     fun testSaveFreeAttachesTags() {
         val repo = NoteRepository(db)
         val tags = TagRepository(db)
-        val future = NoteSaver(repository = { repo }, tags = { tags }).saveFree(NoteDraft("q", tags = listOf("sql")))
+        val future = NoteSaver(repository = { repo }).saveFree(NoteDraft("q", tags = listOf("sql")))
         await(future)
         assertEquals(listOf("sql"), tags.tagsOf(future.get().id).get().map { it.name })
     }
@@ -168,7 +169,7 @@ class NoteSaverTest : BasePlatformTestCase() {
         val created = repo.create(NewNote.free("q")).get()
         tags.replaceTags(created.id, listOf("a", "b")).get()
 
-        val future = NoteSaver(repository = { repo }, tags = { tags }).update(project, created, NoteDraft("q", tags = listOf("b", "c")))
+        val future = NoteSaver(repository = { repo }).update(project, created, NoteDraft("q", tags = listOf("b", "c")))
         await(future)
 
         assertEquals(listOf("b", "c"), tags.tagsOf(created.id).get().map { it.name })
@@ -180,7 +181,7 @@ class NoteSaverTest : BasePlatformTestCase() {
         val tags = TagRepository(db)
         val created = repo.create(NewNote.free("q")).get()
         tags.replaceTags(created.id, listOf("a")).get()
-        await(NoteSaver(repository = { repo }, tags = { tags }).update(project, created, NoteDraft("q")))
+        await(NoteSaver(repository = { repo }).update(project, created, NoteDraft("q")))
         assertTrue(tags.tagsOf(created.id).get().isEmpty())
     }
 
@@ -292,7 +293,8 @@ class NoteSaverTest : BasePlatformTestCase() {
         await(future)
 
         val stored = repo.get(created.id).get()!!
-        assertEquals(stored, future.get())
+        assertEquals(stored, future.get()!!.note)
+        assertFalse(future.get()!!.locationMoved)
         assertEquals(NoteStatus.OK, stored.status)
         assertEquals("two\nthree", stored.snapshot)
         assertEquals(created.copy(status = NoteStatus.OK, snapshot = "two\nthree", updatedAt = stored.updatedAt), stored)
@@ -310,6 +312,84 @@ class NoteSaverTest : BasePlatformTestCase() {
         val stored = repo.get(created.id).get()!!
         assertEquals(created.copy(title = "New", body = "nb", status = NoteStatus.OK, snapshot = "c", updatedAt = stored.updatedAt), stored)
         assertEquals(1, published.get())
+    }
+
+    private fun moveElsewhere(uid: String, relPath: String, start: Int, end: Int, status: NoteStatus) {
+        val other = Database(dir.resolve("jnote.db"))
+        try {
+            NoteRepository(other).updateAnchors(listOf(AnchorUpdate(uid, relPath, start, end, status))).get()
+        } finally {
+            other.close()
+        }
+    }
+
+    fun testEditKeepsAnchorColumnsThatChangedAfterTheListWasRead() {
+        val repo = NoteRepository(db)
+        val read = repo.create(NewNote.code("k", "src/A.kt", 3, 5, "Old", snapshot = "snap")).get()
+        moveElsewhere(read.uid, "src/B.kt", 7, 9, NoteStatus.APPROX)
+
+        val future = NoteSaver(repository = { repo }).update(project, read, NoteDraft("New"))
+        await(future)
+
+        val stored = repo.get(read.id).get()!!
+        assertEquals(read.copy(relPath = "src/B.kt", startLine = 7, endLine = 9, status = NoteStatus.APPROX, title = "New", updatedAt = stored.updatedAt), stored)
+        assertEquals(1, published.get())
+    }
+
+    fun testConfirmingANoteThatMovedMeanwhileChangesNothingAndSaysSo() {
+        val relPath = sourceFile("ConfirmMoved.kt", "one\ntwo\nthree\nfour\n")
+        val repo = NoteRepository(db)
+        val read = approx(repo, relPath, 2, 3)
+        moveElsewhere(read.uid, relPath, 3, 4, NoteStatus.APPROX)
+
+        val future = NoteSaver(repository = { repo }).confirmLocation(project, read)
+        await(future)
+
+        assertTrue(future.get()!!.locationMoved)
+        assertEquals(read.copy(startLine = 3, endLine = 4), repo.get(read.id).get())
+        assertEquals(1, published.get())
+    }
+
+    fun testEditingAnApproxNoteThatMovedMeanwhileSavesTheTextButDoesNotConfirm() {
+        val relPath = sourceFile("EditMoved.kt", "a\nb\nc\nd\n")
+        val repo = NoteRepository(db)
+        val read = approx(repo, relPath, 2, 2)
+        moveElsewhere(read.uid, relPath, 4, 4, NoteStatus.APPROX)
+
+        val future = NoteSaver(repository = { repo }).update(project, read, NoteDraft("New"))
+        await(future)
+
+        assertTrue(future.get()!!.locationMoved)
+        val stored = repo.get(read.id).get()!!
+        assertEquals(read.copy(startLine = 4, endLine = 4, title = "New", body = "", updatedAt = stored.updatedAt), stored)
+    }
+
+    fun testUpdateResolvesRepositoryOnBackgroundExecutor() {
+        var repoThread: String? = null
+        val repo = NoteRepository(db)
+        val created = repo.create(NewNote.free("q")).get()
+        val saver = NoteSaver(
+            repository = {
+                repoThread = Thread.currentThread().name
+                repo
+            },
+            background = joiningBackground,
+        )
+        await(saver.update(project, created, NoteDraft("x")))
+        assertEquals("fake-background", repoThread)
+    }
+
+    fun testUpdateWithACommaTagChangesNothing() {
+        val repo = NoteRepository(db)
+        val tags = TagRepository(db)
+        val created = repo.create(NewNote.free("q"), listOf("a")).get()
+
+        val future = NoteSaver(repository = { repo }).update(project, created, NoteDraft("x", tags = listOf("b,c")))
+        await(future)
+
+        assertTrue(future.isCompletedExceptionally)
+        assertEquals(created, repo.get(created.id).get())
+        assertEquals(listOf("a"), tags.tagsOf(created.id).get().map { it.name })
     }
 
     fun testEditingAnOkNoteKeepsItsSnapshotEvenWhenTheCodeChanged() {

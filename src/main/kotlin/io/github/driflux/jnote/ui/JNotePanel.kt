@@ -308,8 +308,9 @@ class JNotePanel internal constructor(
                     done.complete(Unit)
                     return@onEdt
                 }
-                saver.update(project, note, draft).whenComplete { _, error ->
+                saver.update(project, note, draft).whenComplete { saved, error ->
                     if (error != null) onEdt { ToolWindowNotifier.editFailed(project, (error as? CompletionException)?.cause ?: error) }
+                    if (saved?.locationMoved == true) onEdt { ToolWindowNotifier.locationMoved(project, textSaved = true) }
                     done.complete(Unit)
                 }
             }
@@ -318,8 +319,9 @@ class JNotePanel internal constructor(
     }
 
     internal fun confirmLocation(note: Note): CompletableFuture<*> =
-        saver.confirmLocation(project, note).whenComplete { _, error ->
+        saver.confirmLocation(project, note).whenComplete { saved, error ->
             if (error != null) onEdt { ToolWindowNotifier.confirmFailed(project, (error as? CompletionException)?.cause ?: error) }
+            if (saved?.locationMoved == true) onEdt { ToolWindowNotifier.locationMoved(project, textSaved = false) }
         }
 
     private fun undo(deletion: NoteDeletion, deleted: DeletedNote) {

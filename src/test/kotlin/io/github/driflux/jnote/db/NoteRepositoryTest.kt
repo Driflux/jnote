@@ -1,11 +1,13 @@
 package io.github.driflux.jnote.db
 
 import io.github.driflux.jnote.model.AnchorUpdate
+import io.github.driflux.jnote.model.LocationConfirmation
 import io.github.driflux.jnote.model.NewNote
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteKind
 import io.github.driflux.jnote.model.NoteStatus
 import io.github.driflux.jnote.model.NoteSummary
+import io.github.driflux.jnote.model.NoteText
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -76,6 +78,86 @@ class NoteRepositoryTest {
         val e = assertThrows(ExecutionException::class.java) { repo.create(code(), listOf("a,b")).get() }
         assertTrue(e.cause is IllegalArgumentException)
         assertTrue(repo.list(null, true).get().isEmpty())
+    }
+
+    @Test
+    fun updateTextKeepsAnchorColumnsThatChangedAfterTheNoteWasRead() {
+        val read = repo.create(code()).get()
+        repo.updateAnchors(listOf(AnchorUpdate(read.uid, "src/B.kt", 7, 9, NoteStatus.APPROX))).get()
+        now = 2_000
+
+        val saved = repo.updateText(read.uid, NoteText("New", "nb", "Claude", null, null), emptyList()).get()!!
+
+        val expected = read.copy(
+            relPath = "src/B.kt", startLine = 7, endLine = 9, status = NoteStatus.APPROX,
+            title = "New", body = "nb", aiSource = "Claude", updatedAt = 2_000,
+        )
+        assertEquals(expected, saved.note)
+        assertEquals(expected, repo.get(read.id).get())
+        assertFalse(saved.locationMoved)
+    }
+
+    @Test
+    fun updateTextOfAMissingNoteIsNull() {
+        assertNull(repo.updateText("no-such-uid", NoteText("t", "", null, null, null), listOf("x")).get())
+    }
+
+    @Test
+    fun confirmLocationAppliesOnlyWhileTheStoredAnchorIsTheOneConfirmed() {
+        val read = repo.create(NewNote.code("p1", "src/A.kt", 3, 5, "t", snapshot = "old", status = NoteStatus.APPROX)).get()
+        val other = Database(tmp.root.toPath().resolve("jnote.db"))
+        try {
+            NoteRepository(other).updateAnchors(listOf(AnchorUpdate(read.uid, "src/A.kt", 4, 6, NoteStatus.APPROX))).get()
+        } finally {
+            other.close()
+        }
+
+        val missed = repo.confirmLocation(read.uid, LocationConfirmation("src/A.kt", 3, 5, "seen")).get()!!
+        assertTrue(missed.locationMoved)
+        assertEquals(read.copy(startLine = 4, endLine = 6), missed.note)
+
+        val applied = repo.confirmLocation(read.uid, LocationConfirmation("src/A.kt", 4, 6, "current")).get()!!
+        assertFalse(applied.locationMoved)
+        assertEquals(NoteStatus.OK, applied.note.status)
+        assertEquals("current", applied.note.snapshot)
+        assertEquals(applied.note, repo.get(read.id).get())
+    }
+
+    @Test
+    fun updateTextSetsTheTagsByUidInTheSameTransaction() {
+        val read = repo.create(code(), listOf("a", "b")).get()
+        val saved = repo.updateText(read.uid, NoteText("t", "b", null, null, null), listOf("b", "c")).get()!!
+        assertEquals(listOf("b", "c"), TagRepository(db).tagsOf(saved.note.id).get().map { it.name })
+    }
+
+    @Test
+    fun updateTextRollsBackTheTextWhenSettingTagsFails() {
+        val read = repo.create(code(), listOf("a")).get()
+        db.submit { c ->
+            c.createStatement().use { it.execute("CREATE TEMP TRIGGER fail_link BEFORE INSERT ON note_tag BEGIN SELECT RAISE(ABORT, 'link failed'); END") }
+        }.get()
+
+        assertThrows(ExecutionException::class.java) { repo.updateText(read.uid, NoteText("New", "", null, null, null), listOf("b")).get() }
+
+        assertEquals(read, repo.get(read.id).get())
+        assertEquals(listOf("a"), TagRepository(db).tagsOf(read.id).get().map { it.name })
+    }
+
+    @Test
+    fun confirmLocationOverridesAStatusThatChangedAtTheSameLocation() {
+        val read = repo.create(NewNote.code("p1", "src/A.kt", 3, 5, "t", snapshot = "old", status = NoteStatus.APPROX)).get()
+        repo.updateAnchors(listOf(AnchorUpdate(read.uid, "src/A.kt", 3, 5, NoteStatus.ORPHAN))).get()
+
+        val saved = repo.confirmLocation(read.uid, LocationConfirmation("src/A.kt", 3, 5, "seen")).get()!!
+
+        assertFalse(saved.locationMoved)
+        assertEquals(NoteStatus.OK, saved.note.status)
+        assertEquals("seen", saved.note.snapshot)
+    }
+
+    @Test
+    fun confirmLocationOfAMissingNoteIsNull() {
+        assertNull(repo.confirmLocation("no-such-uid", LocationConfirmation("src/A.kt", 1, 1, "s")).get())
     }
 
     @Test

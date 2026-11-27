@@ -13,7 +13,8 @@ import io.github.driflux.jnote.anchor.CodeAnchor
 import io.github.driflux.jnote.anchor.CodeAnchors
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
-import io.github.driflux.jnote.db.TagRepository
+import io.github.driflux.jnote.db.SavedNote
+import io.github.driflux.jnote.model.LocationConfirmation
 import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.NoteStatus
 import io.github.driflux.jnote.project.ProjectKeyService
@@ -25,7 +26,6 @@ import java.util.concurrent.Executor
 
 class NoteSaver(
     private val repository: () -> NoteRepository = { NoteRepository(DatabaseService.getInstance().database) },
-    private val tags: () -> TagRepository = { TagRepository(DatabaseService.getInstance().database) },
     private val projectKey: (Project) -> String = { it.service<ProjectKeyService>().resolve().key },
     private val background: Executor = AppExecutorUtil.getAppExecutorService(),
     private val ui: Executor = Executor { ApplicationManager.getApplication().invokeLater(it, ModalityState.nonModal()) },
@@ -43,24 +43,24 @@ class NoteSaver(
             .thenComposeAsync({ repository().create(it, draft.tagNames()) }, background)
             .thenApplyAsync({ note -> publish(); note }, ui)
 
-    fun update(project: Project, note: Note, draft: NoteDraft): CompletableFuture<Note?> =
-        CompletableFuture.completedFuture(draft)
-            .thenApply { it.applyTo(note) }
-            .thenApplyAsync({ edited -> if (edited.status == NoteStatus.APPROX) confirmed(project, edited) ?: edited else edited }, background)
-            .thenCompose { repository().update(it) }
-            .thenCompose { updated -> if (updated == null) CompletableFuture.completedFuture(null) else withTags(updated, draft) }
-            .thenApplyAsync({ updated -> publish(); updated }, ui)
+    fun update(project: Project, note: Note, draft: NoteDraft): CompletableFuture<SavedNote?> =
+        CompletableFuture.supplyAsync({ draft.toText() }, background)
+            .thenComposeAsync({ text ->
+                val confirm = if (note.status == NoteStatus.APPROX) confirmation(project, note) else null
+                repository().updateText(note.uid, text, draft.tagNames(), confirm)
+            }, background)
+            .thenApplyAsync({ saved -> publish(); saved }, ui)
 
-    fun confirmLocation(project: Project, note: Note): CompletableFuture<Note?> =
+    fun confirmLocation(project: Project, note: Note): CompletableFuture<SavedNote?> =
         CompletableFuture.supplyAsync({
-            confirmed(project, note) ?: error(
+            confirmation(project, note) ?: error(
                 JNoteBundle.message("toolWindow.error.confirm.unreadable", note.relPath.orEmpty(), NoteRows.lineRange(note.startLine, note.endLine)),
             )
         }, background)
-            .thenCompose { repository().update(it) }
-            .thenApplyAsync({ updated -> publish(); updated }, ui)
+            .thenComposeAsync({ repository().confirmLocation(note.uid, it) }, background)
+            .thenApplyAsync({ saved -> publish(); saved }, ui)
 
-    private fun confirmed(project: Project, note: Note): Note? {
+    private fun confirmation(project: Project, note: Note): LocationConfirmation? {
         val relPath = note.relPath ?: return null
         val start = note.startLine ?: return null
         val end = note.endLine ?: return null
@@ -68,9 +68,6 @@ class NoteSaver(
         val snapshot = ReadAction.compute<String?, Throwable> {
             FileDocumentManager.getInstance().getDocument(file)?.let { CodeAnchors.fromLines(project, file, it, start, end)?.snapshot }
         } ?: return null
-        return note.copy(status = NoteStatus.OK, snapshot = snapshot)
+        return LocationConfirmation(relPath, start, end, snapshot)
     }
-
-    private fun withTags(note: Note, draft: NoteDraft): CompletableFuture<Note> =
-        tags().replaceTags(note.id, draft.tagNames()).thenApply { note }
 }
