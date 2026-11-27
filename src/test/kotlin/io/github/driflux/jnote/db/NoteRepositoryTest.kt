@@ -107,7 +107,6 @@ class NoteRepositoryTest {
         val read = repo.create(NewNote.code("p1", "src/A.kt", 3, 5, "t", snapshot = "old", status = NoteStatus.APPROX)).get()
         val other = Database(tmp.root.toPath().resolve("jnote.db"))
         try {
-            // 다른 IDE 프로세스가 파일을 열어 노트를 옮긴 상황
             NoteRepository(other).updateAnchors(listOf(AnchorUpdate(read.uid, "src/A.kt", 4, 6, NoteStatus.APPROX))).get()
         } finally {
             other.close()

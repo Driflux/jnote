@@ -314,7 +314,6 @@ class NoteSaverTest : BasePlatformTestCase() {
         assertEquals(1, published.get())
     }
 
-    // 다른 IDE 프로세스(또는 파일 열기 검증)가 목록을 읽은 뒤 노트를 옮긴다
     private fun moveElsewhere(uid: String, relPath: String, start: Int, end: Int, status: NoteStatus) {
         val other = Database(dir.resolve("jnote.db"))
         try {

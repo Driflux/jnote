@@ -14,13 +14,8 @@ import java.sql.Statement
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
-/** 편집이나 위치 확인을 저장한 뒤의 노트. [locationMoved]는 확인하려던 위치가 그 사이 바뀌어 확인을 적용하지 않았다는 뜻이다. */
 data class SavedNote(val note: Note, val locationMoved: Boolean = false)
 
-/**
- * 모든 접근은 [Database.submit]을 거치므로 EDT에서 호출해도 블로킹하지 않는다.
- * 제약 위반 등 SQL 오류는 반환된 future가 예외로 완료되는 것으로 드러난다.
- */
 class NoteRepository(
     private val database: Database,
     private val clock: () -> Long = System::currentTimeMillis,
@@ -101,18 +96,12 @@ class NoteRepository(
         if (changed == 0) null else findById(c, note.id)
     }
 
-    /**
-     * 사용자가 고치는 열(제목, 본문, AI 출처)만 바꾸고 updated_at을 올리며, 태그를 [tagNames]와 정확히 같게 맞춘다.
-     * 앵커와 상태는 그 사이 위치 갱신이 바꿨을 수 있어 건드리지 않는다. [confirm]이 있으면 [confirmLocation]도 한다.
-     * 모두 한 트랜잭션이다. 노트가 없으면 null, 쉼표가 든 태그 이름이면 아무것도 쓰지 않고 IllegalArgumentException.
-     */
     fun updateText(uid: String, text: NoteText, tagNames: List<String>, confirm: LocationConfirmation? = null): CompletableFuture<SavedNote?> =
         database.submit { c ->
             val names = cleanTagNames(tagNames)
             transaction(c) { save(c, uid, text, names, confirm) }
         }
 
-    /** 저장된 위치가 [confirm]의 위치와 아직 같을 때만 OK와 그 스냅샷으로 굳힌다. 노트가 없으면 null. */
     fun confirmLocation(uid: String, confirm: LocationConfirmation): CompletableFuture<SavedNote?> =
         database.submit { c -> transaction(c) { save(c, uid, null, null, confirm) } }
 
@@ -131,7 +120,6 @@ class NoteRepository(
             }
             if (changed == 0) return null
         }
-        // 숫자 id는 지워진 노트의 것이 다시 쓰일 수 있어, 쓰기 잠금을 쥔 이 트랜잭션 안에서 uid로 찾는다
         if (tagNames != null) setNoteTags(c, checkNotNull(findByUid(c, uid)).id, tagNames)
         val confirmed = confirm == null || c.prepareStatement(CONFIRM_LOCATION).use { s ->
             s.setString(1, confirm.snapshot)
@@ -160,10 +148,6 @@ class NoteRepository(
         }
     }
 
-    /**
-     * 사용자가 고친 것이 아니므로 "최근 수정 순" 목록의 순서를 바꾸지 않는다(updated_at 유지).
-     * 값이 이미 같은 노트와 그 사이 지워진 노트는 건너뛰고, 실제로 바뀐 노트 수를 돌려준다.
-     */
     fun updateAnchors(updates: List<AnchorUpdate>): CompletableFuture<Int> = database.submit { c ->
         c.autoCommit = false
         try {
@@ -296,11 +280,9 @@ class NoteRepository(
 
         const val UPDATE_TEXT = "UPDATE note SET title=?, body=?, ai_source=?, source_url=?, prompt=?, updated_at=? WHERE uid=?"
 
-        // 상태는 조건에 넣지 않는다. 사용자가 그 위치가 맞다고 했으므로 그 사이 바뀐 상태보다 우선한다
         const val CONFIRM_LOCATION = "UPDATE note SET status='OK', snapshot=?, updated_at=? " +
             "WHERE uid=? AND rel_path=? AND start_line=? AND end_line=?"
 
-        // 값이 같은 행은 건드리지 않아 바뀐 수를 정확히 세고 FTS 트리거도 돌지 않게 한다
         const val UPDATE_ANCHOR = "UPDATE note SET rel_path=?1, start_line=?2, end_line=?3, status=?4 " +
             "WHERE uid=?5 AND (rel_path, start_line, end_line, status) IS NOT (?1, ?2, ?3, ?4)"
     }

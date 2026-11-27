@@ -308,7 +308,6 @@ class JNotePanel internal constructor(
                     done.complete(Unit)
                     return@onEdt
                 }
-                // 저장소가 알림을 UI 스레드로 옮겨 보내므로 여기서는 실패만 알린다
                 saver.update(project, note, draft).whenComplete { saved, error ->
                     if (error != null) onEdt { ToolWindowNotifier.editFailed(project, (error as? CompletionException)?.cause ?: error) }
                     if (saved?.locationMoved == true) onEdt { ToolWindowNotifier.locationMoved(project, textSaved = true) }
