@@ -1,5 +1,7 @@
 package io.github.driflux.jnote.ui
 
+import com.intellij.ide.DataManager
+import com.intellij.ide.impl.HeadlessDataManager
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.keymap.KeymapManager
@@ -13,10 +15,12 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.ui.SimpleColoredComponent
 import io.github.driflux.jnote.JNoteBundle
 import io.github.driflux.jnote.NotesChanged
+import io.github.driflux.jnote.ai.SELECTED_NOTES
 import io.github.driflux.jnote.db.DatabasePaths
 import io.github.driflux.jnote.db.DatabaseService
 import io.github.driflux.jnote.db.NoteRepository
 import io.github.driflux.jnote.model.NewNote
+import io.github.driflux.jnote.model.Note
 import io.github.driflux.jnote.model.Tag
 import io.github.driflux.jnote.project.ProjectKeyService
 import java.nio.file.Files
@@ -111,6 +115,19 @@ class JNoteToolWindowTest : BasePlatformTestCase() {
         // 같은 단언이 실패할 수 있음을 보이는 대조: 패널이 처음 읽으면 열린다
         newPanel()
         awaitUntil("db opened by first load") { dbService.openDatabaseOrNull() != null }
+    }
+
+    fun testPanelProvidesTheSelectedNotesToActions() {
+        val note = repo.create(NewNote.free("pick me")).get()
+        val panel = newPanel()
+        awaitUntil("list loaded") { panel.list.model.size == 1 }
+        HeadlessDataManager.fallbackToProductionDataManager(testRootDisposable)
+        val context = { DataManager.getInstance().getDataContext(panel.list) }
+        assertTrue(context().getData(SELECTED_NOTES).isNullOrEmpty())
+
+        panel.list.selectedIndex = 0
+
+        assertEquals(listOf(note.id), context().getData(SELECTED_NOTES)?.map { it.id })
     }
 
     fun testPanelListsCurrentProjectAndGlobalNotesMostRecentFirst() {
