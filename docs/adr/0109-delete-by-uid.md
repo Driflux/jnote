@@ -11,7 +11,7 @@ The Tool Window's Delete button and Delete key deleted by numeric note id. Betwe
 ## Decision
 - `NoteRepository.deleteReturningTagIds` and `NoteDeletion.delete` take uids. Inside the `BEGIN IMMEDIATE` transaction each uid is looked up, and only the row found by that uid is deleted (by its current id). A uid with no row is skipped.
 - `JNotePanel` passes `Note.uid` for the detail's delete button and `NoteSummary.uid` for a multi-row Delete (ADR 0121).
-- When fewer notes were deleted than requested, the panel shows a WARNING, "Note not found" / "The selected note no longer exists in the current database, so nothing else was deleted. The list was refreshed." (`toolWindow.error.deleteStale.*`, English and Korean, with a count for several notes). `NotesChanged` is published in every case, so the list reloads. Before, a delete of a missing note refreshed the list silently.
+- When fewer notes were deleted than requested, the panel shows a WARNING, "Note not found" / "1 selected note was not found in the current database. The list was refreshed." (`toolWindow.error.deleteStale.*`, English and Korean, with the count of notes not found). Whenever the delete returns without a database error, `NotesChanged` is published, so the list reloads, even when nothing was deleted. Before, a delete of a missing note refreshed the list silently.
 - Undo is unchanged: `NoteDeletion` keeps the database it deleted from, and restores the deleted rows with their original id and uid.
 
 ## Alternatives considered
