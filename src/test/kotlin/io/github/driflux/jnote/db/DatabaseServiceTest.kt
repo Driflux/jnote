@@ -190,6 +190,30 @@ class DatabaseServiceTest : BasePlatformTestCase() {
         service.dispose()
     }
 
+    fun testCloseThatTimesOutBehindARunningJobIsLoggedNotThrownAndStillShutsDown() {
+        val database = Database(dir.resolve("slow.db"), closeTimeoutMillis = 100)
+        val gate = CountDownLatch(1)
+        val running = database.submit { gate.await() }
+        try {
+            PlatformTestUtil.waitWithEventsDispatching("database did not open", { database.isOpen }, 10)
+            DatabaseService.closeAndLog(database)
+            assertFalse(database.isOpen)
+            assertThrows(java.util.concurrent.ExecutionException::class.java) { database.submit { 1 }.get(5, TimeUnit.SECONDS) }
+        } finally {
+            gate.countDown()
+        }
+        running.get(5, TimeUnit.SECONDS)
+    }
+
+    fun testFailingCloseIsLoggedNotThrown() {
+        var closed = false
+        DatabaseService.closeAndLog {
+            closed = true
+            throw java.util.concurrent.ExecutionException(java.sql.SQLException("close failed"))
+        }
+        assertTrue(closed)
+    }
+
     fun testDisposeDoesNotWaitForABusyDatabaseAndClosesItLater() {
         val service = DatabaseService()
         service.switchTo(dir.resolve("busy.db"))
