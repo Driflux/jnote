@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-27
 - Issue: #21
-- PR: (plugin directory and capture), (recall), (organize), (marketplace manifest and install docs)
+- PR: #98 (plugin directory and capture), (recall), (organize), (marketplace manifest and install docs)
 
 ## Context
 intent.md section 10.5 asks for a Claude Code skill `jnote` that captures, recalls, and organizes notes, distributed from this repository through a Claude Code plugin marketplace. The skill must write only into `~/.jnote/inbox/`, read only through the read-only view `v_notes_export`, and use `docs/ai-format.md` (ADR 0016) as its single spec. The JetBrains plugin never calls an AI and runs no server (intent.md section 2), so the skill must work with files alone.
@@ -15,9 +15,12 @@ Claude Code installs a marketplace plugin by copying the plugin directory into i
 - **Contract.** Writes are JSON format v1 documents saved as new files in `~/.jnote/inbox/`; every one passes the import preview (#17, #18) before anything reaches the DB. Reads go through `v_notes_export` with `sqlite3 -readonly` (recall PR). The skill never opens `jnote.db` for writing and never overwrites an inbox file.
 - **Layout (intent.md 10.5, unchanged).** `claude-plugin/.claude-plugin/plugin.json` and `claude-plugin/skills/jnote/SKILL.md`; the root `.claude-plugin/marketplace.json` comes in the last PR.
 - **Spec inside the plugin.** `claude-plugin/skills/jnote/ai-format.md` is a committed copy of `docs/ai-format.md` with one marker line on top ("Copy of docs/ai-format.md. Do not edit"). `./gradlew syncSkillSpec` regenerates it. `ClaudePluginTest` compares the copy without its marker line to the original, after normalizing CRLF to LF, so `./gradlew test` fails whenever the two drift. SKILL.md keeps only the flows and points to `${CLAUDE_PLUGIN_ROOT}/skills/jnote/ai-format.md` for every field rule, so the field rules live in one document.
-- **Capture flow.** The agent collects anchors from the files and git, not from memory: `repo_url` from `git remote get-url origin` (falling back to `project_path` when there is no remote), the path relative to the IDE project folder, 1-based lines, and `snapshot` read verbatim from the file. Notes are new, so `uid` is left out. One document per request, named `<date>-<topic>.json`.
+- **Capture flow.** The agent collects anchors from the files and git, not from memory: `repo_url` from `git config --get remote.origin.url` (falling back to `project_path` when there is no remote; credentials in an `https://user:token@host` URL are dropped), the path relative to the IDE project folder, 1-based lines, and `snapshot` read verbatim from the file. Notes are new, so `uid` is left out. One document per request, named `<date>-<topic>.json`.
+- **Raw origin URL.** `git remote get-url origin` applies `url.*.insteadOf` rewrites, while the IDE's `GitConfigReader` reads the URL as written in the config. Using the rewritten URL would anchor a note to a different project key than the open project, so the skill reads the configured value, as docs/ai-format.md specifies.
+- **Publish needs a validator.** The document is written to a hidden temp file, checked with `python3 -m json.tool` or `jq empty`, and published with `ln`. When neither tool exists the check fails and nothing is published; an unchecked publish could expose a truncated file (a failed write) to the inbox reader.
 - **No `version` in plugin.json.** Without it Claude Code takes the commit SHA as the version, so users get skill fixes with the repository instead of staying on a pinned copy.
-- **Tests.** `ClaudePluginTest` checks the spec copy, the manifest name, the skill frontmatter and its pointer to the spec, and decodes every JSON example in SKILL.md with the real codec (no skipped items, snapshot covers the anchored lines).
+- **Why `syncSkillSpec` exists.** An installed skill cannot read outside its plugin folder, so the copy is needed. A spec change is made in docs/ai-format.md, then `./gradlew syncSkillSpec` is run; `ClaudePluginTest` catches a stale copy.
+- **Tests.** The tests normalize CRLF to LF before reading files, so a CRLF checkout compares equal. `ClaudePluginTest` checks the spec copy, the raw-origin and validator instructions, the manifest name, the skill frontmatter and its pointer to the spec, and decodes every JSON example in SKILL.md with the real codec (no skipped items, snapshot covers the anchored lines).
 
 ## Alternatives considered
 - MCP server: a long-running process per agent session, against the lightweight principle (intent.md section 2), and intent.md already rejects it. Rejected.
@@ -27,6 +30,7 @@ Claude Code installs a marketplace plugin by copying the plugin directory into i
 - A symlink from the plugin folder to `docs/ai-format.md`: not read for local sources and fragile on Windows checkouts. Rejected.
 
 ## Consequences
+- The IDE side of the inbox (#17, #18) is not merged with this PR; the skill's "JNote shows it for review" text is true only once those land. Merge order is tracked as a follow-up.
 - Pros
   - No process, no dependency, nothing in the IDE plugin zip.
   - Every agent write is reviewed by a person in the IDE.
