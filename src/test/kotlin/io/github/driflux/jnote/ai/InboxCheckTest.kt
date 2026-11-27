@@ -95,6 +95,36 @@ class InboxCheckTest : BasePlatformTestCase() {
         assertEquals(1, shown.size)
     }
 
+    fun testFailingNotificationDoesNotBlockLaterChecks() {
+        var fail = true
+        val check = InboxCheck({ inbox }, Executor { it.run() }, Executor { it.run() }) { _, files ->
+            if (fail) error("boom")
+            Notification("JNote", "t", "c", NotificationType.INFORMATION).also { shown += files to it }
+        }
+        put("a.json")
+        try {
+            check.request(project)
+        } catch (_: IllegalStateException) {
+        }
+        fail = false
+
+        check.request(project)
+
+        assertEquals(1, shown.size)
+    }
+
+    fun testEachProjectGetsItsOwnNotification() {
+        val check = check()
+        put("a.json")
+        val other = com.intellij.testFramework.PlatformTestUtil.loadAndOpenProject(Files.createDirectories(root.resolve("other")), testRootDisposable)
+
+        check.request(project)
+        check.request(other)
+        check.request(project)
+
+        assertEquals(2, shown.size)
+    }
+
     fun testFactoryChecksTheInboxWhenItsWindowIsActivated() {
         val checked = mutableListOf<String>()
         val factory = JNoteToolWindowFactory { checked += "check" }
