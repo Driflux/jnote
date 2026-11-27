@@ -15,6 +15,7 @@ Registering on JetBrains Marketplace (intent.md section 3) needs a description, 
 - **Metadata test.** `MarketplaceMetadataTest` is a plain unit test: description starts in English and has Korean, both languages say local only and no telemetry, the install commands match the names in `.claude-plugin/marketplace.json`, change notes exist, the vendor has a URL, both icons are 40x40, and `LICENSE` is MIT. It reads the source files, so the build declares them as test inputs.
 - **README.** A short `README.md` for the GitHub page repeats the local-only statement and the skill install steps.
 - **Release procedure and versioning** (second PR). Semantic versions `MAJOR.MINOR.PATCH`; the first Marketplace release is `1.0.0`; `pluginVersion` in `gradle.properties` carries the number and `-SNAPSHOT` only on development builds. The signing certificate and the Marketplace token come from environment variables, never from files in the repository. Upload is manual for 1.0; the steps are in `docs/release.md`.
+- **Release preconditions.** The description and change notes describe the finished 1.0. The zip is uploaded only from a build that contains every feature they name: JSON import with preview and the inbox check (#17, #18), the gutter "+" button and hover preview (#23), and the rest of the Step 1 to 6 issues. `docs/release.md` (second PR) turns this into a checklist that compares the description with the build before upload.
 - **Not done by an agent.** Screenshots, the final check that the name `JNote` is free, and the first upload need a person. They are a checklist in the PR body, not invented content.
 
 ## Alternatives considered
@@ -29,6 +30,6 @@ Registering on JetBrains Marketplace (intent.md section 3) needs a description, 
   - No new dependency, no runtime change.
 - Cons and what we accept
   - Change notes are edited by hand each release.
-  - The description lists features of the finished 1.0; it must be re-read against the release build before upload.
+  - The description lists features of the finished 1.0; the release checklist compares it with the build, and the upload waits for those issues.
 - Follow-up work
   - Screenshots and the name check (person); upload (person).

@@ -2,6 +2,7 @@ package io.github.driflux.jnote
 
 import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -17,36 +18,48 @@ class MarketplaceMetadataTest {
         return doc.getElementsByTagName(tag).item(0).textContent
     }
 
-    @Test
-    fun descriptionStartsInEnglishAndAlsoHasKorean() {
-        val description = element("description")
-        val firstLetters = description.replace(Regex("<[^>]*>"), "").trim()
+    private fun visible(html: String) = html.replace(Regex("<[^>]*>"), "").trim()
 
-        assertTrue(description.length >= 40)
-        assertTrue(firstLetters.startsWith("JNote is a lightweight"))
-        assertTrue(description.any { it in '가'..'힣' })
+    // 영어 블록 다음에 <hr/>, 그 뒤가 한국어 블록이다
+    private fun blocks(): Pair<String, String> {
+        val parts = element("description").split("<hr/>")
+        assertEquals(2, parts.size)
+        return parts[0] to parts[1]
+    }
+
+    private fun hasHangul(text: String) = text.any { it in '가'..'힣' }
+
+    @Test
+    fun descriptionStartsInEnglishAndThenHasKorean() {
+        val (english, korean) = blocks()
+
+        assertTrue(visible(english).take(40).none { it.code > 127 })
+        assertTrue(visible(english).startsWith("JNote is a lightweight"))
+        assertFalse(hasHangul(english))
+        assertTrue(hasHangul(korean))
     }
 
     @Test
-    fun descriptionStatesLocalOnlyAndNoTelemetryInBothLanguages() {
-        val description = element("description")
+    fun bothLanguagesStateLocalOnlyAndNoTelemetry() {
+        val (english, korean) = blocks()
 
-        assertTrue(description.contains("Local only"))
-        assertTrue(description.contains("no telemetry"))
-        assertTrue(description.contains("로컬 전용"))
-        assertTrue(description.contains("텔레메트리가 없습니다"))
+        assertTrue(english.contains("Local only"))
+        assertTrue(english.contains("no telemetry"))
+        assertTrue(korean.contains("로컬 전용"))
+        assertTrue(korean.contains("텔레메트리가 없습니다"))
     }
 
     @Test
-    fun descriptionTellsHowToInstallTheSkillWithTheMarketplaceNames() {
+    fun bothLanguagesTellHowToInstallTheSkillWithTheMarketplaceNames() {
         val marketplace = JsonParser.parseString(Files.readString(Path.of(".claude-plugin/marketplace.json"))).asJsonObject
         val plugin = marketplace.getAsJsonArray("plugins").single().asJsonObject.get("name").asString
         val name = marketplace.get("name").asString
         val owner = "Driflux/jnote"
-        val description = element("description")
 
-        assertTrue(description.contains("/plugin marketplace add $owner"))
-        assertTrue(description.contains("/plugin install $plugin@$name"))
+        for (block in blocks().toList()) {
+            assertTrue(block.contains("/plugin marketplace add $owner"))
+            assertTrue(block.contains("/plugin install $plugin@$name"))
+        }
     }
 
     @Test

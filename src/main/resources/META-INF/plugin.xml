@@ -10,7 +10,7 @@
             <li>Search notes, snippets, and tags at once (at least 2 characters). Tags are a registered dictionary with filter chips.</li>
             <li>Gutter icons show where notes are, with a preview on hover and a "+" button to add a note on any line.</li>
             <li>Local only. Notes stay in one SQLite file (<code>~/.jnote/jnote.db</code> by default, path changeable in Settings | Tools | JNote). No network calls and no telemetry.</li>
-            <li>Lightweight by design: no work at IDE startup, no database or file I/O on the UI thread, and a single dependency (sqlite-jdbc).</li>
+            <li>Lightweight by design: no startup activity (the database opens on first use), no database or file I/O on the UI thread, and a single dependency (sqlite-jdbc).</li>
         </ul>
         <h3>Use with AI (optional)</h3>
         <p>The plugin never calls an AI. It imports JSON documents (from a file, the clipboard, or <code>~/.jnote/inbox</code>) after a preview, and can copy notes or format instructions for an AI.
@@ -27,7 +27,7 @@
             <li>노트, 코드 조각, 태그를 한 번에 검색합니다(2글자 이상). 태그는 등록된 사전이며 필터 칩으로 거릅니다.</li>
             <li>거터 아이콘으로 노트 위치를 보여 주고, 마우스를 올리면 미리보기가, "+" 버튼으로 어느 줄에나 노트를 추가할 수 있습니다.</li>
             <li>로컬 전용입니다. 노트는 SQLite 파일 하나(기본 <code>~/.jnote/jnote.db</code>, 설정 | 도구 | JNote에서 경로 변경)에만 저장되며, 네트워크 호출과 텔레메트리가 없습니다.</li>
-            <li>가볍게 만들었습니다. IDE 시작 시 작업이 없고, UI 스레드에서 DB나 파일 I/O를 하지 않으며, 의존성은 sqlite-jdbc 하나입니다.</li>
+            <li>가볍게 만들었습니다. 시작 시 실행되는 작업이 없고(DB는 처음 쓸 때 엽니다), UI 스레드에서 DB나 파일 I/O를 하지 않으며, 의존성은 sqlite-jdbc 하나입니다.</li>
         </ul>
         <h3>AI와 함께 쓰기(선택)</h3>
         <p>플러그인은 AI를 직접 호출하지 않습니다. 파일, 클립보드, <code>~/.jnote/inbox</code>의 JSON 문서를 미리보기 후에 가져오고, 노트나 형식 안내를 AI용으로 복사할 수 있습니다.
